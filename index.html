@@ -467,7 +467,8 @@ function hAt(G, x, z) { // bilinear
   const { n, size } = WORLD, cell = size / (n - 1); const fx = (x + size / 2) / cell, fz = (z + size / 2) / cell;
   const i = clamp(Math.floor(fx), 0, n - 2), j = clamp(Math.floor(fz), 0, n - 2), u = clamp(fx - i, 0, 1), v = clamp(fz - j, 0, 1), H = G.H;
   const a = H[j * n + i], b = H[j * n + i + 1], c = H[(j + 1) * n + i], d = H[(j + 1) * n + i + 1];
-  return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
+  // same triangles as the terrain mesh (diagonal from (i+1,j) to (i,j+1)) so feet sit exactly on the drawn ground
+  return u + v <= 1 ? a + (b - a) * u + (c - a) * v : d + (c - d) * (1 - u) + (b - d) * (1 - v);
 }
 function dinAt(G, x, z) { const { n, size } = WORLD, cell = size / (n - 1); const i = clamp(Math.round((x + size / 2) / cell), 0, n - 1), j = clamp(Math.round((z + size / 2) / cell), 0, n - 1); return G.mask[j * n + i] ? G.din[j * n + i] * cell : -G.dout[j * n + i] * cell; }
 function coastPath(G, a0, a1, inset, step = 0.035) {
@@ -2006,7 +2007,9 @@ function updatePlayer(dt, locked) {
     spd = PL.speed;
   } else PL.speed = lerp(PL.speed, 0, Math.min(1, dt * 10));
   const gy = standY(PL.x, PL.z), wade = Math.max(0, -gy - 0.0);
-  PL.y = lerp(PL.y, Math.max(gy, -0.85), Math.min(1, dt * 14));
+  // feet: highest of the centre and 4 points around it (no sinking on slopes); go up at once, come down smoothly
+  let fy = gy; if (gy > 0) for (const [ox, oz] of [[0.2, 0], [-0.2, 0], [0, 0.2], [0, -0.2]]) fy = Math.max(fy, standY(PL.x + ox, PL.z + oz) - 0.04);
+  const ty = Math.max(fy, -0.85); PL.y = ty > PL.y ? ty : lerp(PL.y, ty, Math.min(1, dt * 14));
   PL.mesh.position.set(PL.x, PL.y, PL.z); PL.mesh.rotation.y = PL.rot; PL.mesh.visible = CAM.mode !== 'first';
   animateHero(dt, spd, wade);
 }
@@ -2049,8 +2052,10 @@ function vehOK(v, x, z, rot) {
 }
 function placeVehicle(v, dt) {
   if (v.kind === 'truck') {
-    const s = Math.sin(v.rot), c = Math.cos(v.rot), hf = standY(v.x + s * 1.1, v.z + c * 1.1), hb = standY(v.x - s * 1.1, v.z - c * 1.1), hl = standY(v.x + c * 0.6, v.z - s * 0.6), hr = standY(v.x - c * 0.6, v.z + s * 0.6);
-    v.y = lerp(v.y, (hf + hb + hl + hr) / 4, dt ? Math.min(1, dt * 12) : 1); v.pitch = lerp(v.pitch, Math.atan2(hb - hf, 2.2), dt ? Math.min(1, dt * 8) : 1); v.roll = lerp(v.roll, Math.atan2(hr - hl, 1.2), dt ? Math.min(1, dt * 8) : 1);
+    // the 4 wheels follow this car's real size (bigger cars used to sink at the ends)
+    const sp = VSPEC.truck, fl = Math.max(1.1, (sp.len || 1.6) * 0.72), wl = Math.max(0.6, (sp.wid || 0.8) * 0.85), s = Math.sin(v.rot), c = Math.cos(v.rot);
+    const W = (a, b) => standY(v.x + s * a + c * b, v.z + c * a - s * b), fL = W(fl, wl), fR = W(fl, -wl), bL = W(-fl, wl), bR = W(-fl, -wl), hf = (fL + fR) / 2, hb = (bL + bR) / 2, hl = (fL + bL) / 2, hr = (fR + bR) / 2;
+    const ty = Math.max((hf + hb + hl + hr) / 4, Math.max(fL, fR, bL, bR) - 0.12); v.y = !dt || ty > v.y ? ty : lerp(v.y, ty, Math.min(1, dt * 12)); v.pitch = lerp(v.pitch, Math.atan2(hb - hf, fl * 2), dt ? Math.min(1, dt * 14) : 1); v.roll = lerp(v.roll, Math.atan2(hr - hl, wl * 2), dt ? Math.min(1, dt * 14) : 1);
     v.mesh.position.set(v.x, v.y, v.z); v.mesh.rotation.set(0, 0, 0); v.mesh.rotateY(v.rot); v.mesh.rotateX(v.pitch); v.mesh.rotateZ(v.roll);
   } else {
     v.bob += dt; const t = performance.now() / 1000;
@@ -2183,7 +2188,7 @@ function spawnVillagers(scene) {
 function spawnOneVillager(scene, d, x, z, label, rot = 0) {
   const m = MODELS[d.id]; if (!m) return null;
   const tag = makeNameTag(label); tag.position.y = 1.5; m.add(tag);
-  const npc = { def: d, mesh: m, tag, x, z, y: groundH(x, z), rot, hx: x, hz: z, state: 'idle', timer: 1 + Math.random() * 3, tx: x, tz: z, ph: Math.random() * 6, speed: 0, talk: 0, line: 0,
+  const npc = { def: d, mesh: m, tag, x, z, y: standY(x, z), rot, hx: x, hz: z, state: 'idle', timer: 1 + Math.random() * 3, tx: x, tz: z, ph: Math.random() * 6, speed: 0, talk: 0, line: 0,
     parts: partsOf(m, ['pelvis', 'spine', 'head', 'thighL', 'thighR', 'shinL', 'shinR', 'upperArmL', 'upperArmR', 'foreArmL', 'foreArmR']) };
   npc.rest = {}; for (const [k, o] of Object.entries(npc.parts)) if (o) npc.rest[k] = o.position.clone();
   scene.add(m); NPCS.push(npc); return npc;
@@ -2227,7 +2232,7 @@ function updateVillagers(dt, talking) {
       }
     }
     if (n.greeted > 0) n.greeted -= dt;
-    n.ph += dt * (spd > 0.1 ? 8.5 : 1.8); n.y = lerp(n.y, groundH(n.x, n.z), Math.min(1, dt * 12));
+    n.ph += dt * (spd > 0.1 ? 8.5 : 1.8); { const ty = standY(n.x, n.z); n.y = ty > n.y ? ty : lerp(n.y, ty, Math.min(1, dt * 12)); }
     n.mesh.position.set(n.x, n.y, n.z); n.mesh.rotation.y = n.rot;
     animateBody(n.parts, n.rest, n.ph, spd, dt, { wave: n.greeted > 0 && !talking ? n.greeted : 0, nod: talking === n ? performance.now() / 1000 : 0 });
   }
@@ -5285,7 +5290,7 @@ Object.assign(GAME, {
       ROOM.env = new THREE.AmbientLight('#ffffff', 0.15); ROOM.scene.add(ROOM.env);
     }
     if (ROOM.group) ROOM.scene.remove(ROOM.group); ROOM.group = new THREE.Group(); ROOM.scene.add(ROOM.group);
-    const H = this.home(), S = ROOM_SIZES[H.size], W = S.w, D = S.d, WH = 2.8, g = ROOM.group;
+    const H = this.home(), S = ROOM_SIZES[H.size], W = S.w, D = S.d, WH = H.wh || 2.8, g = ROOM.group;
     const fl = new THREE.Mesh(new THREE.PlaneGeometry(W, D), new THREE.MeshStandardMaterial({ map: floorTex(H.floor, W, D), roughness: 0.75 })); fl.rotation.x = -Math.PI / 2; fl.receiveShadow = true; g.add(fl);
     const wm = new THREE.MeshStandardMaterial({ map: wallTex(H.wall), roughness: 0.9 }), base = new THREE.MeshStandardMaterial({ color: '#7a5a3a', roughness: 0.7 });
     const wall = (w, x, z, ry) => { const m = new THREE.Mesh(new THREE.PlaneGeometry(w, WH), wm.clone()); m.material.map = wallTex(H.wall, w); m.position.set(x, WH / 2, z); m.rotation.y = ry; m.receiveShadow = true; g.add(m); const b = new THREE.Mesh(new THREE.BoxGeometry(w, 0.12, 0.04), base); b.position.set(x, 0.06, z); b.rotation.y = ry; g.add(b); };
@@ -5293,13 +5298,13 @@ Object.assign(GAME, {
     // windows (sky colour follows the time of day)
     ROOM.winMat = new THREE.MeshBasicMaterial({ color: '#bfe4ff', map: ROOM.viewTex || (ROOM.viewTex = txCanvas(128, 100, (x, w, h) => { const gr = x.createLinearGradient(0, 0, 0, h); gr.addColorStop(0, '#9fd2ff'); gr.addColorStop(0.62, '#e8f6ff'); x.fillStyle = gr; x.fillRect(0, 0, w, h); x.fillStyle = '#9ab8c8'; x.beginPath(); x.moveTo(0, 64); x.quadraticCurveTo(30, 50, 62, 62); x.lineTo(62, 66); x.lineTo(0, 66); x.fill(); x.fillStyle = '#4f9cc8'; x.fillRect(0, 64, w, h - 64); x.fillStyle = 'rgba(255,255,255,0.5)'; for (let k = 0; k < 6; k++) x.fillRect(10 + k * 19, 72 + (k % 3) * 8, 12, 2); x.fillStyle = '#ffffff'; x.beginPath(); x.ellipse(90, 22, 18, 7, 0, 0, 7); x.ellipse(78, 25, 12, 6, 0, 0, 7); x.fill(); x.fillStyle = '#6fae4a'; x.fillRect(0, h - 10, w, 10); })) }); const frame = new THREE.MeshStandardMaterial({ color: '#f4f2ec', roughness: 0.5 });
     const win = (x, z, ry) => { const gg = new THREE.Group(); const p = new THREE.Mesh(new THREE.PlaneGeometry(1.3, 1.0), ROOM.winMat); gg.add(p); for (const [w, h, px, py] of [[1.4, 0.07, 0, 0.53], [1.4, 0.07, 0, -0.53], [0.07, 1.1, 0.67, 0], [0.07, 1.1, -0.67, 0], [0.05, 1.0, 0, 0]]) { const f = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.05), frame); f.position.set(px, py, 0.02); gg.add(f); } gg.position.set(x, 1.55, z); gg.rotation.y = ry; g.add(gg); };
-    win(-W / 4, -D / 2 + 0.01, 0); win(W / 4, -D / 2 + 0.01, 0); win(-W / 2 + 0.01, 0, Math.PI / 2);
+    if (!H.plain) { win(-W / 4, -D / 2 + 0.01, 0); win(W / 4, -D / 2 + 0.01, 0); win(-W / 2 + 0.01, 0, Math.PI / 2); }
     // front edge: low sill + door mat to show the exit
     const sill = new THREE.Mesh(new THREE.BoxGeometry(W, 0.1, 0.15), base); sill.position.set(0, 0.05, D / 2); g.add(sill);
     const mat = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 0.6), new THREE.MeshStandardMaterial({ color: '#8a5a3a', roughness: 1 })); mat.rotation.x = -Math.PI / 2; mat.position.set(0, 0.01, D / 2 - 0.4); g.add(mat);
-    const ceil = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.38, 0.12, 20), new THREE.MeshStandardMaterial({ color: '#fff4dc', emissive: new THREE.Color('#ffd9a0'), emissiveIntensity: 0.6 })); ceil.position.set(0, WH - 0.1, 0); g.add(ceil);
+    if (!H.plain) { const ceil = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.38, 0.12, 20), new THREE.MeshStandardMaterial({ color: '#fff4dc', emissive: new THREE.Color('#ffd9a0'), emissiveIntensity: 0.6 })); ceil.position.set(0, WH - 0.1, 0); g.add(ceil); }
     // details: curtains with rods, crown moulding, wall air-con, outlets
-    { const A = archMats(), cm = ROOM.curM || (ROOM.curM = new THREE.MeshStandardMaterial({ map: txCanvas(64, 128, (x, w, h) => { for (let i = 0; i < w; i++) { const f = 0.8 + 0.2 * Math.cos(i / w * Math.PI * 6); x.fillStyle = `rgb(${244 * f},${206 * f},${170 * f})`; x.fillRect(i, 0, 1, h); } }), roughness: 0.9, side: THREE.DoubleSide }));
+    if (!H.plain) { const A = archMats(), cm = ROOM.curM || (ROOM.curM = new THREE.MeshStandardMaterial({ map: txCanvas(64, 128, (x, w, h) => { for (let i = 0; i < w; i++) { const f = 0.8 + 0.2 * Math.cos(i / w * Math.PI * 6); x.fillStyle = `rgb(${244 * f},${206 * f},${170 * f})`; x.fillRect(i, 0, 1, h); } }), roughness: 0.9, side: THREE.DoubleSide }));
       const cur = (x, z, ry) => { const c = sub(g, x, 1.55, z, ry); for (const sx of [-1, 1]) B(c, 0.34, 1.45, 0.05, cm, sx * 0.88, -0.08, 0.09); CY(c, 0.018, 2.2, A.brass, 0, 0.72, 0.1, 6, 0, Math.PI / 2); for (const sx of [-1, 1]) SP(c, 0.035, A.brass, sx * 1.1, 0.72, 0.1, 1, 6); B(c, 1.5, 0.05, 0.14, frame, 0, -0.58, 0.07); };
       cur(-W / 4, -D / 2 + 0.01, 0); cur(W / 4, -D / 2 + 0.01, 0); cur(-W / 2 + 0.01, 0, Math.PI / 2);
       const crown = new THREE.MeshStandardMaterial({ color: '#f6f2ea', roughness: 0.6 }); B(g, W, 0.1, 0.08, crown, 0, WH - 0.05, -D / 2 + 0.04); for (const sx of [-1, 1]) B(g, 0.08, 0.1, D, crown, sx * (W / 2 - 0.04), WH - 0.05, 0);
@@ -5544,7 +5549,7 @@ Object.assign(GAME, {
   },
   rebuildMiniBase() { if (!this.p) return; try { this.drawMap(MINI.base, true); } catch (e) { console.warn('minimap', e); } MINI.builtAt = performance.now() / 1000; this.mapDirty = false; },
   whereText() {
-    if (this.inside) return this.visit ? `🏠 ${this.visit.n.def.name}の家（おじゃま中）` : '🏠 あなたの家（家の中）';
+    if (this.inside) return this.place ? `🏢 ${this.placeName(this.place)}（中）` : this.visit ? `🏠 ${this.visit.n.def.name}の家（おじゃま中）` : '🏠 あなたの家（家の中）';
     const x = PL.x, z = PL.z, [i, j] = toIdx(x, z), zn = ZONES[G.zone[j * WORLD.n + i]];
     let lm = null, bd = 45; for (const [id, L] of Object.entries(this.LM)) { if (!LM_LABEL[id] || L.gone) continue; const d = Math.hypot(L.x - x, L.z - z); if (d < bd) { bd = d; lm = id; } }
     const sea = groundH(x, z) < -0.5 && !PL.veh ? false : groundH(x, z) < -0.5;
@@ -6497,7 +6502,7 @@ function liveVillager(n, dt) {
   let spd = 0; const walkTo = (tx, tz, v) => { const dx = tx - n.x, dz = tz - n.z, d = Math.hypot(dx, dz); if (d < 0.35) return true; const want = Math.atan2(dx, dz);
     for (const off of [0, 0.6, -0.6, 1.2, -1.2, 1.9, -1.9]) { const a = want + off, nx = n.x + Math.sin(a) * v * dt, nz = n.z + Math.cos(a) * v * dt; if (Math.hypot(PL.x - nx, PL.z - nz) < 0.7) return false; if (canWalk(n.x, n.z, nx, nz) && !hitsAnyBld(nx, nz)) { n.rot = angLerp(n.rot, a, Math.min(1, dt * 6)); n.x = nx; n.z = nz; spd = v; if (off) n.stuck += dt * 0.5; else n.stuck = Math.max(0, n.stuck - dt); return false; } }
     n.stuck += dt; return false; };
-  const tele = (x, z) => { n.x = x; n.z = z; n.y = groundH(x, z); n.stuck = 0; };
+  const tele = (x, z) => { n.x = x; n.z = z; n.y = standY(x, z); n.stuck = 0; };
   if (dP < 2.3 && !PL.veh && n.mode !== 'travel' && act !== 'fish' && act !== 'exercise') { n.rot = angLerp(n.rot, Math.atan2(PL.x - n.x, PL.z - n.z), Math.min(1, dt * 6)); if (!n.greeted0) { n.greeted0 = true; n.greeted = 1.2; const f = GAME.p ? GAME.p.friend[n.def.id] || 0 : 0; LIVE.emote(n, f >= 8 ? 'heart' : f >= 3 ? 'note' : 'bang', 1.8); } }
   else if (dP > 4) n.greeted0 = false;
   if (n.mode === 'travel' && G0) {
@@ -6523,7 +6528,7 @@ function liveVillager(n, dt) {
   const pa = SEASON.active && SEASON.active.some(e => e.id === 'matsuri' || e.id === 'tanabata') && hf > 17 && hf < 22 && act !== 'sleep' && n.mode === 'act' && (act === 'chat' || act === 'look' || act === 'stroll');
   const shown = n.mode === 'travel' ? (n.rainy ? 'umb' : act === 'carry' ? 'plank' : null) : pa ? 'uchiwa' : act === 'umb' || (n.rainy && act !== 'sleep') ? 'umb' : PROP_OF[act] || null; showProp(n, shown);
   if (n.greeted > 0) n.greeted -= dt;
-  n.ph += dt * (spd > 0.1 ? (spd > 3 ? 11 : 8.5) : 1.8); n.y = lerp(n.y, groundH(n.x, n.z), Math.min(1, dt * 12)); n.mesh.position.set(n.x, n.y, n.z); n.mesh.rotation.y = n.rot;
+  n.ph += dt * (spd > 0.1 ? (spd > 3 ? 11 : 8.5) : 1.8); { const ty = standY(n.x, n.z); n.y = ty > n.y ? ty : lerp(n.y, ty, Math.min(1, dt * 12)); } n.mesh.position.set(n.x, n.y, n.z); n.mesh.rotation.y = n.rot;
   animateBody(n.parts, n.rest, n.ph, spd, dt, { wave: n.greeted > 0 ? n.greeted : 0, nod: 0 }); if (n.parts.head) n.parts.head.rotation.y = 0; if (n.parts.spine) n.parts.spine.rotation.z = 0;
   if (spd < 0.1 && n.mode === 'act') livePose(n, pa ? 'festival' : n.rainy && act !== 'umb' ? 'umb' : act, t); else if (n.rainy || shown === 'plank') livePose(n, shown === 'plank' ? 'carry' : 'umb', t);
 }
@@ -8701,7 +8706,7 @@ FSH.updatePanel = function () {
 { const _ok2 = GAME.onKey; GAME.onKey = function (e) { if (!e.repeat && e.code === 'KeyT' && this.p && !this.modal && !EDIT.on && !PL.veh && !LIFE.fish && FSH.holdKg() > 0.05) { const S = DECO.ship, H = this.LM.harbor; if ((S && Math.hypot(PL.x - S.x, PL.z - S.z) < 12) || (H && Math.hypot(PL.x - H.x, PL.z - H.z) < 60)) { FSH.openLanding(true); return true; } } return _ok2.apply(this, arguments); }; }
 { const _p2 = GAME.prompt; GAME.prompt = function () { if (this.p && !PL.veh && !this.modal && this.nearShip && this.nearShip() && FSH.holdKg() > 0.05) return `Space：出荷所　T：網の魚を水揚げ（魚倉 ${FSH.holdKg().toFixed(0)}kg）`; return _p2.apply(this, arguments); }; }
 // version label so you can tell whether the page has updated
-const GAME_VER = '29（10/24）';
+const GAME_VER = '30（10/24）';
 { const v = document.createElement('div'); v.id = 'verTag'; v.textContent = 'ver.' + GAME_VER; v.style.cssText = 'position:fixed;left:6px;bottom:4px;z-index:5;font-size:10px;color:rgba(255,255,255,.75);text-shadow:0 1px 2px rgba(0,0,0,.6);pointer-events:none;font-family:sans-serif'; document.body.appendChild(v); }
 
 // ===================== 島の収益: 建物ごとに1時間あたりの売上が入りつづける（留守のあいだも最大24時間分） =====================
@@ -8763,6 +8768,306 @@ GAME.openRevenue = function () {
 { const _od2 = GAME.openDev; GAME.openDev = function () { const r = _od2.apply(this, arguments); try { this.el.modal.querySelectorAll('[data-dev]').forEach(b => { const R = REV_DEV[b.dataset.dev], li = b.closest('li'), own = li && li.querySelector('.own'); if (R && own && !own.querySelector('.rvh')) own.insertAdjacentHTML('beforeend', `<span class="rvh">　💴 収益 +${yen(R[0])}/時${R[2] === 'stay' ? '（稼働率で変動）' : ''}</span>`); }); } catch (e) { } return r; }; }
 { const _ep = UI.editPanel; UI.editPanel = function () { const r = _ep.apply(this, arguments); try { if (EDIT.on && EDIT.tool === 'city') document.querySelectorAll('#editp [data-ct]').forEach(b => { const R = REV_CITY[b.dataset.ct], i = b.querySelector('i'); if (R && R[0] && i && !i.querySelector('.rvh')) i.insertAdjacentHTML('beforeend', `<span class="rvh"> ・💴${R[0] >= 10000 ? (R[0] / 10000) + '万' : R[0]}円/時</span>`); }); } catch (e) { } return r; }; }
 { const st = document.createElement('style'); st.textContent = `.rvh{color:#2f7a3a;font-weight:700}`; document.head.appendChild(st); }
+
+// ===================== 足もとの高さを、見えている地面（歩道・道路の段差）に合わせる =====================
+// sidewalks are drawn 0.16m above the road; the walk height used to ignore them, so feet sank into the paving
+const SIDEWALK_H = 0.16;
+{ const _mk = makeRoadMesh; makeRoadMesh = function (r) {
+  const g = _mk.apply(this, arguments);
+  try { r._sw = null; if (r.frames) { const L = rLen(r), s0 = r.trim ? r.trim[0] : 0, s1 = L - (r.trim ? r.trim[1] : 0); if (s1 - s0 > 0.3) { const F = stripFrames(r, s0, s1, 1.0); let x0 = 1e9, x1 = -1e9, z0 = 1e9, z1 = -1e9; for (const f of F) { x0 = Math.min(x0, f.x); x1 = Math.max(x1, f.x); z0 = Math.min(z0, f.z); z1 = Math.max(z1, f.z); } const pad = r.w / 2 + (r.side ? SIDEW : 0) + 1; r._sw = { F, bb: [x0 - pad, z0 - pad, x1 + pad, z1 + pad] }; } } } catch (e) { r._sw = null; }
+  return g;
+}; }
+function sidewalkY(x, z) {
+  if (typeof ROADS === 'undefined') return null; let out = null; const top = y => { if (out === null || y > out) out = y; };
+  for (const r of ROADS) {
+    const S = r._sw; if (!S || x < S.bb[0] || x > S.bb[2] || z < S.bb[1] || z > S.bb[3]) continue;
+    const F = S.F, half = r.w / 2; let best = -1, bd = 1e9;
+    for (let i = 0; i < F.length; i++) { const f = F[i], d = (x - f.x) * (x - f.x) + (z - f.z) * (z - f.z); if (d < bd) { bd = d; best = i; } }
+    const rr = half + (r.side ? SIDEW : 0) + 1; if (best < 0 || bd > rr * rr + 4) continue;
+    const f = F[best], lat = (x - f.x) * f.nx + (z - f.z) * f.nz, al = Math.abs(lat);
+    if (best === 0 || best === F.length - 1) { const tx = -f.nz, tz = f.nx, along = (x - f.x) * tx + (z - f.z) * tz; if (Math.abs(along) > 0.9) continue; }
+    if (al <= half) { const ty = rType(r), yl = ty === 'dirt' || ty === 'trail' || ty === 'gravel' ? 0.03 : 0.04; top(f.y + yl); continue; }
+    if (!r.side || al > half + SIDEW + 0.02) continue;
+    const sd = lat < 0 ? -1 : 1; if ((r.gaps || []).some(g => !g.foot && g.side === sd && f.dist > g.s0 - 0.6 && f.dist < g.s1 + 0.6)) continue;
+    top(f.y + SIDEWALK_H);
+  }
+  return out;
+}
+{ const _sy = standY; standY = function (x, z) { const b = _sy(x, z), s = sidewalkY(x, z); return s !== null && s > b - 0.3 && s < b + 0.5 ? Math.max(b, s) : b; }; }
+
+// ===================== 川の表現: 流れる向き・速さのある水面（フローマップ）、白波・岸の泡、澄んだ浅瀬、川岸のヨシと石 =====================
+let riverMat = null;
+const RIV = { pts: null, sp: null, reeds: null };
+// downstream direction and speed along the river (pts go from the spring to the sea)
+RIV.prep = function () {
+  const R = G.river; if (!R || !R.pts) return; const P = R.pts, lv = R.lv, N = P.length; RIV.pts = P; RIV.sp = new Float32Array(N); RIV.dir = new Float32Array(N * 2);
+  for (let i = 0; i < N; i++) { const a = P[Math.max(0, i - 3)], b = P[Math.min(N - 1, i + 3)], dx = b[0] - a[0], dz = b[1] - a[1], l = Math.hypot(dx, dz) || 1; RIV.dir[i * 2] = dx / l; RIV.dir[i * 2 + 1] = dz / l;
+    const la = lv ? lv[Math.max(0, i - 3)] : 0, lb = lv ? lv[Math.min(N - 1, i + 3)] : 0, drop = Math.max(0, la - lb) / l; RIV.sp[i] = clamp(0.35 + drop * 9, 0.35, 1.7); }
+};
+RIV.flowAt = function (x, z) {
+  if (!RIV.pts) RIV.prep(); const P = RIV.pts; if (!P) return [0, 0]; let bi = -1, bd = 1e9;
+  for (let i = 0; i < P.length; i += 2) { const d = (P[i][0] - x) * (P[i][0] - x) + (P[i][1] - z) * (P[i][1] - z); if (d < bd) { bd = d; bi = i; } }
+  const d = Math.sqrt(bd), hw = (G.river.hw && G.river.hw[bi]) || 4; if (d > hw + 12) return [0.03, 0.02]; // ponds: barely moving
+  const k = 1 - clamp((d - hw * 0.6) / (hw + 10), 0, 0.85), s = RIV.sp[bi] * k; return [RIV.dir[bi * 2] * s, RIV.dir[bi * 2 + 1] * s];
+};
+function makeRiverMat() {
+  const U = waterMat.uniforms; // shared, so time / sun / sky updates reach the rivers too
+  return new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, fog: true, side: THREE.DoubleSide, uniforms: U,
+    vertexShader: `attribute float aFoam; attribute vec2 aFlow; varying float vFoam; varying vec2 vFlow; varying vec3 vW; #include <fog_pars_vertex>
+      void main(){ vFoam = aFoam; vFlow = aFlow; vec4 wp = modelMatrix * vec4(position,1.0); vW = wp.xyz; vec4 mvPosition = viewMatrix * wp; gl_Position = projectionMatrix * mvPosition; #include <fog_vertex> }`.replace(/#include <(\w+)>/g, '\n#include <$1>\n'),
+    fragmentShader: `uniform float time, wsize, ambient; uniform vec3 sunDir, sunCol, skyCol, horCol; uniform sampler2D hTex, nTex, mTex; varying vec3 vW; varying float vFoam; varying vec2 vFlow;
+      #include <common>
+      #include <fog_pars_fragment>
+      void main(){
+        vec2 huv = (vW.xz + wsize * 0.5) / wsize; float th = texture2D(hTex, huv).r; float depth = max(0.0, vW.y - th);
+        vec3 gN = normalize(cross(dFdx(vW), dFdy(vW))); float fall = 1.0 - smoothstep(0.45, 0.75, abs(gN.y));
+        float sp = length(vFlow); vec2 dir = sp > 0.001 ? vFlow / sp : vec2(1.0, 0.0); vec2 perp = vec2(-dir.y, dir.x);
+        // flow map: two phases of the ripple texture slide downstream and cross-fade, so the surface really moves with the current
+        float ph0 = fract(time * 0.22), ph1 = fract(time * 0.22 + 0.5), wgt = abs(ph0 - 0.5) * 2.0;
+        vec2 uvb = vW.xz * 0.11;
+        vec3 na = texture2D(nTex, uvb - vFlow * ph0 * 1.4).xyz * 2.0 - 1.0, nb = texture2D(nTex, uvb - vFlow * ph1 * 1.4 + 0.37).xyz * 2.0 - 1.0;
+        vec3 nf = mix(na, nb, wgt);
+        vec3 n2 = texture2D(nTex, vW.xz * 0.31 - vFlow * time * 0.5).xyz * 2.0 - 1.0;
+        float rough = 0.25 + sp * 0.6;
+        vec3 N = normalize(vec3((nf.x + n2.x * 0.45) * rough, 4.0, (nf.y + n2.y * 0.45) * rough));
+        vec3 V = normalize(cameraPosition - vW); float fres = 0.02 + 0.98 * pow(1.0 - max(dot(N, V), 0.0), 5.0);
+        // clear fresh water: you can see the stones in the shallows, deep pools turn green-blue
+        vec3 shallow = vec3(0.22, 0.46, 0.33), mid = vec3(0.07, 0.30, 0.28), deep = vec3(0.02, 0.13, 0.14);
+        vec3 wc = mix(shallow, mid, smoothstep(0.15, 1.2, depth)); wc = mix(wc, deep, smoothstep(1.2, 4.5, depth));
+        float dif = 0.62 + 0.38 * max(dot(N, sunDir), 0.0); vec3 col = wc * dif * mix(vec3(1.0), sunCol, 0.5) * ambient;
+        // light ripples (caustics) dancing on the bed of the shallows
+        float cs = texture2D(mTex, vW.xz * 0.42 - vFlow * time * 0.25).b * texture2D(mTex, vW.xz * 0.29 + vec2(time * 0.03, -time * 0.02)).g;
+        col += vec3(0.9, 0.95, 0.8) * smoothstep(0.32, 0.6, cs) * (1.0 - smoothstep(0.2, 1.4, depth)) * 0.35 * max(sunDir.y, 0.0) * ambient;
+        vec3 R = reflect(-V, N); vec3 refl = mix(horCol, skyCol, clamp(R.y * 2.2, 0.0, 1.0)); col = mix(col, refl * 0.85, fres * 0.55);
+        vec3 Hh = normalize(sunDir + V); float spc = pow(max(dot(N, Hh), 0.0), 300.0) * 2.0 + pow(max(dot(N, Hh), 0.0), 40.0) * 0.1; col += sunCol * spc * step(0.0, sunDir.y);
+        // white water: streaks along the current, rapids where it runs fast, bubbles below steps, a thin foam line on the banks
+        float st = texture2D(mTex, vec2(dot(vW.xz, perp) * 0.45, dot(vW.xz, dir) * 0.06 - time * sp * 0.35)).b;
+        float streak = smoothstep(0.8, 0.95, st) * smoothstep(0.5, 1.2, sp) * 0.35;
+        float rap = smoothstep(1.2, 1.7, sp) * smoothstep(0.55, 0.8, texture2D(mTex, vW.xz * 0.2 - vFlow * time * 0.6).b);
+        float bub = texture2D(mTex, vW.xz * 0.35 - vFlow * time * 0.3).b;
+        float bank = (1.0 - smoothstep(0.03, 0.18, depth)) * smoothstep(0.0, 0.03, depth) * smoothstep(0.5, 0.75, texture2D(mTex, vW.xz * 0.6 - vFlow * time * 0.2).g);
+        float foam = clamp(streak + rap * 0.8 + bank * 0.7 + vFoam * smoothstep(0.3, 0.6, bub + vFoam * 0.3), 0.0, 1.0);
+        col = mix(col, vec3(0.93, 0.97, 0.98) * ambient, foam);
+        float alpha = smoothstep(0.0, 0.15, depth) * mix(0.5, 0.95, smoothstep(0.25, 2.5, depth)); alpha = max(alpha, foam * 0.85 * smoothstep(0.0, 0.08, depth)); alpha = mix(alpha, 1.0, fres * 0.55);
+        if (fall > 0.0) { float hc = vW.x * 0.9 + vW.z * 0.9; float s1 = texture2D(mTex, vec2(hc * 0.35, vW.y * 0.12 + time * 0.9)).b; float s2 = texture2D(mTex, vec2(hc * 0.8, vW.y * 0.3 + time * 1.6)).g;
+          vec3 fc = mix(vec3(0.62, 0.84, 0.92), vec3(0.97, 0.99, 1.0), smoothstep(0.35, 0.75, s1 * 0.6 + s2 * 0.6)) * ambient; col = mix(col, fc, fall); alpha = mix(alpha, 0.88 + s1 * 0.1, fall); }
+        gl_FragColor = vec4(col, alpha);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+        #include <fog_fragment>
+      }`,
+  });
+}
+// inland water chunks get a flow attribute and the river material
+{ const _rw = rebuildWaterChunk; rebuildWaterChunk = function (cx, cz) {
+  _rw(cx, cz); const m = TERR.wchunks.get(cx + ',' + cz); if (!m) return;
+  if (!riverMat && waterMat) riverMat = makeRiverMat(); if (!riverMat) return;
+  const pos = m.geometry.attributes.position, fl = new Float32Array(pos.count * 2), cache = new Map();
+  for (let i = 0; i < pos.count; i++) { const x = pos.getX(i), z = pos.getZ(i), k = Math.round(x * 2) + ',' + Math.round(z * 2); let f = cache.get(k); if (!f) { f = RIV.flowAt(x, z); cache.set(k, f); } fl[i * 2] = f[0]; fl[i * 2 + 1] = f[1]; }
+  m.geometry.setAttribute('aFlow', new THREE.BufferAttribute(fl, 2)); m.material = riverMat;
+}; }
+// reeds on the banks and rocks in the stream
+RIV.decor = function () {
+  if (RIV.group) { scene.remove(RIV.group); RIV.group.traverse(o => { if (o.geometry) o.geometry.dispose(); }); }
+  const R = G.river; if (!R || !R.pts) return; const g = RIV.group = new THREE.Group(); scene.add(g); const rnd = mulberry(9137), reeds = [], rocks = [];
+  const P = R.pts;
+  for (let i = 2; i < P.length - 2; i++) { const a = P[i - 1], b = P[i + 1], dx = b[0] - a[0], dz = b[1] - a[1], l = Math.hypot(dx, dz) || 1, nx = -dz / l, nz = dx / l, [cx, cz] = P[i];
+    for (const sd of [-1, 1]) { // walk out from the middle to the bank
+      let bank = null; for (let d = 1; d < 22; d += 0.5) { const x = cx + nx * d * sd, z = cz + nz * d * sd; if (isNaN(waterLevelAt(G, x, z)) || waterDepthAt(x, z) < 0.05) { bank = d; break; } }
+      if (bank === null) continue;
+      if (rnd() < 0.55) for (let k = 0; k < 3; k++) { const d = bank + rnd() * 2.2 - 0.6, x = cx + nx * d * sd + (rnd() - 0.5) * 1.5, z = cz + nz * d * sd + (rnd() - 0.5) * 1.5, h = groundH(x, z), L = waterLevelAt(G, x, z); if (h < 0.2 || (!isNaN(L) && L - h > 0.35) || roadDistAt(x, z) < R_HALF_ROAD() + 1.5) continue; if (collidersNear(x, z).some(c => c.r !== undefined ? Math.hypot(c.x - x, c.z - z) < c.r + 0.6 : false)) continue; reeds.push([x, Math.max(h, isNaN(L) ? h : L - 0.1), z, 0.7 + rnd() * 0.7, rnd() * 6.28]); }
+      if (rnd() < 0.12) { const d = rnd() * bank * 0.8, x = cx + nx * d * sd, z = cz + nz * d * sd, L = waterLevelAt(G, x, z), h = groundH(x, z); if (!isNaN(L) && L - h < 1.1 && L - h > 0.1) rocks.push([x, h, z, 0.4 + rnd() * 0.6, L]); }
+    } }
+  // reed tuft: a few thin tapered blades with a brown head
+  const blade = new THREE.ConeGeometry(0.035, 1.6, 3, 1, true); blade.translate(0, 0.8, 0); const parts = []; for (let k = 0; k < 6; k++) { const b = blade.clone(); b.rotateZ((rnd() - 0.5) * 0.35); b.rotateY(k / 6 * 6.28); b.translate(Math.cos(k) * 0.12, 0, Math.sin(k) * 0.12); b.scale(1, 0.75 + rnd() * 0.5, 1); parts.push(b); }
+  const tg = mergeGeometries(parts.map(p => p.toNonIndexed ? p.toNonIndexed() : p)); const rm = new THREE.MeshStandardMaterial({ color: '#7f9a4a', roughness: 0.9, side: THREE.DoubleSide });
+  const im = new THREE.InstancedMesh(tg, rm, Math.max(1, reeds.length)); const D = new THREE.Object3D(); reeds.forEach((r, i) => { D.position.set(r[0], r[1], r[2]); D.rotation.set(0, r[4], 0); D.scale.setScalar(r[3]); D.updateMatrix(); im.setMatrixAt(i, D.matrix); }); im.count = reeds.length; im.castShadow = true; im.receiveShadow = true; g.add(im);
+  const head = new THREE.CylinderGeometry(0.05, 0.05, 0.26, 5); head.translate(0, 1.45, 0); const hm = new THREE.InstancedMesh(head, new THREE.MeshStandardMaterial({ color: '#6a4a2a', roughness: 1 }), Math.max(1, reeds.length)); let hn = 0; reeds.forEach(r => { if (r[3] < 1.0) return; D.position.set(r[0], r[1], r[2]); D.rotation.set(0, r[4], 0); D.scale.setScalar(r[3]); D.updateMatrix(); hm.setMatrixAt(hn++, D.matrix); }); hm.count = hn; g.add(hm);
+  const rg = new THREE.DodecahedronGeometry(1, 0); rg.scale(1, 0.55, 0.85); const km = new THREE.InstancedMesh(rg, new THREE.MeshStandardMaterial({ color: '#8a8478', roughness: 0.95 }), Math.max(1, rocks.length)); rocks.forEach((r, i) => { D.position.set(r[0], Math.min(r[1] + r[3] * 0.35, r[4] + 0.08), r[2]); D.rotation.set(rnd(), rnd() * 6, 0); D.scale.setScalar(r[3]); D.updateMatrix(); km.setMatrixAt(i, D.matrix); }); km.count = rocks.length; km.castShadow = true; km.receiveShadow = true; g.add(km);
+  RIV.n = { reeds: reeds.length, rocks: rocks.length };
+};
+function R_HALF_ROAD() { return 3.5; }
+{ const _b = GAME.begin; GAME.begin = function () { const r = _b.apply(this, arguments); try { RIV.decor(); } catch (e) { console.warn('river decor', e); } return r; }; }
+{ const _rr = refreshRegion; refreshRegion = function () { const r = _rr.apply(this, arguments); clearTimeout(RIV._t); RIV._t = setTimeout(() => { try { if (GAME.p) RIV.decor(); } catch (e) { } }, 800); return r; }; }
+
+// ===================== 建物の中に入る: 商店・出荷所・集会所・道の駅・待合所・水族館・旅館/ホテル・マンション・モール・カフェ・チャペル・オフィス =====================
+// uses the same room system as your home (ROOM scene). this.place = { key, room, out } while inside
+const PLACE_SIZES = { s: [9, 7], m: [11, 9], l: [14, 10], xl: [16, 12] };
+let _psz = 20; const placeSizeIdx = {}; for (const [k, [w, d]] of Object.entries(PLACE_SIZES)) { ROOM_SIZES[_psz] = { w, d, name: k }; placeSizeIdx[k] = _psz++; }
+// extra wall / floor finishes for public buildings
+{ const _wt = wallTex; wallTex = function (k, w = 8) {
+  const key = k + w; if (!['panel', 'aqua', 'concrete', 'cream', 'shoji'].includes(k)) return _wt(k, w); if (_texCache[key]) return _texCache[key]; const [c, x] = cvs(512, 256), s = 512 / w;
+  if (k === 'panel') { x.fillStyle = '#efe6d4'; x.fillRect(0, 0, 512, 256); x.fillStyle = '#8a6440'; x.fillRect(0, 150, 512, 106); for (let i = 0; i < 512; i += s * 0.6) { x.fillStyle = 'rgba(40,20,5,.35)'; x.fillRect(i, 150, 2, 106); } x.fillStyle = '#6a4a2a'; x.fillRect(0, 146, 512, 6); }
+  if (k === 'aqua') { const gr = x.createLinearGradient(0, 0, 0, 256); gr.addColorStop(0, '#0a1e3a'); gr.addColorStop(1, '#14365a'); x.fillStyle = gr; x.fillRect(0, 0, 512, 256); }
+  if (k === 'concrete') { x.fillStyle = '#d8d6d0'; x.fillRect(0, 0, 512, 256); for (let i = 0; i < 2500; i++) { x.fillStyle = `rgba(0,0,0,${Math.random() * 0.04})`; x.fillRect(Math.random() * 512, Math.random() * 256, 2, 2); } x.strokeStyle = 'rgba(0,0,0,.12)'; for (let i = 0; i < 512; i += s * 1.2) { x.beginPath(); x.moveTo(i, 0); x.lineTo(i, 256); x.stroke(); } }
+  if (k === 'cream') { x.fillStyle = '#f6ecd8'; x.fillRect(0, 0, 512, 256); x.fillStyle = '#e8d8b8'; x.fillRect(0, 200, 512, 56); x.fillStyle = '#c8a878'; x.fillRect(0, 196, 512, 5); }
+  if (k === 'shoji') { x.fillStyle = '#f4efe2'; x.fillRect(0, 0, 512, 256); x.fillStyle = '#8a6440'; for (let i = 0; i < 512; i += s * 0.45) x.fillRect(i, 0, 3, 256); for (let j = 0; j < 256; j += 40) x.fillRect(0, j, 512, 3); x.fillStyle = '#6a4a2a'; x.fillRect(0, 210, 512, 46); }
+  const t = toTex(c, false); return (_texCache[key] = t);
+}; }
+{ const _ft = floorTex; floorTex = function (k, W = 8, D = 8) {
+  if (!['marble', 'stone', 'darkwood', 'deck'].includes(k)) return _ft(k, W, D); const key = 'f' + k + W + D; if (_texCache[key]) return _texCache[key]; const [c, x] = cvs(512, 512);
+  if (k === 'marble') { for (let j = 0; j < 4; j++) for (let i = 0; i < 4; i++) { x.fillStyle = (i + j) % 2 ? '#e8e2d6' : '#f4f0e8'; x.fillRect(i * 128, j * 128, 128, 128); } x.strokeStyle = 'rgba(120,110,95,.25)'; x.lineWidth = 1.5; for (let i = 0; i < 40; i++) { x.beginPath(); let px = Math.random() * 512, py = Math.random() * 512; x.moveTo(px, py); for (let k2 = 0; k2 < 6; k2++) { px += (Math.random() - 0.5) * 60; py += Math.random() * 40; x.lineTo(px, py); } x.stroke(); } x.strokeStyle = 'rgba(0,0,0,.15)'; for (let i = 0; i <= 512; i += 128) { x.beginPath(); x.moveTo(i, 0); x.lineTo(i, 512); x.moveTo(0, i); x.lineTo(512, i); x.stroke(); } }
+  if (k === 'stone') { x.fillStyle = '#b8b2a6'; x.fillRect(0, 0, 512, 512); for (let j = 0; j < 8; j++) for (let i = 0; i < 8; i++) { x.fillStyle = `hsl(35,8%,${62 + Math.random() * 10}%)`; x.fillRect(i * 64 + 2, j * 64 + 2, 60, 60); } }
+  if (k === 'darkwood') { for (let j = 0; j < 512; j += 24) { let i = -(j * 37 % 100); while (i < 512) { const len = 100 + Math.random() * 90; x.fillStyle = `hsl(25,${35 + Math.random() * 10}%,${22 + Math.random() * 6}%)`; x.fillRect(i, j, len, 24); x.fillStyle = 'rgba(0,0,0,.35)'; x.fillRect(i, j, 1.5, 24); i += len; } } }
+  if (k === 'deck') { for (let j = 0; j < 512; j += 32) { x.fillStyle = `hsl(28,30%,${48 + Math.random() * 8}%)`; x.fillRect(0, j, 512, 30); } }
+  const t = toTex(c, false); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(W / 4, D / 4); return (_texCache[key] = t);
+}; }
+// ---------- small builders ----------
+const PM = {}; const pm = (k, c, r = 0.6, m = 0, ex) => PM[k] || (PM[k] = stdM(c, r, m, ex));
+function staffMesh(shirt = '#3a6ab0', apron = '#f2f2ee', hair = '#3a2a20') {
+  const g = new THREE.Group(), skin = pm('skin', '#f2c9a4', 0.7);
+  for (const sx of [-0.1, 0.1]) CY(g, 0.07, 0.75, pm('pants', '#2a2e3a'), sx, 0.38, 0, 8);
+  CY(g, 0.2, 0.62, pm('sh' + shirt, shirt), 0, 1.06, 0, 10, 0, 0, 0, 0.18); B(g, 0.3, 0.5, 0.02, pm('ap' + apron, apron), 0, 0.98, 0.17);
+  for (const sx of [-0.25, 0.25]) CY(g, 0.055, 0.55, pm('sh' + shirt, shirt), sx, 1.05, 0.03, 6, 0.15, 0, 0);
+  SP(g, 0.17, skin, 0, 1.55, 0, 1.05, 14); SP(g, 0.175, pm('hair' + hair, hair), 0, 1.6, -0.03, 0.85, 12);
+  for (const sx of [-0.06, 0.06]) SP(g, 0.022, pm('eye', '#1a1a1a'), sx, 1.57, 0.155, 1, 6);
+  g.traverse(o => { if (o.isMesh) { o.castShadow = true; } }); return g;
+}
+function fishMesh(c1, c2, L = 0.3) { const g = new THREE.Group(), m1 = pm('f' + c1, c1, 0.3, 0.4), m2 = pm('f' + c2, c2, 0.4); const b = SP(g, 0.5, m1, 0, 0, 0, 1, 10); b.scale.set(0.3, 0.4, 1); const t = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.35, 4), m2); t.rotation.x = -Math.PI / 2; t.scale.set(0.25, 1, 1); t.position.z = -0.62; g.add(t); const bk = SP(g, 0.5, m2, 0, 0.08, 0, 1, 8); bk.scale.set(0.31, 0.32, 0.95); g.scale.setScalar(L); return g; }
+const FISH_COL = { madai: ['#e8706a', '#c84a48'], kasago: ['#c45a3a', '#8a3a22'], mebaru: ['#8a6a50', '#5a4030'], kue: ['#6a5a48', '#3a3026'], chinu: ['#606a70', '#30363a'], hirame: ['#8a7a60', '#5a4a36'], karei: ['#8a7a60', '#5a4a36'], tako: ['#a85a4a', '#7a3a2e'], ika: ['#e8e0d8', '#c8b8b0'], koi: ['#d88a3a', '#a85a1a'], buri: ['#c8d4dc', '#3a5a8a'], hamachi: ['#c8d4dc', '#3a6a9a'], aji: ['#c8d0d0', '#5a7a7a'], fugu: ['#e8e0c8', '#7a7a50'], manbou: ['#a8b0b8', '#6a7078'], kuruma: ['#d8a080', '#8a5a40'], gazami: ['#7a8a6a', '#4a5a3a'] };
+function signBoard(g, text, x, y, z, ry = 0, w = 2.4, bg = '#2a4a6a', fg = '#ffffff') { const [c, ctx] = cvs(512, 128); ctx.fillStyle = bg; ctx.fillRect(0, 0, 512, 128); ctx.fillStyle = fg; ctx.font = '700 64px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(text, 256, 66, 490); const m = new THREE.Mesh(new THREE.PlaneGeometry(w, w / 4), new THREE.MeshBasicMaterial({ map: toTex(c, false) })); m.position.set(x, y, z); m.rotation.y = ry; g.add(m); return m; }
+function counter(g, x, z, w, d = 0.7, ry = 0, top = '#c8a070', body = '#8a5a3a') { const c = sub(g, x, 0, z, ry); B(c, w, 0.95, d, pm('cb' + body, body, 0.7), 0, 0.475, 0); B(c, w + 0.1, 0.06, d + 0.1, pm('ct' + top, top, 0.5), 0, 0.98, 0); return c; }
+function shelf(g, x, z, w, ry, rnd, goods = ['#e85a4a', '#f0c040', '#4a9ae8', '#5ac06a', '#f08ac0', '#ffffff', '#8a5a3a']) { const s = sub(g, x, 0, z, ry), wood = pm('shw', '#a07850', 0.7); B(s, w, 1.8, 0.05, wood, 0, 0.9, -0.22); for (const sx of [-1, 1]) B(s, 0.05, 1.8, 0.45, wood, sx * w / 2, 0.9, 0); for (let lv = 0; lv < 4; lv++) { const y = 0.12 + lv * 0.44; B(s, w, 0.04, 0.45, wood, 0, y, 0); for (let i = -w / 2 + 0.15; i < w / 2 - 0.1; i += 0.16 + rnd() * 0.08) { const h = 0.12 + rnd() * 0.2; B(s, 0.12, h, 0.14 + rnd() * 0.12, pm('gd' + Math.floor(rnd() * 7), goods[Math.floor(rnd() * goods.length)], 0.6), i, y + 0.02 + h / 2, 0); } } return s; }
+function plantPot(g, x, z, h = 1.4) { const p = sub(g, x, 0, z); CY(p, 0.22, 0.4, pm('pot', '#c87a4a', 0.8), 0, 0.2, 0, 10, 0, 0, 0, 0.18); for (let k = 0; k < 6; k++) { const l = SP(p, 0.28, pm('leaf', '#4a9a4a', 0.8), Math.cos(k) * 0.15, 0.5 + h * (0.4 + (k % 3) * 0.2), Math.sin(k) * 0.15, 1.6, 6); l.scale.x = 0.6; } return p; }
+function pBench(g, x, z, w, ry) { const b = sub(g, x, 0, z, ry), wd = pm('bw', '#b08858', 0.7), mt = pm('bm', '#5a5a5a', 0.4, 0.6); B(b, w, 0.06, 0.45, wd, 0, 0.45, 0); B(b, w, 0.4, 0.05, wd, 0, 0.7, -0.22); for (const sx of [-1, 1]) B(b, 0.05, 0.45, 0.4, mt, sx * (w / 2 - 0.1), 0.22, 0); return b; }
+function chandelier(g, x, y, z) { const c = sub(g, x, y, z), gold = pm('gold', '#d8b060', 0.3, 0.8), glow = pm('glow', '#fff4d8', 0.3, 0, { emissive: new THREE.Color('#ffe8b0'), emissiveIntensity: 1.2 }); CY(c, 0.02, 0.8, gold, 0, 0.4, 0, 6); const ring = new THREE.Mesh(new THREE.TorusGeometry(0.7, 0.03, 6, 24), gold); ring.rotation.x = Math.PI / 2; c.add(ring); for (let k = 0; k < 10; k++) { const a = k / 10 * 6.28; SP(c, 0.07, glow, Math.cos(a) * 0.7, 0.08, Math.sin(a) * 0.7, 1.3, 8); } SP(c, 0.16, glow, 0, -0.1, 0, 1, 10); return c; }
+function vending(g, x, z, ry, col) { const v = sub(g, x, 0, z, ry); B(v, 0.9, 1.8, 0.7, pm('vd' + col, col, 0.4), 0, 0.9, 0); B(v, 0.75, 0.9, 0.02, pm('vg', '#dff0ff', 0.1, 0, { emissive: new THREE.Color('#bfe0ff'), emissiveIntensity: 0.5 }), 0, 1.15, 0.36); for (let i = 0; i < 12; i++) B(v, 0.08, 0.16, 0.03, pm('can' + (i % 4), ['#e83a2a', '#3a8ae8', '#f0c020', '#3ab05a'][i % 4]), -0.27 + (i % 6) * 0.11, 0.95 + Math.floor(i / 6) * 0.35, 0.37); return v; }
+function tankWall(g, x, z, w, h, ry, fishIds, rnd, tanks) { // a big glowing tank set into a wall, with fish that swim
+  const t = sub(g, x, 0, z, ry); B(t, w + 0.3, h + 0.5, 0.4, pm('tf', '#1a2a3a', 0.6), 0, 0.3 + h / 2, -0.1);
+  const water = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ color: '#2a8ab8', transparent: true, opacity: 0.85 })); water.position.set(0, 0.55 + h / 2, 0.11); t.add(water);
+  const back = new THREE.Mesh(new THREE.PlaneGeometry(w, h), pm('tb', '#0a4a6a', 0.9, 0, { emissive: new THREE.Color('#0a5a8a'), emissiveIntensity: 0.6 })); back.position.set(0, 0.55 + h / 2, -0.29); t.add(back);
+  for (let k = 0; k < 7; k++) { const r = SP(t, 0.15 + rnd() * 0.25, pm('rk', '#5a6a6a', 0.9), -w / 2 + rnd() * w, 0.6, -0.15 + rnd() * 0.1, 0.6, 6); }
+  for (let k = 0; k < 5; k++) { const s = CY(t, 0.02, 0.4 + rnd() * 0.7, pm('weed', '#3a8a4a', 0.8), -w / 2 + rnd() * w, 0.75, -0.18, 5); s.rotation.z = (rnd() - 0.5) * 0.3; }
+  const list = fishIds.length ? fishIds : ['aji', 'madai', 'kasago']; const fish = [];
+  for (let k = 0; k < Math.min(10, 3 + list.length * 2); k++) { const id = list[k % list.length], col = FISH_COL[id] || ['#c0ccd4', '#4a5a66'], f = fishMesh(col[0], col[1], 0.22 + rnd() * 0.18); f.position.set(0, 0.8 + rnd() * (h - 0.5), -0.05 - rnd() * 0.15); f.userData = { a: rnd() * 6.28, sp: 0.3 + rnd() * 0.4, r: w / 2 - 0.3, y: f.position.y }; t.add(f); fish.push(f); }
+  tanks.push({ fish, list }); return t;
+}
+// ---------- the places ----------
+const PLACES = {
+  shop: { name: () => `${GAME.p.island}商店`, size: 's', wall: 'wood', floor: 'wood', staff: { x: 2.6, z: -1.6, ry: Math.PI / 2 + 0.6, shirt: '#3a8a5a', who: '店長', lines: ['いらっしゃいませ！', '釣りざおも家具も、なんでもそろってますよ。', '今日もいい天気ですねえ。'] },
+    build(g, W, D, R) { shelf(g, -2.6, -D / 2 + 0.35, 3.0, 0, R); shelf(g, 0.8, -D / 2 + 0.35, 2.6, 0, R); shelf(g, -W / 2 + 0.35, 0.4, 2.4, Math.PI / 2, R); counter(g, 3.0, -0.6, 2.2, 0.7, Math.PI / 2); B(g, 0.4, 0.3, 0.35, pm('reg', '#3a3a3a', 0.4), 3.0, 1.15, -1.0); signBoard(g, 'いらっしゃいませ', 0, 2.35, -D / 2 + 0.02, 0, 2.6, '#c84a3a'); for (let k = 0; k < 3; k++) B(g, 0.5, 0.35, 0.35, pm('mk', '#e88a2a', 0.7), -1.0 + k * 0.6, 0.18, 1.2); },
+    blocks: [[3.0, -0.6, 0.45, 1.2], [-2.6, -3.15, 1.6, 0.35], [0.8, -3.15, 1.4, 0.35], [-4.15, 0.4, 0.35, 1.3]],
+    acts: [{ x: 2.2, z: -0.6, r: 1.6, label: '買い物をする（家具・道具・釣りざお）', fn: () => GAME.openShop() }] },
+  ship: { name: () => '漁協 出荷所', size: 's', wall: 'concrete', floor: 'stone', staff: { x: 0, z: -2.3, ry: 0, shirt: '#2a5a8a', apron: '#2a2a2a', who: '漁協のおじさん', lines: ['おう、今日はなにが釣れた？', '網の魚は、kgごとに今日の相場で買うぞ。', '高値の魚は掲示板を見てくれ。'] },
+    build(g, W, D, R) { counter(g, 0, -1.5, 3.4, 0.8, 0, '#d8d8d4', '#5a7a8a'); B(g, 0.6, 0.12, 0.5, pm('scale', '#c8c8c8', 0.3, 0.7), 1.1, 1.08, -1.5); for (let k = 0; k < 6; k++) { const c = sub(g, -3.6 + (k % 3) * 0.75, 0, 1.6 + Math.floor(k / 3) * 0.6); B(c, 0.65, 0.3, 0.45, pm('crate', '#4a8ad8', 0.6), 0, 0.15, 0); B(c, 0.58, 0.04, 0.38, pm('ice', '#e8f4ff', 0.2), 0, 0.31, 0); const col = Object.values(FISH_COL)[k % 8]; for (let q = 0; q < 3; q++) { const f = fishMesh(col[0], col[1], 0.2); f.position.set(-0.15 + q * 0.15, 0.36, 0); f.rotation.set(0, 0.3, Math.PI / 2); c.add(f); } } signBoard(g, `今日の高値：${(FISH.find(f => f.id === GAME.hotFish()) || {}).name || ''}`, 0, 2.3, -D / 2 + 0.02, 0, 3.2, '#2a4a6a'); },
+    blocks: [[0, -1.5, 1.8, 0.5], [-2.85, 1.9, 1.2, 0.65]],
+    acts: [{ x: 0, z: -0.7, r: 1.4, label: '魚やみかんを出荷する', fn: () => GAME.openShip() }, { x: 1.6, z: -0.7, r: 1.0, label: '網の魚を水揚げ（せり）', fn: () => FSH.openLanding(true), show: () => FSH.holdKg() > 0.05 }] },
+  hall: { name: () => `${GAME.p.island}島 集会所`, size: 'm', wall: 'tsuchi', floor: 'tatami', wh: 3.2,
+    build(g, W, D, R) { const st = sub(g, 0, 0, -D / 2 + 1.0); B(st, 4.0, 0.35, 1.6, pm('stage', '#9a6a40', 0.6), 0, 0.17, 0); B(st, 0.7, 1.0, 0.5, pm('podium', '#7a4a2a', 0.6), 0, 0.85, 0.2); signBoard(g, '島の会議', 0, 2.6, -D / 2 + 0.02, 0, 3.0, '#f4efe2', '#3a2a1a');
+      for (const z of [0.3, 2.3]) { B(g, 4.6, 0.32, 0.8, pm('lt', '#8a5a34', 0.6), 0, 0.16, z); for (let i = -2; i <= 2; i++) for (const sd of [-1, 1]) B(g, 0.5, 0.06, 0.5, pm('zb', '#c85a3a', 0.9), i * 0.9, 0.03, z + sd * 0.75); }
+      const bb = sub(g, W / 2 - 0.05, 1.5, 0.5, -Math.PI / 2); B(bb, 1.8, 1.2, 0.04, pm('cork', '#b8905a', 0.9), 0, 0, 0); for (let k = 0; k < 5; k++) B(bb, 0.35, 0.45, 0.01, pm('pap' + k, ['#ffffff', '#fff4c8', '#e8f4ff'][k % 3], 0.8), -0.6 + k * 0.3, (k % 2) * 0.2 - 0.1, 0.03); },
+    blocks: [[0, -3.5, 2.0, 0.8], [0, 0.3, 2.3, 0.4], [0, 2.3, 2.3, 0.4]],
+    acts: [{ x: 0, z: -2.3, r: 1.5, label: () => GAME.meetToday() ? '島の会議をはじめる' : '会議の予定を見る', fn: () => { if (GAME.meetToday()) { GAME.exitHome(); setTimeout(() => GAME.startMeeting(), 900); } else UI.toast(GAME.agenda().length ? `次の島の会議は ${fmtDay(GAME.meetState().next)} です` : '今は話し合う議題がありません'); } }, { x: 4.6, z: 0.5, r: 1.3, label: '掲示板を見る', fn: () => UI.toast(`📌 島の元気度 Lv${GAME.level()}・島民 ${typeof resN === 'function' ? resN() : ''}人・観光ポイント ${GAME.tourism()}`) }] },
+  michinoeki: { name: () => '道の駅', size: 'm', wall: 'cream', floor: 'deck', staff: { x: 3.6, z: -1.2, ry: -Math.PI / 2, shirt: '#e88a2a', who: '道の駅の店員', lines: ['島のみかん、甘いですよ〜！', 'みかんの出荷もここで受けつけてます。'] },
+    build(g, W, D, R) { for (let k = 0; k < 4; k++) { const t = sub(g, -3 + k * 1.9, 0, 0.6); B(t, 1.4, 0.8, 0.9, pm('tbl', '#a07850', 0.7), 0, 0.4, 0); for (let q = 0; q < 6; q++) SP(t, 0.09, pm('mikan', '#f08a1a', 0.6), -0.5 + (q % 3) * 0.25, 0.86, -0.2 + Math.floor(q / 3) * 0.3, 1, 8); } shelf(g, -1, -D / 2 + 0.35, 5, 0, R, ['#f08a1a', '#f0c040', '#5ac06a', '#c84a3a']); counter(g, 4.2, -1.2, 2, 0.7, Math.PI / 2); signBoard(g, '島の名産', 0, 2.4, -D / 2 + 0.02, 0, 3, '#3a7a3a'); vending(g, -W / 2 + 0.5, 2.5, Math.PI / 2, '#e83a2a'); },
+    blocks: [[-0.15, 0.6, 3.7, 0.5], [-1, -4.15, 2.6, 0.35], [4.2, -1.2, 0.45, 1.1]],
+    acts: [{ x: 3.4, z: -1.2, r: 1.5, label: 'みかんや魚を出荷する', fn: () => GAME.openShip() }] },
+  waiting: { name: () => '港の待合所', size: 's', wall: 'cream', floor: 'tile',
+    build(g, W, D, R) { for (let k = 0; k < 3; k++) pBench(g, -2.5 + k * 2.5, 0.5, 2, 0); signBoard(g, '時刻表', 0, 2.2, -D / 2 + 0.02, 0, 2.4, '#2a4a6a'); vending(g, W / 2 - 0.5, -2.2, -Math.PI / 2, '#3a8ae8'); plantPot(g, -W / 2 + 0.5, -2.8); },
+    blocks: [[-2.5, 0.5, 1, 0.3], [0, 0.5, 1, 0.3], [2.5, 0.5, 1, 0.3]],
+    acts: [{ x: 0, z: -2.6, r: 1.6, label: '時刻表を見る', fn: () => UI.toast('🚌 島めぐりバスは港と灯台口・西の浜口を往復。🛳️ 観光船は桟橋から島を一周します') }] },
+  aquarium: { name: () => '島の水族館', size: 'xl', wall: 'aqua', floor: 'darkwood', wh: 3.6, dark: true,
+    build(g, W, D, R, P) { const ids = Object.keys(GAME.p.fish || {}).filter(id => FISH.find(f => f.id === id)); const pick = (a, b) => ids.slice(a, b); P.tanks = [];
+      tankWall(g, -4, -D / 2 + 0.25, 6, 2.4, 0, pick(0, 4), R, P.tanks); tankWall(g, 4, -D / 2 + 0.25, 6, 2.4, 0, pick(4, 8), R, P.tanks); tankWall(g, -W / 2 + 0.25, 0, 6, 2.2, Math.PI / 2, pick(8, 12), R, P.tanks); tankWall(g, W / 2 - 0.25, 0, 6, 2.2, -Math.PI / 2, pick(12, 16), R, P.tanks);
+      const ct = sub(g, 0, 0, 0.3); CY(ct, 1.3, 0.6, pm('tf', '#1a2a3a'), 0, 0.3, 0, 24); const cyl = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.2, 2.4, 28, 1, true), new THREE.MeshBasicMaterial({ color: '#3ab0e0', transparent: true, opacity: 0.45, side: THREE.DoubleSide, depthWrite: false })); cyl.position.y = 1.8; ct.add(cyl); CY(ct, 1.3, 0.2, pm('tf', '#1a2a3a'), 0, 3.1, 0, 24);
+      const jel = []; for (let k = 0; k < 7; k++) { const j = SP(ct, 0.16, pm('jel', '#f0d8ff', 0.2, 0, { emissive: new THREE.Color('#d8a8ff'), emissiveIntensity: 0.9, transparent: true, opacity: 0.85 }), Math.cos(k) * 0.6, 1.2 + k * 0.25, Math.sin(k) * 0.6, 0.6, 10); j.userData.ph = k; jel.push(j); } P.jelly = jel;
+      signBoard(g, `島の海の魚 ${ids.length}種`, 0, 3.1, -D / 2 + 0.02, 0, 3.2, '#0a2a4a', '#bfe8ff'); for (let k = 0; k < 3; k++) pBench(g, -4 + k * 4, 3.4, 2.2, Math.PI); },
+    blocks: [[0, 0.3, 1.35, 1.35], [-4, 3.4, 1.1, 0.3], [0, 3.4, 1.1, 0.3], [4, 3.4, 1.1, 0.3]],
+    acts: [{ x: 0, z: -4.6, r: 3.5, label: '水そうをながめる', fn: () => { const ids = Object.keys(GAME.p.fish || {}); UI.toast(ids.length ? `🐟 ${ids.slice(0, 8).map(id => (FISH.find(f => f.id === id) || {}).name).filter(Boolean).join('・')}${ids.length > 8 ? ' ほか' : ''}（釣った魚が展示されています）` : '🐟 まだ展示する魚がいません。釣った魚がここに並びます'); } }, { x: 0, z: 1.8, r: 1.6, label: 'クラゲの水そうを見る', fn: () => UI.toast('🪼 ミズクラゲがゆらゆら…（瀬戸内の夏の海によくいます）') }] },
+  hotel: { name: k => ({ ryokan: '旅館', resort: 'ほしなみリゾートホテル', hotelL: '大型リゾートホテル', hotelG: 'ガラスのタワーホテル', villa: 'プールつきヴィラ' }[k] || 'ホテル'), size: 'l', wall: 'panel', floor: 'marble', wh: 3.6, staff: { x: 0, z: -3.3, ry: 0, shirt: '#2a2a3a', apron: '#2a2a3a', who: 'フロント', lines: ['ようこそいらっしゃいませ。', 'ご予約のお客さまでいらっしゃいますか？', '最上階のレストランからは、瀬戸内の夕日が見えますよ。'] },
+    build(g, W, D, R) { counter(g, 0, -2.7, 4.2, 0.8, 0, '#f2eee6', '#6a4a2a'); signBoard(g, 'RECEPTION / フロント', 0, 2.6, -D / 2 + 0.02, 0, 3.4, '#3a2a1a', '#e8d090'); chandelier(g, 0, 2.6, 0.6); chandelier(g, -4, 2.6, 1.5); chandelier(g, 4, 2.6, 1.5);
+      for (const [x, z, ry] of [[-4.5, 1.2, Math.PI / 2], [4.5, 1.2, -Math.PI / 2]]) { const s = sub(g, x, 0, z, ry); B(s, 2.0, 0.4, 0.8, pm('sofa', '#7a3a3a', 0.8), 0, 0.3, 0); B(s, 2.0, 0.5, 0.2, pm('sofa', '#7a3a3a', 0.8), 0, 0.65, -0.35); B(s, 0.8, 0.4, 0.6, pm('lt2', '#4a3020', 0.5), 0, 0.2, 1.1); }
+      for (const x of [-W / 2 + 0.5, W / 2 - 0.5]) plantPot(g, x, -D / 2 + 0.6, 1.8); B(g, 1.8, 0.02, 4, pm('rug', '#8a2a2a', 0.9), 0, 0.01, 2.2); const el = sub(g, W / 2 - 0.05, 0, -2.5, -Math.PI / 2); B(el, 1.4, 2.4, 0.06, pm('elv', '#c8c8c8', 0.25, 0.8), 0, 1.2, 0); B(el, 0.02, 2.3, 0.07, pm('dk', '#3a3a3a'), 0, 1.2, 0); },
+    blocks: [[0, -2.7, 2.2, 0.5], [-4.5, 1.2, 0.5, 1.1], [4.5, 1.2, 0.5, 1.1]],
+    acts: [{ x: 0, z: -1.9, r: 1.6, label: 'フロントで話す', fn: () => { const occ = typeof REV !== 'undefined' ? Math.round(REV.occupancy() * 100) : 0; UI.toast(`🏨 本日の客室稼働率 ${occ}%。島に遊べる場所がふえるほど、お客さまがふえます`); } }, { x: 6.2, z: -2.5, r: 1.4, label: 'エレベーターに乗る', fn: () => UI.toast('🛗 客室は宿泊のお客さま専用です') }] },
+  ryokan: { name: () => '旅館', size: 'l', wall: 'shoji', floor: 'tatami', wh: 3.0, staff: { x: -0.5, z: -2.9, ry: 0, shirt: '#8a3a4a', apron: '#d8c8a8', who: '女将', lines: ['ようこそおいでくださいました。', 'お風呂は夜十時まで入れますよ。', 'お夕飯は瀬戸内のお魚づくしです。'] },
+    build(g, W, D, R) { counter(g, -0.5, -2.5, 3.0, 0.7, 0, '#9a6a40', '#6a4020'); const nr = sub(g, W / 2 - 0.05, 0, 1.2, -Math.PI / 2); for (let k = 0; k < 3; k++) B(nr, 0.55, 1.0, 0.02, pm('noren', k % 2 ? '#2a4a8a' : '#c84a3a', 0.9), -0.6 + k * 0.6, 2.0, 0); signBoard(g, 'ゆ', W / 2 - 0.06, 2.75, 1.2, -Math.PI / 2, 0.8, '#2a4a8a'); for (let i = -1; i <= 1; i++) { B(g, 1.2, 0.35, 0.8, pm('lt', '#8a5a34', 0.6), i * 2.6 - 1, 0.17, 1.5); B(g, 0.5, 0.06, 0.5, pm('zb', '#c85a3a', 0.9), i * 2.6 - 1, 0.03, 2.3); } plantPot(g, -W / 2 + 0.5, -D / 2 + 0.6, 1.2); signBoard(g, '歓迎', -0.5, 2.4, -D / 2 + 0.02, 0, 2.0, '#3a2a1a', '#ffffff'); },
+    blocks: [[-0.5, -2.5, 1.6, 0.45], [-3.6, 1.5, 0.6, 0.4], [-1, 1.5, 0.6, 0.4], [1.6, 1.5, 0.6, 0.4]],
+    acts: [{ x: -0.5, z: -1.7, r: 1.5, label: '女将と話す', fn: () => UI.toast('🏮 「本日もたくさんのお客さまにお越しいただいています」') }, { x: 6.2, z: 1.2, r: 1.4, label: '温泉に入る', fn: () => GAME.fade(() => UI.toast('♨️ あったまった〜。いいお湯だった！')) }] },
+  lobby: { name: k => ({ mansion: 'しおさいマンション', condo: '高級コンドミニアム', slim: 'スリムタワー', midrise: 'マンション', tower: 'ほしなみスカイタワー', office: 'オフィスビル', r_towers: 'リゾートタワー' }[k] || 'ロビー'), size: 'm', wall: 'concrete', floor: 'marble', wh: 3.4, staff: { x: -3.6, z: -2.3, ry: 0.4, shirt: '#3a3a4a', who: '管理人', lines: ['こんにちは。', 'エレベーターは住人の方専用です。'] },
+    build(g, W, D, R) { counter(g, -3.6, -1.8, 2.2, 0.6, 0, '#d8d4cc', '#4a4a50'); const mb = sub(g, -W / 2 + 0.05, 0, 0.8, Math.PI / 2); for (let i = 0; i < 6; i++) for (let j = 0; j < 4; j++) B(mb, 0.3, 0.22, 0.05, pm('mbx', '#c8c0b0', 0.4, 0.5), -0.8 + i * 0.32, 0.9 + j * 0.25, 0); for (const x of [0.8, 2.8]) { const el = sub(g, x, 0, -D / 2 + 0.05); B(el, 1.3, 2.3, 0.05, pm('elv', '#c8c8c8', 0.25, 0.8), 0, 1.15, 0); B(el, 0.02, 2.2, 0.06, pm('dk', '#3a3a3a'), 0, 1.15, 0); B(el, 0.3, 0.12, 0.04, pm('elsg', '#1a1a1a', 0.3, 0, { emissive: new THREE.Color('#ff8a3a'), emissiveIntensity: 0.6 }), 0, 2.5, 0.02); } plantPot(g, W / 2 - 0.6, 2.8, 1.6); pBench(g, 2.6, 2.2, 2.0, -Math.PI / 2); },
+    blocks: [[-3.6, -1.8, 1.1, 0.4], [2.6, 2.2, 0.3, 1.0]],
+    acts: [{ x: 1.8, z: -3.2, r: 1.6, label: 'エレベーターに乗る', fn: () => UI.toast('🛗 住人専用です（このビルの島民がくらしています）') }] },
+  mall: { name: () => 'ショッピングモール', size: 'xl', wall: 'cream', floor: 'marble', wh: 4.0,
+    build(g, W, D, R) { const shops = [['カフェ', '#8a5a3a', -4.8, -D / 2 + 1.4, 0], ['雑貨', '#e85a8a', 0, -D / 2 + 1.4, 0], ['ファッション', '#3a3a5a', 4.8, -D / 2 + 1.4, 0], ['本屋', '#3a7a5a', -W / 2 + 1.4, 1.2, Math.PI / 2], ['おもちゃ', '#e8a02a', W / 2 - 1.4, 1.2, -Math.PI / 2]];
+      shops.forEach(([nm, col, x, z, ry]) => { const s = sub(g, x, 0, z, ry); B(s, 4.2, 3.2, 0.1, pm('sw' + col, col, 0.7), 0, 1.6, -1.2); for (const sx of [-1, 1]) B(s, 0.12, 3.2, 2.4, pm('sw' + col, col, 0.7), sx * 2.05, 1.6, 0); signBoard(s, nm, 0, 3.4, 0.02, 0, 2.4, col); shelf(s, 0, -0.9, 3.2, 0, R); B(s, 1.2, 0.9, 0.6, pm('cnt', '#f2eee6', 0.5), 1.0, 0.45, 0.6); });
+      plantPot(g, -2.2, 1.0, 2.0); plantPot(g, 2.2, 1.0, 2.0); chandelier(g, 0, 3.3, 1.5); B(g, 3.0, 0.45, 0.8, pm('mbench', '#c8c0b0', 0.6), 0, 0.22, 1.0); },
+    blocks: [[-4.8, -4.6, 2.1, 1.3], [0, -4.6, 2.1, 1.3], [4.8, -4.6, 2.1, 1.3], [-6.6, 1.2, 1.3, 2.1], [6.6, 1.2, 1.3, 2.1], [0, 1.0, 1.5, 0.45]],
+    acts: [{ x: -4.8, z: -3.0, r: 1.8, label: 'カフェで買い物をする', fn: () => GAME.openShop() }, { x: 0, z: -3.0, r: 1.8, label: '雑貨屋で買い物をする', fn: () => GAME.openShop() }, { x: 4.8, z: -3.0, r: 1.8, label: '服屋で買い物をする', fn: () => GAME.openShop() }, { x: -5.0, z: 1.2, r: 1.8, label: '本屋で買い物をする', fn: () => GAME.openShop() }, { x: 5.0, z: 1.2, r: 1.8, label: 'おもちゃ屋で買い物をする', fn: () => GAME.openShop() }] },
+  cafe: { name: () => 'カフェ・レストラン', size: 's', wall: 'panel', floor: 'darkwood', staff: { x: 2.8, z: -2.4, ry: 0, shirt: '#2a2a2a', apron: '#8a5a3a', who: 'マスター', lines: ['いらっしゃい。今日のおすすめは瀬戸内レモンのケーキだよ。', 'コーヒー、おかわり自由です。'] },
+    build(g, W, D, R) { counter(g, 2.6, -1.9, 3.0, 0.7, 0, '#5a3a20', '#3a2a18'); B(g, 0.4, 0.5, 0.35, pm('cm', '#c8c8c8', 0.3, 0.7), 3.6, 1.25, -2.1); for (const [x, z] of [[-2.8, -1.6], [-2.8, 1.2], [-0.4, 1.4]]) { const t = sub(g, x, 0, z); CY(t, 0.45, 0.04, pm('tt', '#e8dcc8', 0.5), 0, 0.75, 0, 16); CY(t, 0.05, 0.72, pm('tl', '#3a3a3a', 0.4, 0.6), 0, 0.36, 0, 6); for (const a of [0, Math.PI]) { const c = sub(t, Math.sin(a) * 0.75, 0, Math.cos(a) * 0.75, a + Math.PI); B(c, 0.42, 0.05, 0.42, pm('ch', '#8a5a3a', 0.7), 0, 0.45, 0); B(c, 0.42, 0.45, 0.05, pm('ch', '#8a5a3a', 0.7), 0, 0.68, -0.2); } SP(t, 0.05, pm('cup', '#ffffff', 0.3), 0.1, 0.8, 0, 0.8, 8); } signBoard(g, 'CAFE', 2.6, 2.3, -D / 2 + 0.02, 0, 2.0, '#3a2a18', '#e8d090'); plantPot(g, -W / 2 + 0.5, -D / 2 + 0.5); },
+    blocks: [[2.6, -1.9, 1.6, 0.45], [-2.8, -1.6, 0.6, 1.0], [-2.8, 1.2, 0.6, 1.0], [-0.4, 1.4, 0.6, 1.0]],
+    acts: [{ x: 2.6, z: -1.1, r: 1.5, label: 'コーヒーをたのむ', fn: () => GAME.fade(() => UI.toast('☕ おいしいコーヒーとレモンケーキで、ひと休みした')) }] },
+  chapel: { name: () => 'ウェディングチャペル', size: 'l', wall: 'plaster', floor: 'marble', wh: 4.5,
+    build(g, W, D, R) { B(g, 1.6, 0.02, D - 1, pm('aisle', '#f4f0f0', 0.9), 0, 0.01, 0.4); for (let r = 0; r < 4; r++) for (const sd of [-1, 1]) { const p = sub(g, sd * 2.6, 0, -1 + r * 1.4); B(p, 3.2, 0.08, 0.5, pm('pew', '#f2eee6', 0.5), 0, 0.45, 0); B(p, 3.2, 0.5, 0.06, pm('pew', '#f2eee6', 0.5), 0, 0.72, -0.22); } B(g, 1.6, 1.0, 0.6, pm('alt', '#ffffff', 0.4), 0, 0.5, -D / 2 + 1.2);
+      const [c, ctx] = cvs(256, 384); const cols = ['#3a6ad8', '#e8c040', '#d84a5a', '#5ac06a', '#9a5ad8']; for (let j = 0; j < 12; j++) for (let i = 0; i < 8; i++) { ctx.fillStyle = cols[(i * 3 + j * 5) % 5]; ctx.fillRect(i * 32 + 1, j * 32 + 1, 30, 30); } const sg = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 2.6), new THREE.MeshBasicMaterial({ map: toTex(c, false) })); sg.position.set(0, 2.6, -D / 2 + 0.03); g.add(sg); for (const x of [-1.4, 1.4]) { const fl = sub(g, x, 0, -D / 2 + 1.2); CY(fl, 0.2, 0.9, pm('fs', '#ffffff', 0.4), 0, 0.45, 0, 10); for (let k = 0; k < 6; k++) SP(fl, 0.12, pm('flw' + (k % 2), k % 2 ? '#ffffff' : '#f8b8c8', 0.7), Math.cos(k) * 0.15, 1.0 + (k % 3) * 0.1, Math.sin(k) * 0.15, 1, 6); } },
+    blocks: [[0, -3.8, 0.8, 0.3]].concat([0, 1, 2, 3].flatMap(r => [[-2.6, -1 + r * 1.4, 1.6, 0.3], [2.6, -1 + r * 1.4, 1.6, 0.3]])),
+    acts: [{ x: 0, z: -2.9, r: 1.5, label: '祭壇の前に立つ', fn: () => UI.toast('💒 ステンドグラスの光がきれい…。島でいつか結婚式があるかも') }] },
+};
+const PLACE_OF = { ryokan: 'ryokan', aquarium: 'aquarium', michinoeki: 'michinoeki', waiting: 'waiting', mansion: 'lobby', resort: 'hotel', tower: 'lobby', r_towers: 'lobby', hotelL: 'hotel', hotelG: 'hotel', villa: 'hotel', condo: 'lobby', slim: 'lobby', midrise: 'lobby', office: 'lobby', mall: 'mall', cafe: 'cafe', chapel: 'chapel' };
+// ---------- which building is in front of you ----------
+// colliders made by each development, so we know where its walls are
+const PLACE_BLD = {};
+for (const id of Object.keys(PLACE_OF)) if (typeof DEV_BUILD !== 'undefined' && DEV_BUILD[id]) { const f = DEV_BUILD[id]; DEV_BUILD[id] = function (s) { const prev = COLL.track, mine = []; COLL.track = { push(c) { mine.push(c); if (prev) prev.push(c); } }; try { return f.apply(this, arguments); } finally { COLL.track = prev; const boxes = mine.filter(c => c.hw !== undefined).sort((a, b) => b.hw * b.hd - a.hw * a.hd); PLACE_BLD[id] = boxes.slice(0, 2); } }; }
+function boxDist(c, x, z) { const cs = Math.cos(c.rot || 0), sn = Math.sin(c.rot || 0), dx = x - c.x, dz = z - c.z, lx = dx * cs - dz * sn, lz = dx * sn + dz * cs; const ox = Math.max(0, Math.abs(lx) - c.hw), oz = Math.max(0, Math.abs(lz) - c.hd); return Math.hypot(ox, oz); }
+GAME.nearPlace = function () {
+  if (!this.p || PL.veh || this.inside || EDIT.on) return null; const x = PL.x, z = PL.z; let best = null, bd = 1e9; const cand = (d, lim, v) => { if (d < lim && d < bd) { bd = d; best = v; } };
+  if (DECO.shop) cand(Math.hypot(x - DECO.shop.x, z - DECO.shop.z), 2.4, { key: 'shop', kind: 'shop', out: DECO.shop });
+  if (DECO.ship) cand(Math.hypot(x - DECO.ship.x, z - DECO.ship.z), 2.6, { key: 'ship', kind: 'ship', out: DECO.ship });
+  if (PLACED.hall && PLACED.hall.entry) cand(Math.hypot(x - PLACED.hall.entry.x, z - PLACED.hall.entry.z), 2.6, { key: 'hall', kind: 'hall', out: PLACED.hall.entry });
+  const D = this.devState();
+  for (const id of Object.keys(PLACE_BLD)) { const s = D[id]; if (!s || s.state !== 'done') continue; for (const c of PLACE_BLD[id]) if (!c.off) cand(boxDist(c, x, z), 1.6, { key: PLACE_OF[id], kind: id, out: { x, z } }); }
+  if (typeof CITY !== 'undefined') for (const b of CITY.list) { const k = PLACE_OF[b.t]; if (!k) continue; const T = CITY_TYPES[b.t]; if (Math.abs(x - b.x) > T.w + 4 || Math.abs(z - b.z) > T.d + 4) continue; const [dx, dz] = toWorld(b, 0, T.d / 2 + 1.0); cand(Math.hypot(x - dx, z - dz), 3.2, { key: k, kind: b.t, out: { x: dx, z: dz } }); }
+  return best;
+};
+GAME.placeName = function (pl) { const P = PLACES[pl.key]; return typeof P.name === 'function' ? P.name(pl.kind) : P.name; };
+// ---------- enter / leave ----------
+GAME.enterPlace = function (pl) {
+  const P = PLACES[pl.key]; if (!P) return; const room = { size: placeSizeIdx[P.size], wall: P.wall, floor: P.floor, items: [], store: {}, plain: true, wh: P.wh, place: pl.key };
+  this.place = { ...pl, P, room, outRot: PL.rot }; try { SND.play('door_open', { vol: 0.7 }); } catch (e) { }
+  this.fade(() => {
+    this.buildRoom(); const S = ROOM_SIZES[room.size], R = mulberry(hashStr(pl.key + pl.kind)); this.place.data = {}; P.build(ROOM.group, S.w, S.d, R, this.place.data);
+    ROOM.scene.background = new THREE.Color(P.dark ? '#08121e' : '#2a2420'); ROOM.env.intensity = P.dark ? 0.05 : 0.2; const sc = ROOM.sun.shadow.camera; sc.left = sc.bottom = -Math.max(9, S.w * 0.7); sc.right = sc.top = Math.max(9, S.w * 0.7); sc.updateProjectionMatrix();
+    if (P.staff) { const st = staffMesh(P.staff.shirt, P.staff.apron); st.position.set(P.staff.x, 0, P.staff.z); st.rotation.y = P.staff.ry || 0; ROOM.group.add(st); this.place.staff = st; }
+    this.inside = true; this.outPos = { x: PL.x, z: PL.z, rot: PL.rot };
+    scene.remove(PL.mesh); ROOM.scene.add(PL.mesh); PL.x = 0; PL.z = S.d / 2 - 0.8; PL.rot = Math.PI; PL.y = 0; PL.speed = 0; PL.mesh.visible = true;
+    GAME_RP.scene = ROOM.scene; this.el.hud.classList.add('inroom'); this.el.hud.querySelector('.help').hidden = true; this.roomUI();
+    UI.toast(`🚪 ${this.placeName(pl)}に入った`);
+    if (P.staff) setTimeout(() => { if (this.place) UI.toast(`${P.staff.who}「${P.staff.lines[Math.floor(Math.random() * P.staff.lines.length)]}」`); }, 900);
+  });
+};
+{ const _ex = GAME.exitHome; GAME.exitHome = function () {
+  if (!this.place) return _ex.apply(this, arguments); const pl = this.place;
+  this.fade(() => { this.inside = false; ROOM.scene.remove(PL.mesh); scene.add(PL.mesh); GAME_RP.scene = scene; ROOM.scene.background = new THREE.Color('#2a2420');
+    const o = this.outPos || pl.out; PL.x = o.x; PL.z = o.z; PL.rot = (o.rot || 0) + Math.PI; const [qx, qz] = pushOut(PL.x - Math.sin(o.rot || 0) * 0.6, PL.z - Math.cos(o.rot || 0) * 0.6, 0.3); PL.x = qx; PL.z = qz; PL.y = standY(PL.x, PL.z); CAM.yaw = PL.rot + Math.PI; CAM.snap = true;
+    this.place = null; this.el.roomp.hidden = true; this.el.hud.classList.remove('inroom'); this.el.hud.querySelector('.help').hidden = false; const bb = document.getElementById('buildBtn'); if (bb) bb.hidden = false; try { SND.play('door_close', { vol: 0.7 }); } catch (e) { } });
+}; }
+{ const _h = GAME.home; GAME.home = function () { return this.place ? this.place.room : _h.apply(this, arguments); }; }
+{ const _t = GAME.toggleRoomEdit; GAME.toggleRoomEdit = function (on) { if (this.place && on !== false) { UI.toast('ここでは模様がえはできません'); return; } return _t.apply(this, arguments); }; }
+{ const _c = GAME.openCatalog; GAME.openCatalog = function () { if (this.place) { UI.toast('カタログは自分の家で使えます'); return; } return _c.apply(this, arguments); }; }
+{ const _ru = GAME.roomUI; GAME.roomUI = function () { if (this.place) { const el = this.el.roomp; el.hidden = false; el.innerHTML = `<span class="vtag">🏢 ${esc(this.placeName(this.place))}</span><button data-r="out">🚪 外に出る</button>`; const b = el.querySelector('[data-r="out"]'); if (b) b.onclick = e => { e.stopPropagation(); this.exitHome(); }; return; } return _ru.apply(this, arguments); }; }
+{ const _rb = GAME.roomBlocked; GAME.roomBlocked = function (x, z) { if (this.place) { for (const [bx, bz, hw, hd] of this.place.P.blocks || []) if (Math.abs(x - bx) < hw + 0.3 && Math.abs(z - bz) < hd + 0.3) return true; if (this.place.staff && Math.hypot(x - this.place.staff.position.x, z - this.place.staff.position.z) < 0.55) return true; return false; } return _rb.apply(this, arguments); }; }
+GAME.placeAct = function () { const P = this.place && this.place.P; if (!P) return null; let best = null, bd = 1e9; for (const a of P.acts || []) { if (a.show && !a.show()) continue; const d = Math.hypot(PL.x - a.x, PL.z - a.z); if (d < a.r && d < bd) { bd = d; best = a; } } return best; };
+{ const _rp = GAME.roomPrompt; GAME.roomPrompt = function () { if (this.place) { const S = ROOM.size; if (PL.z > S.d / 2 - 1.0 && Math.abs(PL.x) < 1) return 'Space：外に出る'; const a = this.placeAct(); if (a) return 'Space：' + (typeof a.label === 'function' ? a.label() : a.label); return ''; } return _rp.apply(this, arguments); }; }
+{ const _ra = GAME.roomAct; GAME.roomAct = function () { if (this.place) { const S = ROOM.size; if (PL.z > S.d / 2 - 1.0 && Math.abs(PL.x) < 1) { this.exitHome(); return; } const a = this.placeAct(); if (a) a.fn(this.place); return; } return _ra.apply(this, arguments); }; }
+{ const _ur = GAME.updateRoom; GAME.updateRoom = function (dt) { _ur.apply(this, arguments); const pl = this.place; if (!pl) return; const t = performance.now() / 1000;
+  if (pl.P.dark) { ROOM.sun.intensity = 0.25; ROOM.lamp.intensity = 1.2; }
+  if (pl.staff) { const st = pl.staff, want = Math.atan2(PL.x - st.position.x, PL.z - st.position.z); st.rotation.y = angLerp(st.rotation.y, Math.hypot(PL.x - st.position.x, PL.z - st.position.z) < 4 ? want : (pl.P.staff.ry || 0), Math.min(1, dt * 3)); st.position.y = Math.abs(Math.sin(t * 1.6)) * 0.015; }
+  const d = pl.data || {}; for (const tk of d.tanks || []) for (const f of tk.fish) { const u = f.userData; u.a += dt * u.sp; f.position.x = Math.sin(u.a) * u.r; f.rotation.y = Math.cos(u.a) > 0 ? Math.PI / 2 : -Math.PI / 2; f.position.y = u.y + Math.sin(t * 1.3 + u.a) * 0.05; }
+  for (const j of d.jelly || []) { j.position.y = 1.2 + ((t * 0.15 + j.userData.ph * 0.13) % 1) * 1.6; j.scale.y = 0.6 + Math.sin(t * 3 + j.userData.ph) * 0.12; }
+}; }
+// outdoors: Space in front of a building goes inside
+// other things right there (season events, mailbox, garage…) come first; the shop/出荷所/集会所 counters now live inside
+GAME.withoutCounters = function (fn) { const a = this.nearShop, b = this.nearShip, c = this.nearHall; this.nearShop = this.nearShip = this.nearHall = () => false; try { return fn(); } finally { this.nearShop = a; this.nearShip = b; this.nearHall = c; } };
+{ const _i = GAME.interact; GAME.interact = function () { const pl = !PL.veh && this.p && !this.nearDoor() && this.nearPlace(); if (!pl) return _i.apply(this, arguments); const r = this.withoutCounters(() => _i.apply(this, arguments)); if (r) return r; this.enterPlace(pl); return true; }; }
+{ const _p = GAME.prompt; GAME.prompt = function () { if (this.p && !PL.veh && !this.modal && !this.inside) { const pl = !this.nearDoor() && this.nearPlace(); if (pl) { const r = this.withoutCounters(() => _p.apply(this, arguments)); return r || `Space：${this.placeName(pl)}に入る`; } } return _p.apply(this, arguments); }; }
+// resident houses: visiting only needs you to have talked once (not なかよし3)
+{ const _tv = GAME.tryVisit; GAME.tryVisit = function (n) { const p = this.p, id = n.def.id; if (!p.talked[id] || (p.friend[id] || 0) >= 3) return _tv.apply(this, arguments); const f0 = p.friend[id] || 0; p.friend[id] = 3; try { return _tv.apply(this, arguments); } finally { p.friend[id] = f0; } }; }
+// saving while inside a building stores the spot outside the door, not the room coordinates
+{ const _sv = GAME.save; GAME.save = function () { if (this.inside && this.outPos && this.p) { const x = PL.x, z = PL.z, r = PL.rot; PL.x = this.outPos.x; PL.z = this.outPos.z; PL.rot = this.outPos.rot; try { return _sv.apply(this, arguments); } finally { PL.x = x; PL.z = z; PL.rot = r; } } return _sv.apply(this, arguments); }; }
+// the meeting still starts from outside the hall too, and a game reset leaves any building
+{ const _ra2 = GAME.resetAll; if (_ra2) GAME.resetAll = function () { this.place = null; return _ra2.apply(this, arguments); }; }
 
 // ===================== MAIN =====================
 let renderer, scene, camera;

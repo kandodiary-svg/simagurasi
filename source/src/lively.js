@@ -154,7 +154,7 @@ function liveVillager(n, dt) {
   let spd = 0; const walkTo = (tx, tz, v) => { const dx = tx - n.x, dz = tz - n.z, d = Math.hypot(dx, dz); if (d < 0.35) return true; const want = Math.atan2(dx, dz);
     for (const off of [0, 0.6, -0.6, 1.2, -1.2, 1.9, -1.9]) { const a = want + off, nx = n.x + Math.sin(a) * v * dt, nz = n.z + Math.cos(a) * v * dt; if (Math.hypot(PL.x - nx, PL.z - nz) < 0.7) return false; if (canWalk(n.x, n.z, nx, nz) && !hitsAnyBld(nx, nz)) { n.rot = angLerp(n.rot, a, Math.min(1, dt * 6)); n.x = nx; n.z = nz; spd = v; if (off) n.stuck += dt * 0.5; else n.stuck = Math.max(0, n.stuck - dt); return false; } }
     n.stuck += dt; return false; };
-  const tele = (x, z) => { n.x = x; n.z = z; n.y = groundH(x, z); n.stuck = 0; };
+  const tele = (x, z) => { n.x = x; n.z = z; n.y = standY(x, z); n.stuck = 0; };
   if (dP < 2.3 && !PL.veh && n.mode !== 'travel' && act !== 'fish' && act !== 'exercise') { n.rot = angLerp(n.rot, Math.atan2(PL.x - n.x, PL.z - n.z), Math.min(1, dt * 6)); if (!n.greeted0) { n.greeted0 = true; n.greeted = 1.2; const f = GAME.p ? GAME.p.friend[n.def.id] || 0 : 0; LIVE.emote(n, f >= 8 ? 'heart' : f >= 3 ? 'note' : 'bang', 1.8); } }
   else if (dP > 4) n.greeted0 = false;
   if (n.mode === 'travel' && G0) {
@@ -180,7 +180,7 @@ function liveVillager(n, dt) {
   const pa = SEASON.active && SEASON.active.some(e => e.id === 'matsuri' || e.id === 'tanabata') && hf > 17 && hf < 22 && act !== 'sleep' && n.mode === 'act' && (act === 'chat' || act === 'look' || act === 'stroll');
   const shown = n.mode === 'travel' ? (n.rainy ? 'umb' : act === 'carry' ? 'plank' : null) : pa ? 'uchiwa' : act === 'umb' || (n.rainy && act !== 'sleep') ? 'umb' : PROP_OF[act] || null; showProp(n, shown);
   if (n.greeted > 0) n.greeted -= dt;
-  n.ph += dt * (spd > 0.1 ? (spd > 3 ? 11 : 8.5) : 1.8); n.y = lerp(n.y, groundH(n.x, n.z), Math.min(1, dt * 12)); n.mesh.position.set(n.x, n.y, n.z); n.mesh.rotation.y = n.rot;
+  n.ph += dt * (spd > 0.1 ? (spd > 3 ? 11 : 8.5) : 1.8); { const ty = standY(n.x, n.z); n.y = ty > n.y ? ty : lerp(n.y, ty, Math.min(1, dt * 12)); } n.mesh.position.set(n.x, n.y, n.z); n.mesh.rotation.y = n.rot;
   animateBody(n.parts, n.rest, n.ph, spd, dt, { wave: n.greeted > 0 ? n.greeted : 0, nod: 0 }); if (n.parts.head) n.parts.head.rotation.y = 0; if (n.parts.spine) n.parts.spine.rotation.z = 0;
   if (spd < 0.1 && n.mode === 'act') livePose(n, pa ? 'festival' : n.rainy && act !== 'umb' ? 'umb' : act, t); else if (n.rainy || shown === 'plank') livePose(n, shown === 'plank' ? 'carry' : 'umb', t);
 }

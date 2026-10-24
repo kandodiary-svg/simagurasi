@@ -75,7 +75,9 @@ function updatePlayer(dt, locked) {
     spd = PL.speed;
   } else PL.speed = lerp(PL.speed, 0, Math.min(1, dt * 10));
   const gy = standY(PL.x, PL.z), wade = Math.max(0, -gy - 0.0);
-  PL.y = lerp(PL.y, Math.max(gy, -0.85), Math.min(1, dt * 14));
+  // feet: highest of the centre and 4 points around it (no sinking on slopes); go up at once, come down smoothly
+  let fy = gy; if (gy > 0) for (const [ox, oz] of [[0.2, 0], [-0.2, 0], [0, 0.2], [0, -0.2]]) fy = Math.max(fy, standY(PL.x + ox, PL.z + oz) - 0.04);
+  const ty = Math.max(fy, -0.85); PL.y = ty > PL.y ? ty : lerp(PL.y, ty, Math.min(1, dt * 14));
   PL.mesh.position.set(PL.x, PL.y, PL.z); PL.mesh.rotation.y = PL.rot; PL.mesh.visible = CAM.mode !== 'first';
   animateHero(dt, spd, wade);
 }
@@ -118,8 +120,10 @@ function vehOK(v, x, z, rot) {
 }
 function placeVehicle(v, dt) {
   if (v.kind === 'truck') {
-    const s = Math.sin(v.rot), c = Math.cos(v.rot), hf = standY(v.x + s * 1.1, v.z + c * 1.1), hb = standY(v.x - s * 1.1, v.z - c * 1.1), hl = standY(v.x + c * 0.6, v.z - s * 0.6), hr = standY(v.x - c * 0.6, v.z + s * 0.6);
-    v.y = lerp(v.y, (hf + hb + hl + hr) / 4, dt ? Math.min(1, dt * 12) : 1); v.pitch = lerp(v.pitch, Math.atan2(hb - hf, 2.2), dt ? Math.min(1, dt * 8) : 1); v.roll = lerp(v.roll, Math.atan2(hr - hl, 1.2), dt ? Math.min(1, dt * 8) : 1);
+    // the 4 wheels follow this car's real size (bigger cars used to sink at the ends)
+    const sp = VSPEC.truck, fl = Math.max(1.1, (sp.len || 1.6) * 0.72), wl = Math.max(0.6, (sp.wid || 0.8) * 0.85), s = Math.sin(v.rot), c = Math.cos(v.rot);
+    const W = (a, b) => standY(v.x + s * a + c * b, v.z + c * a - s * b), fL = W(fl, wl), fR = W(fl, -wl), bL = W(-fl, wl), bR = W(-fl, -wl), hf = (fL + fR) / 2, hb = (bL + bR) / 2, hl = (fL + bL) / 2, hr = (fR + bR) / 2;
+    const ty = Math.max((hf + hb + hl + hr) / 4, Math.max(fL, fR, bL, bR) - 0.12); v.y = !dt || ty > v.y ? ty : lerp(v.y, ty, Math.min(1, dt * 12)); v.pitch = lerp(v.pitch, Math.atan2(hb - hf, fl * 2), dt ? Math.min(1, dt * 14) : 1); v.roll = lerp(v.roll, Math.atan2(hr - hl, wl * 2), dt ? Math.min(1, dt * 14) : 1);
     v.mesh.position.set(v.x, v.y, v.z); v.mesh.rotation.set(0, 0, 0); v.mesh.rotateY(v.rot); v.mesh.rotateX(v.pitch); v.mesh.rotateZ(v.roll);
   } else {
     v.bob += dt; const t = performance.now() / 1000;

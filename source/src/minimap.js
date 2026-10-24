@@ -16,7 +16,7 @@ Object.assign(GAME, {
   },
   rebuildMiniBase() { if (!this.p) return; try { this.drawMap(MINI.base, true); } catch (e) { console.warn('minimap', e); } MINI.builtAt = performance.now() / 1000; this.mapDirty = false; },
   whereText() {
-    if (this.inside) return this.visit ? `🏠 ${this.visit.n.def.name}の家（おじゃま中）` : '🏠 あなたの家（家の中）';
+    if (this.inside) return this.place ? `🏢 ${this.placeName(this.place)}（中）` : this.visit ? `🏠 ${this.visit.n.def.name}の家（おじゃま中）` : '🏠 あなたの家（家の中）';
     const x = PL.x, z = PL.z, [i, j] = toIdx(x, z), zn = ZONES[G.zone[j * WORLD.n + i]];
     let lm = null, bd = 45; for (const [id, L] of Object.entries(this.LM)) { if (!LM_LABEL[id] || L.gone) continue; const d = Math.hypot(L.x - x, L.z - z); if (d < bd) { bd = d; lm = id; } }
     const sea = groundH(x, z) < -0.5 && !PL.veh ? false : groundH(x, z) < -0.5;

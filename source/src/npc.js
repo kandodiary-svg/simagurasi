@@ -25,7 +25,7 @@ function spawnVillagers(scene) {
 function spawnOneVillager(scene, d, x, z, label, rot = 0) {
   const m = MODELS[d.id]; if (!m) return null;
   const tag = makeNameTag(label); tag.position.y = 1.5; m.add(tag);
-  const npc = { def: d, mesh: m, tag, x, z, y: groundH(x, z), rot, hx: x, hz: z, state: 'idle', timer: 1 + Math.random() * 3, tx: x, tz: z, ph: Math.random() * 6, speed: 0, talk: 0, line: 0,
+  const npc = { def: d, mesh: m, tag, x, z, y: standY(x, z), rot, hx: x, hz: z, state: 'idle', timer: 1 + Math.random() * 3, tx: x, tz: z, ph: Math.random() * 6, speed: 0, talk: 0, line: 0,
     parts: partsOf(m, ['pelvis', 'spine', 'head', 'thighL', 'thighR', 'shinL', 'shinR', 'upperArmL', 'upperArmR', 'foreArmL', 'foreArmR']) };
   npc.rest = {}; for (const [k, o] of Object.entries(npc.parts)) if (o) npc.rest[k] = o.position.clone();
   scene.add(m); NPCS.push(npc); return npc;
@@ -69,7 +69,7 @@ function updateVillagers(dt, talking) {
       }
     }
     if (n.greeted > 0) n.greeted -= dt;
-    n.ph += dt * (spd > 0.1 ? 8.5 : 1.8); n.y = lerp(n.y, groundH(n.x, n.z), Math.min(1, dt * 12));
+    n.ph += dt * (spd > 0.1 ? 8.5 : 1.8); { const ty = standY(n.x, n.z); n.y = ty > n.y ? ty : lerp(n.y, ty, Math.min(1, dt * 12)); }
     n.mesh.position.set(n.x, n.y, n.z); n.mesh.rotation.y = n.rot;
     animateBody(n.parts, n.rest, n.ph, spd, dt, { wave: n.greeted > 0 && !talking ? n.greeted : 0, nod: talking === n ? performance.now() / 1000 : 0 });
   }

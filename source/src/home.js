@@ -72,7 +72,7 @@ Object.assign(GAME, {
       ROOM.env = new THREE.AmbientLight('#ffffff', 0.15); ROOM.scene.add(ROOM.env);
     }
     if (ROOM.group) ROOM.scene.remove(ROOM.group); ROOM.group = new THREE.Group(); ROOM.scene.add(ROOM.group);
-    const H = this.home(), S = ROOM_SIZES[H.size], W = S.w, D = S.d, WH = 2.8, g = ROOM.group;
+    const H = this.home(), S = ROOM_SIZES[H.size], W = S.w, D = S.d, WH = H.wh || 2.8, g = ROOM.group;
     const fl = new THREE.Mesh(new THREE.PlaneGeometry(W, D), new THREE.MeshStandardMaterial({ map: floorTex(H.floor, W, D), roughness: 0.75 })); fl.rotation.x = -Math.PI / 2; fl.receiveShadow = true; g.add(fl);
     const wm = new THREE.MeshStandardMaterial({ map: wallTex(H.wall), roughness: 0.9 }), base = new THREE.MeshStandardMaterial({ color: '#7a5a3a', roughness: 0.7 });
     const wall = (w, x, z, ry) => { const m = new THREE.Mesh(new THREE.PlaneGeometry(w, WH), wm.clone()); m.material.map = wallTex(H.wall, w); m.position.set(x, WH / 2, z); m.rotation.y = ry; m.receiveShadow = true; g.add(m); const b = new THREE.Mesh(new THREE.BoxGeometry(w, 0.12, 0.04), base); b.position.set(x, 0.06, z); b.rotation.y = ry; g.add(b); };
@@ -80,13 +80,13 @@ Object.assign(GAME, {
     // windows (sky colour follows the time of day)
     ROOM.winMat = new THREE.MeshBasicMaterial({ color: '#bfe4ff', map: ROOM.viewTex || (ROOM.viewTex = txCanvas(128, 100, (x, w, h) => { const gr = x.createLinearGradient(0, 0, 0, h); gr.addColorStop(0, '#9fd2ff'); gr.addColorStop(0.62, '#e8f6ff'); x.fillStyle = gr; x.fillRect(0, 0, w, h); x.fillStyle = '#9ab8c8'; x.beginPath(); x.moveTo(0, 64); x.quadraticCurveTo(30, 50, 62, 62); x.lineTo(62, 66); x.lineTo(0, 66); x.fill(); x.fillStyle = '#4f9cc8'; x.fillRect(0, 64, w, h - 64); x.fillStyle = 'rgba(255,255,255,0.5)'; for (let k = 0; k < 6; k++) x.fillRect(10 + k * 19, 72 + (k % 3) * 8, 12, 2); x.fillStyle = '#ffffff'; x.beginPath(); x.ellipse(90, 22, 18, 7, 0, 0, 7); x.ellipse(78, 25, 12, 6, 0, 0, 7); x.fill(); x.fillStyle = '#6fae4a'; x.fillRect(0, h - 10, w, 10); })) }); const frame = new THREE.MeshStandardMaterial({ color: '#f4f2ec', roughness: 0.5 });
     const win = (x, z, ry) => { const gg = new THREE.Group(); const p = new THREE.Mesh(new THREE.PlaneGeometry(1.3, 1.0), ROOM.winMat); gg.add(p); for (const [w, h, px, py] of [[1.4, 0.07, 0, 0.53], [1.4, 0.07, 0, -0.53], [0.07, 1.1, 0.67, 0], [0.07, 1.1, -0.67, 0], [0.05, 1.0, 0, 0]]) { const f = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.05), frame); f.position.set(px, py, 0.02); gg.add(f); } gg.position.set(x, 1.55, z); gg.rotation.y = ry; g.add(gg); };
-    win(-W / 4, -D / 2 + 0.01, 0); win(W / 4, -D / 2 + 0.01, 0); win(-W / 2 + 0.01, 0, Math.PI / 2);
+    if (!H.plain) { win(-W / 4, -D / 2 + 0.01, 0); win(W / 4, -D / 2 + 0.01, 0); win(-W / 2 + 0.01, 0, Math.PI / 2); }
     // front edge: low sill + door mat to show the exit
     const sill = new THREE.Mesh(new THREE.BoxGeometry(W, 0.1, 0.15), base); sill.position.set(0, 0.05, D / 2); g.add(sill);
     const mat = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 0.6), new THREE.MeshStandardMaterial({ color: '#8a5a3a', roughness: 1 })); mat.rotation.x = -Math.PI / 2; mat.position.set(0, 0.01, D / 2 - 0.4); g.add(mat);
-    const ceil = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.38, 0.12, 20), new THREE.MeshStandardMaterial({ color: '#fff4dc', emissive: new THREE.Color('#ffd9a0'), emissiveIntensity: 0.6 })); ceil.position.set(0, WH - 0.1, 0); g.add(ceil);
+    if (!H.plain) { const ceil = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.38, 0.12, 20), new THREE.MeshStandardMaterial({ color: '#fff4dc', emissive: new THREE.Color('#ffd9a0'), emissiveIntensity: 0.6 })); ceil.position.set(0, WH - 0.1, 0); g.add(ceil); }
     // details: curtains with rods, crown moulding, wall air-con, outlets
-    { const A = archMats(), cm = ROOM.curM || (ROOM.curM = new THREE.MeshStandardMaterial({ map: txCanvas(64, 128, (x, w, h) => { for (let i = 0; i < w; i++) { const f = 0.8 + 0.2 * Math.cos(i / w * Math.PI * 6); x.fillStyle = `rgb(${244 * f},${206 * f},${170 * f})`; x.fillRect(i, 0, 1, h); } }), roughness: 0.9, side: THREE.DoubleSide }));
+    if (!H.plain) { const A = archMats(), cm = ROOM.curM || (ROOM.curM = new THREE.MeshStandardMaterial({ map: txCanvas(64, 128, (x, w, h) => { for (let i = 0; i < w; i++) { const f = 0.8 + 0.2 * Math.cos(i / w * Math.PI * 6); x.fillStyle = `rgb(${244 * f},${206 * f},${170 * f})`; x.fillRect(i, 0, 1, h); } }), roughness: 0.9, side: THREE.DoubleSide }));
       const cur = (x, z, ry) => { const c = sub(g, x, 1.55, z, ry); for (const sx of [-1, 1]) B(c, 0.34, 1.45, 0.05, cm, sx * 0.88, -0.08, 0.09); CY(c, 0.018, 2.2, A.brass, 0, 0.72, 0.1, 6, 0, Math.PI / 2); for (const sx of [-1, 1]) SP(c, 0.035, A.brass, sx * 1.1, 0.72, 0.1, 1, 6); B(c, 1.5, 0.05, 0.14, frame, 0, -0.58, 0.07); };
       cur(-W / 4, -D / 2 + 0.01, 0); cur(W / 4, -D / 2 + 0.01, 0); cur(-W / 2 + 0.01, 0, Math.PI / 2);
       const crown = new THREE.MeshStandardMaterial({ color: '#f6f2ea', roughness: 0.6 }); B(g, W, 0.1, 0.08, crown, 0, WH - 0.05, -D / 2 + 0.04); for (const sx of [-1, 1]) B(g, 0.08, 0.1, D, crown, sx * (W / 2 - 0.04), WH - 0.05, 0);

@@ -146,7 +146,8 @@ function hAt(G, x, z) { // bilinear
   const { n, size } = WORLD, cell = size / (n - 1); const fx = (x + size / 2) / cell, fz = (z + size / 2) / cell;
   const i = clamp(Math.floor(fx), 0, n - 2), j = clamp(Math.floor(fz), 0, n - 2), u = clamp(fx - i, 0, 1), v = clamp(fz - j, 0, 1), H = G.H;
   const a = H[j * n + i], b = H[j * n + i + 1], c = H[(j + 1) * n + i], d = H[(j + 1) * n + i + 1];
-  return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
+  // same triangles as the terrain mesh (diagonal from (i+1,j) to (i,j+1)) so feet sit exactly on the drawn ground
+  return u + v <= 1 ? a + (b - a) * u + (c - a) * v : d + (c - d) * (1 - u) + (b - d) * (1 - v);
 }
 function dinAt(G, x, z) { const { n, size } = WORLD, cell = size / (n - 1); const i = clamp(Math.round((x + size / 2) / cell), 0, n - 1), j = clamp(Math.round((z + size / 2) / cell), 0, n - 1); return G.mask[j * n + i] ? G.din[j * n + i] * cell : -G.dout[j * n + i] * cell; }
 function coastPath(G, a0, a1, inset, step = 0.035) {
