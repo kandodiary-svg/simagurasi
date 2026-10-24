@@ -8482,7 +8482,7 @@ FSH.showHaul = function (title, sub, res) {
   g.el.modal.innerHTML = `<div class="mbox haulbox"><div class="mh"><h2>${title}</h2><span class="isl">${sub}</span><button class="x" data-x="close" aria-label="とじる">×</button></div>
     <p class="small" style="margin:0 0 6px">漁獲 <b>${tot.toFixed(1)}kg</b>（浜値の目安 ${yen(val)}）　魚倉 ${FSH.holdKg().toFixed(0)} / ${HOLD_CAP}kg${res.full ? '　<b style="color:#c33">魚倉がいっぱいで一部を海へもどした</b>' : ''}${res.newZ.length ? `<br>📖 図鑑にのった：${res.newZ.map(esc).join('・')}` : ''}</p>
     <ul class="list haullist">${res.rows.map(r => `<li><span class="ck">${r.by ? BYCATCH[r.id][1] : r.rel ? '🐢' : '🐟'}</span><div><b>${esc(r.name)}</b>${r.n ? ` ×${r.n}` : ''}<div class="sub">${r.note ? esc(r.note) : `最大 ${r.max}cm　${yen(r.ppk)}/kg`}</div></div><span class="rv">${r.kg.toFixed(1)}kg</span></li>`).join('')}</ul>
-    <p class="small" style="margin:6px 0 0">港の近くで船をとめて <b>T</b>（または「水揚げ」ボタン）で、せりに出して売れます。</p></div>`;
+    <p class="small" style="margin:6px 0 0">港の近くで船をとめて <b>T</b>（「水揚げ」ボタン）か、陸の「漁協 出荷所」で売れます。</p></div>`;
   g.el.modal.hidden = false; g.el.modal.querySelector('[data-x="close"]').onclick = () => g.closeModal();
 };
 // ---------- zones ----------
@@ -8641,10 +8641,14 @@ FSH.animNets = function (dt) {
     fi.userData.ph.forEach((q, i) => { const a = q[0] + t * q[2] * (1 + lift * 3); D.position.set(Math.cos(a) * q[1], -0.35 - q[3] * (1 - lift) + lift * 0.25 + (lift > 0.5 && Math.sin(t * 9 + i) > 0.7 ? 0.35 : 0), Math.sin(a) * q[1]); D.rotation.set(0, -a, 0); D.updateMatrix(); fi.setMatrixAt(i, D.matrix); }); fi.instanceMatrix.needsUpdate = true; fi.rotation.y = n.rot; }
 };
 // =================== 水揚げ (landing at the fish market) ===================
-FSH.atHarbor = v => { const H = GAME.LM.harbor; return H && v && Math.hypot(v.x - H.x, v.z - H.z) < 80; };
+FSH.atHarbor = v => { const H = GAME.LM.harbor, S = DECO.ship; return !!(v && ((H && Math.hypot(v.x - H.x, v.z - H.z) < 130) || (S && Math.hypot(v.x - S.x, v.z - S.z) < 130))); };
 FSH.market = id => { const R = mulberry(hashStr(todayKey() + id)); return 0.8 + R() * 0.4; };
 FSH.landKey = function () {
-  const v = PL.veh, H = FSH.hold(), g = GAME; if (!FSH.atHarbor(v)) return UI.toast('水揚げは港で（港の近くまで船をもどそう）'); if (Math.abs(v.v) > 1.5) return UI.toast('船をとめてから水揚げ');
+  return FSH.openLanding(false);
+};
+// fromShop: opened from the 出荷所 on land (no boat checks)
+FSH.openLanding = function (fromShop) {
+  const v = PL.veh, H = FSH.hold(), g = GAME; if (!fromShop) { if (!FSH.atHarbor(v)) return UI.toast('水揚げは港で（港の近くまで船をもどすか、陸の「漁協 出荷所」で売れます）'); if (Math.abs(v.v) > 3) return UI.toast('船をとめてから水揚げ'); }
   const ids = Object.keys(H.fish); if (!ids.length && !(H.by.gomi > 0)) return UI.toast('魚倉はからっぽ');
   const rows = ids.map(id => { const f = FISH.find(q => q.id === id), q = H.fish[id], m = FSH.market(id), ppk = Math.round((NET_PRICE[id] || 500) * m / 10) * 10; return { id, name: f.name, n: q.n, kg: q.kg, ppk, m, val: Math.round(q.kg * ppk) }; }).sort((a, b) => b.val - a.val), tot = rows.reduce((s, r) => s + r.val, 0), kg = rows.reduce((s, r) => s + r.kg, 0);
   g.modal = 'landing'; g.el.modal.innerHTML = `<div class="mbox haulbox"><div class="mh"><h2>⚖️ 水揚げ・せり</h2><span class="isl">${esc(g.p.island)}島 漁協市場</span><button class="x" data-x="close" aria-label="とじる">×</button></div>
@@ -8685,6 +8689,11 @@ FSH.updatePanel = function () {
 { const _b = GAME.begin; GAME.begin = function () { const r = _b.apply(this, arguments); try { FSH.buildNets(); } catch (e) { console.warn('nets', e); } return r; }; }
 // can't get off the boat in the middle of a tow without losing the net; leave warning via toast in updateTrawl
 { const _p = GAME.prompt; GAME.prompt = function () { const v = PL.veh; if (this.p && v && v.kind === 'boat' && !LIFE.fish && !this.modal) { if (FSH.trawl) return FSH.trawl.phase === 'tow' ? 'N：網を揚げる　（ゆっくり引く：最大2.4m/s）' : ''; if (FSH.lift) return ''; } return _p.apply(this, arguments); }; }
+
+// the 出荷所 on land also buys what is in the boat's hold
+{ const _os = GAME.openShip; GAME.openShip = function () { const r = _os.apply(this, arguments); try { const kg = FSH.holdKg(), H = FSH.hold(); if (kg > 0.05 || H.by.gomi > 0) { const mb = this.el.modal.querySelector('.mb'); if (mb) { const emp = mb.querySelector('.empty'); if (emp) emp.remove(); mb.insertAdjacentHTML('afterbegin', `<div class="holdsell" style="display:flex;align-items:center;gap:10px;padding:10px 12px;margin:0 0 10px;border-radius:12px;background:#e8f3ff"><span style="font-size:22px">🚢</span><div style="flex:1"><b>漁船の魚倉 ${kg.toFixed(1)}kg</b><div class="small">網でとった魚は kg ごとに、今日の相場で買いとります</div></div><button class="primary" data-hold="1" style="padding:8px 14px">水揚げする</button></div>`); mb.querySelector('[data-hold]').onclick = e => { e.stopPropagation(); FSH.openLanding(true); }; } } } catch (e) { console.warn('holdsell', e); } return r; }; }
+// remind the player where to sell when coming back to the harbor with a full hold
+{ const _u2 = GAME.update; GAME.update = function (dt) { const r = _u2.apply(this, arguments); try { const v = PL.veh; if (this.p && v && v.kind === 'boat' && !this.modal) { const at = FSH.atHarbor(v); if (at && !FSH._wasAt && FSH.holdKg() > 1) UI.toast(`⚖️ 港に着いた。T で水揚げ（魚倉 ${FSH.holdKg().toFixed(0)}kg）`); FSH._wasAt = at; } } catch (e) { } return r; }; }
 
 // ===================== 島の収益: 建物ごとに1時間あたりの売上が入りつづける（留守のあいだも最大24時間分） =====================
 const REV = { acc: 0, t: 0, shown: 0, lastPay: 0 };
