@@ -1,0 +1,4 @@
+build.js veg.js actors.js npc.js edit.js ui.js roads2.js game.js letter.js meeting.js life.js economy.js dev.js devbuild.js arch.js devarch.js home.js furniture.js minimap.js sound.js season.js nature.js lively.js bugs.js visit.js story.js housemove.js highrise.js resort.js bridges.js citybuild.js city.js demo.js democity.js
+fishing2.js
+fishery.js
+income.js main.js

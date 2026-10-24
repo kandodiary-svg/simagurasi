@@ -1,0 +1,67 @@
+ほしなみ島ぐらし — 音の出典 / Sound credits
+
+BGM: Sunny_Little_Village.mp3（制作者から提供）
+
+■ Freesound（すべて CC0 / Public Domain）
+- Ocean Waves.wav by Noted451  (https://freesound.org/s/531015/)  → amb_sea
+- Gentle small waves lapping on shore.wav by Alex_hears_things  (https://freesound.org/s/352356/)  → amb_sea_lap
+- AkasakaHieJinjaCicadas_4mics.wav by markystar  (https://freesound.org/s/79086/)  → amb_cicada
+- Japan_Kashiwa_Insects_Far_and_Upclose.wav by RutgerMuller  (https://freesound.org/s/365257/)  → amb_insects
+- crickets by FreethinkerAnon  (https://freesound.org/s/129678/)  → amb_crickets
+- Morning-Birds.mp3 by dadshb1489  (https://freesound.org/s/390563/)  → amb_birds
+- bird chirps5.wav by keweldog  (https://freesound.org/s/184870/)  → amb_birds_day
+- bush_warbler.wav by Heigh-hoo  (https://freesound.org/s/32295/)  → uguisu
+- Seagulls_short.wav by Lydmakeren  (https://freesound.org/s/510917/)  → seagulls
+- Seagull single call by steaq  (https://freesound.org/s/263786/)  → seagull
+- crow.wav by nigelcoop  (https://freesound.org/s/75162/)  → crow
+- Crow Caw by Jofae  (https://freesound.org/s/361470/)  → crow1
+- a gentle breeze, wind 3 by mario1298  (https://freesound.org/s/181252/)  → amb_wind
+- Rain light 2 (rural) by jmbphilmes  (https://freesound.org/s/200273/)  → amb_rain
+- Waterfall by nsmusic  (https://freesound.org/s/321886/)  → amb_waterfall
+- Stream, Running Water | Aviemore Scotland by BurghRecords  (https://freesound.org/s/415151/)  → amb_stream
+- Bonfire by forfie  (https://freesound.org/s/364992/)  → amb_fire
+- Frogs on a summer night 3.MP3 by macdaddyno1  (https://freesound.org/s/396490/)  → amb_frogs
+- Furin japanese wind chime.wav by ayustat2001  (https://freesound.org/s/501168/)  → furin
+- Fireworks display 2    by waxsocks  (https://freesound.org/s/254836/)  → fw_bang0, fw_bang1, fw_bang2, fw_bang3, fw_bang4
+- Fireworks Crackle by 16FThumaF  (https://freesound.org/s/505264/)  → fw_crackle
+- Construction Sounds Hammering a Nail by deleted_user_7146007  (https://freesound.org/s/383726/)  → amb_build
+- Japan_Matsudo_Small_Truck_Idle_Engine.wav by RutgerMuller  (https://freesound.org/s/364819/)  → eng_truck
+- Car Ignition Key - Engine Starting Running Idle 2.wav by RutgerMuller  (https://freesound.org/s/50898/)  → car_start
+- car door close.wav by monotraum  (https://freesound.org/s/208695/)  → car_door
+- Diesel motor on Fishing Boat.MP3 by Bansemer  (https://freesound.org/s/35499/)  → eng_boat
+- engine_vibrations_of_ferry_2.WAV by ivolipa  (https://freesound.org/s/344948/)  → eng_ferry
+- Staten Island Ferry Horn (Close).mp3 by nathanvladimirovich  (https://freesound.org/s/261847/)  → horn
+- Bus Motor/Engine Sound Loop by qubodup  (https://freesound.org/s/54909/)  → eng_bus
+- Bus Closing Door by am7  (https://freesound.org/s/520753/)  → bus_door
+- Foot_Step_grit_Sand.wav by savataivanov  (https://freesound.org/s/384082/)  → step_sand0, step_sand1, step_sand2, step_sand3, step_sand4
+- Footsteps Dirt Gravel by PotatokingXII  (https://freesound.org/s/352870/)  → step_gravel0, step_gravel1, step_gravel2, step_gravel3, step_gravel4
+- Splashing Footsteps Shallow Water by ChristopherJngs  (https://freesound.org/s/861369/)  → step_water0, step_water1, step_water2, step_water3, step_water4
+- wooden sliding door by Diramus  (https://freesound.org/s/346776/)  → slide_door0, slide_door1
+- Mailbox Metal Flap.wav by RutgerMuller  (https://freesound.org/s/50736/)  → mailbox
+- Cash Register Purchase by Zott820  (https://freesound.org/s/209578/)  → register
+- Vending machine by Emma7073  (https://freesound.org/s/250194/)  → vending
+- Fishing Rod Cast - Swoosh by mwchristian95  (https://freesound.org/s/725426/)  → cast
+- Splash by swordofkings128  (https://freesound.org/s/398032/)  → splash
+- FishingRod Winding.aif by esperri  (https://freesound.org/s/118973/)  → reel_loop
+- Small Water Spill by Braleven  (https://freesound.org/s/319418/)  → plop
+- Shovel_dirt.wav by dr19  (https://freesound.org/s/353907/)  → shovel0, shovel1, shovel2
+- Digging in wet course sand (1) by f3bbbo  (https://freesound.org/s/651292/)  → dig
+- A Tree Falling Down.wav by ecfike  (https://freesound.org/s/139952/)  → tree_fall
+- Rustling leaves by giddster  (https://freesound.org/s/437356/)  → rustle, rustle2
+- Success Jingle by Kastenfrosch  (https://freesound.org/s/521949/)  → jingle
+- Congrats by Fupicat  (https://freesound.org/s/607207/)  → congrats
+- WinFantasia.wav by Fupicat  (https://freesound.org/s/521645/)  → levelup
+- smallcrowd.wav by moxobna  (https://freesound.org/s/32260/)  → applause
+- Old Church Bell.wav by dsp9000  (https://freesound.org/s/76405/)  → bell
+- hammering 2.wav by cognito perceptu  (https://freesound.org/s/17012/)  → hammer0, hammer1, hammer2, hammer3
+
+■ 効果音ラボ（https://soundeffect-lab.info/ 利用規約に基づく。クレジット不要・ゲームへの組込み可・素材の再配布は禁止）
+- animal/mp3/minminzemi-cry1.mp3 → amb_minmin
+- animal/mp3/aburazemi-cry1.mp3 → amb_abura
+- animal/mp3/higurashi-cry1.mp3 → higurashi1, higurashi2
+- animal/mp3/tsukutsukuboushi-cry1.mp3 → tsukutsuku
+
+■ Kenney（https://kenney.nl  CC0）: RPG Audio / Impact Sounds / Interface Sounds
+- 足音（草・コンクリート・木・カーペット）、ドア、コイン、本・紙、布、UIの音、物を置く音
+
+話し声の「ポポポ」は WebAudio でその場で合成しています。
