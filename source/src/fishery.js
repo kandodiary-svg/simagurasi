@@ -256,7 +256,7 @@ FSH.panelEl = null;
 FSH.updatePanel = function () {
   const v = PL.veh, show = GAME.p && !GAME.modal && v && v.kind === 'boat' && !EDIT.on && !GAME.inside; let el = FSH.panelEl;
   if (!show) { if (el) el.hidden = true; return; }
-  if (!el) { el = FSH.panelEl = document.createElement('div'); el.id = 'boatPanel'; document.getElementById('game').appendChild(el); el.addEventListener('click', e => { const b = e.target.closest('[data-f]'); if (!b || b.disabled) return; e.stopPropagation(); const f = b.dataset.f; if (f === 'trawl') FSH.trawlKey(); else if (f === 'set') FSH.setKey(); else if (f === 'land') FSH.landKey(); else if (f === 'rm') { const n = FSH.nearNet(PL.veh.x, PL.veh.z); if (n) FSH.removeNet(n); } else if (f === 'fish') GAME.fishKey(); FSH._ph = ''; document.getElementById('c').focus(); }); }
+  if (!el) { el = FSH.panelEl = document.createElement('div'); el.id = 'boatPanel'; document.getElementById('game').appendChild(el); el.addEventListener('click', e => { const b = e.target.closest('[data-f]'); if (!b || b.disabled) return; e.stopPropagation(); const f = b.dataset.f; if (f === 'trawl') FSH.trawlKey(); else if (f === 'set') FSH.setKey(); else if (f === 'land') FSH.landKey(); else if (f === 'rm') { const n = FSH.nearNet(PL.veh.x, PL.veh.z); if (n) FSH.removeNet(n); } else if (f === 'fish') GAME.fishKey(); const bb = el.querySelector('.bp-btns'); if (bb) bb._h = ''; document.getElementById('c').focus(); }); }
   el.hidden = false; const fb = FSH.isFishingBoat(v), T = FSH.trawl, dp = FSH.depth(v.x, v.z), hk = FSH.holdKg(), near = fb && FSH.nearNet(v.x, v.z), harbor = FSH.atHarbor(v), c = FISHX.cond('sea'), td = TIDE.at(currentHour(), c.a);
   const kmh = Math.abs(v.v) * 1.944; // knots
   const rows = [];
@@ -270,9 +270,12 @@ FSH.updatePanel = function () {
       + (near ? `<button data-f="set">🧺 網起こし（約${Math.round(FSH.netKg(near))}kg） <kbd>O</kbd></button>` : `<button data-f="set" ${T ? 'disabled' : ''}>🧺 定置網を設置 <kbd>O</kbd></button>`)
       + (harbor ? `<button data-f="land" class="hot">⚖️ 水揚げ <kbd>T</kbd></button>` : '') + `<button data-f="fish">🎣 竿釣り <kbd>F</kbd></button>` + (near ? `<button data-f="rm" class="sm">撤去</button>` : '') + `</div>`);
   } else rows.push(`<div class="bp-tr">網の漁は漁船で（ガレージで乗りかえ）。🎣 F で竿釣りはできます</div>`);
-  const html = rows.join(''); if (FSH._ph !== html) { el.innerHTML = html; FSH._ph = html; }
+  // info and buttons are kept in separate boxes so the buttons are not rebuilt while you click them
+  if (!el.querySelector('.bp-info')) el.innerHTML = '<div class="bp-info"></div><div class="bp-btns"></div>';
+  const btnI = rows.findIndex(r => r.startsWith('<div class="bp-b">')), info = rows.filter((r, i) => i !== btnI).join(''), btns = btnI >= 0 ? rows[btnI] : '';
+  const bi = el.querySelector('.bp-info'), bb = el.querySelector('.bp-btns'); if (bi._h !== info) { bi.innerHTML = info; bi._h = info; } if (bb._h !== btns) { bb.innerHTML = btns; bb._h = btns; }
 };
-{ const st = document.createElement('style'); st.textContent = `#boatPanel{position:absolute;right:196px;bottom:112px;z-index:11;background:rgba(255,255,255,.93);border-radius:14px;padding:8px 10px;width:250px;max-width:calc(100vw - 32px);box-shadow:0 4px 14px rgba(0,0,0,.16);font-size:12px;color:#234}
+{ const st = document.createElement('style'); st.textContent = `#boatPanel{pointer-events:auto;position:absolute;right:196px;bottom:112px;z-index:11;background:rgba(255,255,255,.93);border-radius:14px;padding:8px 10px;width:250px;max-width:calc(100vw - 32px);box-shadow:0 4px 14px rgba(0,0,0,.16);font-size:12px;color:#234}
 #boatPanel .bp-h{display:flex;gap:8px;align-items:baseline;font-weight:800}#boatPanel .bp-h span{font-weight:400;color:#456}#boatPanel .bp-t{color:#567;margin:2px 0 4px}#boatPanel .bp-hold{display:flex;align-items:center;gap:6px}#boatPanel .bp-hold .bar{flex:1;height:8px;background:#e2e8ec;border-radius:5px;overflow:hidden}#boatPanel .bp-hold i{display:block;height:100%;background:#3a8ad0}
 #boatPanel .bp-tr{margin-top:4px;font-weight:700;color:#a0502a}#boatPanel .bp-b{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px}#boatPanel button{flex:1 1 46%;padding:6px 6px;border-radius:9px;border:1px solid #c8d4dc;background:#f6f9fb;font-size:12px;font-weight:700;color:#234;cursor:pointer}#boatPanel button:disabled{opacity:.45}#boatPanel button.hot{background:#ffe9a8;border-color:#e8c050}#boatPanel button.sm{flex:0 0 auto;font-weight:400}#boatPanel kbd{font-size:10px;opacity:.6}
 @media (max-width:600px){#boatPanel{bottom:auto;top:58px;right:8px;width:220px}}.haullist li{display:flex;align-items:center;gap:8px}.haullist .rv{margin-left:auto;font-weight:800;white-space:nowrap}`; document.head.appendChild(st); }
