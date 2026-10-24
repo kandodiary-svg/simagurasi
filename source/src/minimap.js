@@ -1,6 +1,6 @@
 // ===================== いつも右下に出る小さな地図（現在地・場所の名前） =====================
 const MINI = { base: null, t: 0, builtAt: -99, view: 170 };
-const LM_LABEL = { falls: '滝', light: '灯台', church: '教会', peak: '見晴らしの丘のてっぺん', mikan: 'みかん畑', beach: '夕日の浜', islet: 'はなれ小島', harbor: '港', home: 'あなたの家', hall: '集会所', ship: '漁協 出荷所', shop: '商店', motors: '島モータース' };
+const LM_LABEL = { falls: '滝', light: '灯台', church: '神社', peak: '見晴らしの丘のてっぺん', mikan: 'みかん畑', beach: '夕日の浜', islet: 'はなれ小島', harbor: '港', home: 'あなたの家', hall: '集会所', ship: '漁協 出荷所', shop: '商店', motors: '島モータース' };
 Object.assign(GAME, {
   startAtHome() { // つづきから: always wake up in front of your own house, vehicles parked at home / harbor
     PL.veh = null; PL.x = this.spawn.x; PL.z = this.spawn.z; PL.rot = this.spawn.rot; PL.y = standY(PL.x, PL.z); PL.mesh.visible = true;

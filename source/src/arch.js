@@ -3,8 +3,8 @@
 // Static buildings are merged per material by mergeStatic(); dynamic ones use mergeLocal().
 const AM = { ok: false };
 const stdM = (c, r = 0.6, m = 0, ex = {}) => new THREE.MeshStandardMaterial(Object.assign({ color: c, roughness: r, metalness: m }, ex));
-const SIDING_COLS = ['#fbf3e2', '#d4e9f6', '#dff1da', '#ffe3cf', '#fff0bf', '#fde0e7', '#e6e0f5', '#f6f6f2'];
-const SHINGLE_COLS = ['#d0645a', '#4f86c0', '#5f9e70', '#e09048', '#7d6bb8', '#8a5a48', '#4a5560'];
+const SIDING_COLS = ['#f3efe6', '#e4ddcf', '#cfc7b9', '#a99d8a', '#8a8478', '#5e6064', '#ece6da', '#f6f6f2'];
+const SHINGLE_COLS = ['#3b3d42', '#4a4f58', '#5a4636', '#6b6f75', '#3a4656', '#6e3a30', '#4f5a4a'];
 const CURTAIN_COLS = ['#f2a7b8', '#9fcbe8', '#f6d27a', '#a8d8a0', '#f4f0e6', '#c9b2e6', '#f0b48a'];
 const SHUTTER_COLS = ['#5a8fc8', '#4f9a72', '#d86a6a', '#f2f0ea', '#e8a34a', '#7a6ab0'];
 const DOOR_COLS = ['#c85a4a', '#3f72b0', '#4f8f62', '#f2efe6', '#7a5238', '#e7b545', '#5e5aa6'];
@@ -238,7 +238,7 @@ function makeHouse(hs) {
   const pick = a => a[Math.floor(R() * a.length)];
   const cur = Math.floor(R() * A.win.length), cur2 = Math.floor(R() * A.win.length);
   const wallM = hs.wallM || (minka ? pick(AM.plaster) : shop ? A.siding[0] : pick(A.siding));
-  const trimM = minka ? MAT.darkwood : A.trim;
+  const trimM = minka ? MAT.darkwood : (A.trimJ || (A.trimJ = stdM('#8c877e', 0.55, 0.2)));
   // ----- foundation, base flashing, walls -----
   B(g, W + 0.14, B0, D + 0.14, A.found, 0, B0 / 2, 0);
   for (const s of [-1, 1]) for (let k = 0; k < Math.floor(W / 2.4); k++) B(g, 0.36, 0.12, 0.03, A.vent, -W / 2 + (k + 0.5) * W / Math.floor(W / 2.4), B0 * 0.5, s * (D / 2 + 0.075));
@@ -255,10 +255,10 @@ function makeHouse(hs) {
   }
   // ----- balcony (2-storey) -----
   let bal = null;
-  if (hs.floors > 1 && !shop && (modern || R() < 0.5)) { const bw = Math.min(W * 0.5, 3.8), side = R() < 0.5 ? -1 : 1; bal = { x: side * (W / 2 - bw / 2 - 0.35), w: bw }; balconyPart(g, bal.x, B0 + fh + 0.05, D / 2, bw, 1.05, { rail: minka ? MAT.darkwood : null, laundry: R() < 0.7, seed: hs.seed }); }
+  if (hs.floors > 1 && !shop && (modern || R() < 0.5)) { const bw = Math.min(W * 0.5, 3.8), side = R() < 0.5 ? -1 : 1; bal = { x: side * (W / 2 - bw / 2 - 0.35), w: bw }; balconyPart(g, bal.x, B0 + fh + 0.05, D / 2, bw, 1.05, { rail: minka ? MAT.darkwood : (A.aluFence || (A.aluFence = stdM('#4a3e36', 0.45, 0.5))), laundry: R() < 0.7, seed: hs.seed }); }
   // ----- windows -----
-  const shut = modern && R() < 0.65 ? pick(A.louver) : null, boxes = modern ? R() < 0.7 : R() < 0.3;
-  const wopt = minka ? { style: 'slide', trim: MAT.darkwood, sash: A.sashBr, cur } : { style: 'cross', trim: A.trim, cur, shutter: shut };
+  const shut = null, boxes = modern ? R() < 0.7 : R() < 0.3;
+  const wopt = minka || modern ? { style: 'slide', trim: minka ? MAT.darkwood : (A.trimJ || (A.trimJ = stdM('#8c877e', 0.55, 0.2))), sash: A.sashBr, cur } : { style: 'cross', trim: A.trim, cur, shutter: shut };
   for (let f = 0; f < hs.floors; f++) {
     const y = B0 + f * fh + 1.45, nf = Math.max(1, Math.floor(W / 2.8));
     for (let k = 0; k < nf; k++) { const x = -W / 2 + (k + 0.5) * W / nf;
@@ -274,21 +274,21 @@ function makeHouse(hs) {
   // gable round window (cute) for western houses
   // ----- roof -----
   const over = minka ? 0.75 : 0.55, rise = modern ? 1.75 : shop ? 1.6 : (hs.hip ? 2.0 : 2.3);
-  const rm = hs.roofM || (modern ? pick(A.shingle) : shop ? MAT.metalRoof[1] : (R() < 0.45 ? MAT.kawaraRed : R() < 0.75 ? MAT.kawara : pick(MAT.metalRoof)));
+  const rm = hs.roofM || (modern ? (R() < 0.55 ? MAT.kawara : pick([MAT.metalRoof[4], MAT.metalRoof[0], AM.slateJ || (AM.slateJ = new THREE.MeshStandardMaterial({ map: TEX.kawara, color: '#55585e', roughness: 0.55, metalness: 0.2 }))])) : shop ? MAT.metalRoof[1] : (R() < 0.45 ? MAT.kawaraRed : R() < 0.75 ? MAT.kawara : pick(MAT.metalRoof)));
   const hip = minka && hs.hip, y1 = rise * over / (D / 2 + over), rbase = B0 + H - y1;
   roofPart(g, { W, D, over, rise, hip, rbase, mat: rm, soffit: minka ? A.soffitWood : A.soffit, fascia: minka ? MAT.darkwood : A.trim, gutterM: minka ? A.gutterBr : A.gutter, wallTop: B0 + H });
-  if (!hip) { gableFill(g, W, D, rise, y1, B0 + H, minka ? A.yakisugi : wallM); if (!minka && W > 5) for (const sx of [-1, 1]) winPart(g, sx * (W / 2 + 0.01), B0 + H + (rise - y1) * 0.42, 0, sx * Math.PI / 2, 0.55, 0.55, { style: 'round', trim: A.trim, cur }); }
+  if (!hip) { gableFill(g, W, D, rise, y1, B0 + H, minka ? A.yakisugi : wallM);  }
   if (modern && R() < 0.4) { CY(g, 0.09, 1.0, AM.dark, W / 4, rbase + rise * 0.6 + 0.4, -D / 4, 8); CY(g, 0.15, 0.08, AM.dark, W / 4, rbase + rise * 0.6 + 0.92, -D / 4, 8); }
   // ----- entrance -----
   const doorM = pick(A.door);
-  if (!shop) { if (minka) doorJapanese(g, 0, D / 2, B0, { roofM: rm === MAT.kawara || rm === MAT.kawaraRed ? rm : MAT.kawara }); else doorWestern(g, 0, D / 2, B0, { door: doorM, roofM: rm }); }
+  if (!shop) doorJapanese(g, 0, D / 2, B0, { roofM: rm === MAT.kawara || rm === MAT.kawaraRed ? rm : minka ? MAT.kawara : rm });
   // ----- side & back equipment -----
   acUnit(g, W / 2 + 0.3, -D / 4, Math.PI / 2); B(g, 0.12, Math.min(H - 0.6, 2.6), 0.12, A.acBody, W / 2 + 0.07, B0 + 1.3, -D / 4 + 0.25);
   if (minka || R() < 0.5) gasTanks(g, -W / 2 + 0.9, -D / 2 - 0.35, Math.PI); else heatPump(g, -W / 2 - 0.42, -D / 2 + 0.8, -Math.PI / 2);
   B(g, 0.3, 0.42, 0.14, A.meter, W / 2 - 0.6, B0 + 1.0, -D / 2 - 0.08);
   // ----- garden -----
   const fz = D / 2 + 2.6, fw = W + 2.4;
-  const beds = !minka || R() < 0.4;
+  const beds = R() < 0.25;
   if (minka) { // low block wall topped with a clipped hedge, stone gate posts
     for (const sx of [-1, 1]) { const len = fw / 2 - 1.0, cx = sx * (fw / 4 + 0.5); B(g, len, 0.5, 0.2, A.block, cx, 0.25, fz); B(g, len + 0.04, 0.06, 0.26, A.block, cx, 0.53, fz); B(g, len - 0.06, 0.55, 0.5, A.hedge, cx, 0.85, fz - 0.05); B(g, len - 0.2, 0.12, 0.38, A.hedge, cx, 1.16, fz - 0.05);
       B(g, 0.2, 0.5, (fz - D / 2) - 0.2, A.block, sx * fw / 2, 0.25, (D / 2 + fz) / 2); B(g, 0.45, 0.5, (fz - D / 2) - 0.4, A.hedge, sx * fw / 2 - sx * 0.12, 0.78, (D / 2 + fz) / 2);
@@ -296,21 +296,25 @@ function makeHouse(hs) {
     for (let k = 0; k < 3; k++) { const st = CY(g, 0.32 + R() * 0.08, 0.08, A.flag, (R() - 0.5) * 0.3, 0.04, D / 2 + 1.0 + k * 0.62, 7); st.rotation.y = R() * 3; }
     if (!beds) { shrub(g, -W / 2 + 0.9, D / 2 + 1.3, 0.55, R); shrub(g, W / 2 - 1.2, D / 2 + 1.2, 0.45, R); if (R() < 0.6) stoneLantern(g, W / 2 - 2.4, D / 2 + 1.7); }
     for (let k = 0; k < 3; k++) pottedPlant(g, -1.5 - k * 0.45, D / 2 + 0.35, false, R);
-  } else { // white picket fence, square pavers, flower beds with brick edging
-    const n = Math.floor(fw / 0.3);
-    for (let k = 0; k <= n; k++) { const x = -fw / 2 + k * fw / n; if (Math.abs(x) < 1.0) continue; B(g, 0.09, 0.8, 0.045, MAT.fence, x, 0.42, fz); const tip = new THREE.Mesh(new THREE.ConeGeometry(0.065, 0.12, 4), MAT.fence); tip.position.set(x, 0.88, fz); tip.rotation.y = Math.PI / 4; g.add(tip); }
-    for (const sx of [-1, 1]) { B(g, fw / 2 - 1.0, 0.07, 0.04, MAT.fence, sx * (fw / 4 + 0.5), 0.62, fz - 0.04); B(g, fw / 2 - 1.0, 0.07, 0.04, MAT.fence, sx * (fw / 4 + 0.5), 0.3, fz - 0.04);
-      for (const px of [sx * 1.0, sx * fw / 2]) { B(g, 0.16, 1.0, 0.16, MAT.fence, px, 0.5, fz); SP(g, 0.1, MAT.fence, px, 1.06, fz, 1, 8); }
-      const sideN = Math.floor((fz - D / 2) / 0.3); for (let k = 0; k < sideN; k++) B(g, 0.045, 0.8, 0.09, MAT.fence, sx * fw / 2, 0.42, D / 2 + 0.1 + k * 0.3); B(g, 0.04, 0.07, fz - D / 2, MAT.fence, sx * fw / 2, 0.62, (D / 2 + fz) / 2); }
-    for (const pz of [1.85, 2.3]) B(g, 0.85, 0.06, 0.4, A.pave, 0, 0.03, D / 2 + pz);
-    for (let k = 0; k < 3; k++) pottedPlant(g, W / 2 - 0.5 - k * 0.48, D / 2 + 0.4, k === 0, R);
+  } else { // ブロック塀 + アルミフェンス, 門柱, concrete approach (a Japanese modern house)
+    const alu = A.aluFence || (A.aluFence = stdM('#4a3e36', 0.45, 0.5)), cap = A.block;
+    for (const sx of [-1, 1]) { const len = fw / 2 - 1.1, cx = sx * (fw / 4 + 0.55); B(g, len, 0.6, 0.15, A.block, cx, 0.3, fz); B(g, len + 0.04, 0.05, 0.19, cap, cx, 0.62, fz);
+      for (let k = 0; k <= Math.floor(len / 0.12); k++) B(g, 0.03, 0.6, 0.03, alu, cx - len / 2 + k * 0.12, 0.95, fz); B(g, len, 0.05, 0.05, alu, cx, 1.27, fz);
+      B(g, 0.15, 0.6, fz - D / 2 - 0.2, A.block, sx * fw / 2, 0.3, (D / 2 + fz) / 2);
+      B(g, 0.42, 1.25, 0.42, A.block, sx * 1.05, 0.62, fz); B(g, 0.48, 0.06, 0.48, cap, sx * 1.05, 1.27, fz); }
+    { const np = stdM('#e8e2d2', 0.5); B(g, 0.3, 0.12, 0.02, np, -1.05, 1.02, fz + 0.22); B(g, 0.1, 0.14, 0.03, AM.dark, -1.05, 0.82, fz + 0.22); }
+    B(g, 1.9, 0.05, fz - D / 2, A.pave, 0, 0.03, (D / 2 + fz) / 2);
+    for (let k = 0; k < 2; k++) pottedPlant(g, W / 2 - 0.5 - k * 0.48, D / 2 + 0.4, k === 0, R);
     if (R() < 0.5) shrub(g, -W / 2 - 0.3, -D / 2 + 0.6, 0.5, R);
   }
-  if (beds) for (const sx of [-1, 1]) { const bx = sx * (W / 4 + 0.6), bw = W / 2 - 1.4; B(g, bw + 0.14, 0.2, 0.92, A.brick, bx, 0.1, D / 2 + 1.35); B(g, bw, 0.2, 0.78, MAT.soil, bx, 0.11, D / 2 + 1.35);
+  if (beds) for (const sx of [-1, 1]) { const bx = sx * (W / 4 + 0.6), bw = W / 2 - 1.4; B(g, bw + 0.14, 0.2, 0.92, A.block, bx, 0.1, D / 2 + 1.35); B(g, bw, 0.2, 0.78, MAT.soil, bx, 0.11, D / 2 + 1.35);
     for (let k = 0; k < 9; k++) { const fx = bx - (bw - 0.2) / 2 + k * (bw - 0.2) / 8, fzz = D / 2 + 1.2 + (k % 2) * 0.3; SP(g, 0.14, k % 2 ? A.plant : A.plant2, fx, 0.3, fzz, 0.7, 7); SP(g, 0.09, MAT.flowers[(k + Math.floor(R() * 5)) % 5], fx + 0.03, 0.46, fzz + 0.02, 0.8, 6); SP(g, 0.07, MAT.flowers[(k + 2) % 5], fx - 0.06, 0.42, fzz - 0.04, 0.8, 5); } }
   if (R() < 0.35 && !shop) bicycle(g, -W / 2 - 0.55, D / 2 - 0.9, 0.15, pick(A.bike));
   // mailbox (by the gate)
-  { const mbc = MAT.flowers[Math.floor(R() * 5)]; B(g, 0.07, 1.0, 0.07, MAT.darkwood, 1.4, 0.5, fz + 0.25); B(g, 0.38, 0.3, 0.48, mbc, 1.4, 1.1, fz + 0.25); const mt = new THREE.Mesh(new THREE.CylinderGeometry(0.19, 0.19, 0.48, 12, 1, false, 0, Math.PI), mbc); mt.rotation.set(Math.PI / 2, 0, Math.PI / 2); mt.position.set(1.4, 1.25, fz + 0.25); mt.castShadow = true; g.add(mt); B(g, 0.2, 0.03, 0.02, AM.dark, 1.4, 1.15, fz + 0.5); }
+  { const mb = A.mailbox || (A.mailbox = stdM('#3e4246', 0.45, 0.4)); B(g, 0.36, 0.42, 0.14, mb, 1.05, 0.95, fz + 0.29); B(g, 0.26, 0.03, 0.02, AM.dark, 1.05, 1.06, fz + 0.37); }
+  // laundry pole in the back yard, a persimmon tree by the side (orange fruit in autumn)
+  if (!shop && R() < 0.5) laundryPole(g, (R() - 0.5) * (W - 3), -D / 2 - 1.1, R);
+  if (!shop && (minka ? R() < 0.45 : R() < 0.15)) persimmon(g, (R() < 0.5 ? -1 : 1) * (W / 2 + 1.0), -D / 4, R);
   if (shop) shopFront(g, hs, { W, D, B0, H, fh, rm, R });
   // colliders (same footprint as before)
   { const cs = Math.cos(hs.rot), sn = Math.sin(hs.rot);
@@ -348,3 +352,12 @@ function shopFront(g, hs, o) {
 }
 function pick2(a, R) { return a[Math.floor(R() * a.length)]; }
 function updateArchLights(night) { if (!AM.ok) return; for (const m of AM.win) m.emissiveIntensity = night * 1.1; AM.koshi.emissiveIntensity = night * 0.9; AM.disp.emissiveIntensity = 0.05 + night * 1.0; AM.vendFace.emissiveIntensity = 0.15 + night * 0.9; }
+
+// 物干し: two T-posts, a pole and a few things drying
+function laundryPole(g, x, z, R) { const s = sub(g, x, 0, z), m = stdM('#b8bcc0', 0.4, 0.6); for (const sx of [-1, 1]) { B(s, 0.06, 1.85, 0.06, m, sx * 1.1, 0.92, 0); B(s, 0.06, 0.06, 0.5, m, sx * 1.1, 1.8, 0); } CY(s, 0.02, 2.4, m, 0, 1.84, 0.18, 6, 0, Math.PI / 2); CY(s, 0.02, 2.4, m, 0, 1.84, -0.18, 6, 0, Math.PI / 2);
+  const cols = ['#ffffff', '#e8eef6', '#f4d8d8', '#d8e8d8', '#3a4a6a', '#f2e6c8']; let x0 = -0.9; for (let k = 0; k < 4; k++) { const w = 0.35 + R() * 0.3, h = 0.4 + R() * 0.45, c = new THREE.Mesh(new THREE.PlaneGeometry(w, h), stdM(cols[Math.floor(R() * cols.length)], 0.9, 0, { side: THREE.DoubleSide })); c.position.set(x0 + w / 2, 1.82 - h / 2, 0.18); c.castShadow = true; s.add(c); x0 += w + 0.12; if (x0 > 0.9) break; } }
+// 柿の木
+function persimmon(g, x, z, R) { const s = sub(g, x, 0, z), month = new Date().getMonth() + 1, fruit = month >= 9 || month <= 1, leafCol = month >= 11 || month <= 2 ? '#c8783a' : month >= 10 ? '#8a8a3a' : '#4f7a34';
+  const tr = CY(s, 0.11, 1.4, stdM('#5a4636', 0.9), 0, 0.7, 0, 7); const br = CY(s, 0.06, 0.9, stdM('#5a4636', 0.9), 0.25, 1.5, 0, 6); br.rotation.z = -0.6;
+  const lm = stdM(leafCol, 0.85); for (let k = 0; k < 5; k++) { const a = k / 5 * 6.28; SP(s, 0.55 + R() * 0.2, lm, Math.cos(a) * 0.5, 1.9 + R() * 0.4, Math.sin(a) * 0.5, 0.75, 7); } SP(s, 0.6, lm, 0, 2.4, 0, 0.8, 7);
+  if (fruit) { const fm = stdM('#f07a1a', 0.45); for (let k = 0; k < 14; k++) { const a = R() * 6.28, r = 0.6 + R() * 0.5; SP(s, 0.07, fm, Math.cos(a) * r, 1.6 + R() * 1.0, Math.sin(a) * r, 0.85, 6); } } }

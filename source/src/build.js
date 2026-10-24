@@ -169,7 +169,7 @@ function makeMaterials() {
   };
   MAT.kawara = new THREE.MeshStandardMaterial({ map: TEX.kawara, roughness: 0.55, metalness: 0.15, color: '#ffffff' });
   MAT.kawaraRed = new THREE.MeshStandardMaterial({ map: TEX.kawara, roughness: 0.55, metalness: 0.1, color: '#c87a62' });
-  MAT.metalRoof = ['#3f7fb8', '#d0504a', '#4f9a6a', '#e88a3a', '#5a6ab8'].map(c => new THREE.MeshStandardMaterial({ map: TEX.kawara, color: new THREE.Color(c).multiplyScalar(1.6), roughness: 0.5, metalness: 0.15 }));
+  MAT.metalRoof = ['#4a6a88', '#8a4038', '#4f6e58', '#9a7450', '#5c5e66'].map(c => new THREE.MeshStandardMaterial({ map: TEX.kawara, color: new THREE.Color(c).multiplyScalar(1.3), roughness: 0.5, metalness: 0.15 }));
   MAT.fence = new THREE.MeshStandardMaterial({ color: '#fbf6ec', roughness: 0.7 }); MAT.soil = worldMat(TEX.dirt, 0.4, '#8a6a4a', 1);
   MAT.flowers = ['#ff6f91', '#ffd84a', '#ffffff', '#b07ae8', '#ff9a3a'].map(c => new THREE.MeshStandardMaterial({ color: c, roughness: 0.7 })); MAT.leafy = new THREE.MeshStandardMaterial({ color: '#5aa040', roughness: 0.9 });
   MAT.glowWin = [MAT.glass];

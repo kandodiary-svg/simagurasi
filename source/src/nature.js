@@ -4,7 +4,7 @@ const NATURE = { paddies: [], fields: [], t: 0, flora: {}, birds: [], ready: fal
 // clumps of the seasonal trees are shaded in grey so the material colour alone decides the hue (pink blossom, green, red leaves)
 function greyClumps(list) { for (const g of list) { const c = g.attributes.color; if (!c) continue; for (let i = 0; i < c.count; i++) { const l = Math.min(1.1, (0.3 * c.getX(i) + 0.6 * c.getY(i) + 0.1 * c.getZ(i)) * 1.7); c.setXYZ(i, l, l, l); } } return list; }
 const TREE_COL = {
-  sakura: [[md(1, 1), '#5e8e40'], [md(3, 18), '#7a9a52'], [md(3, 24), '#ffd6e4'], [md(4, 10), '#ffe2ec'], [md(4, 18), '#a8cc78'], [md(5, 10), '#6aa848'], [md(9, 25), '#5e9a3e'], [md(10, 25), '#d89a48'], [md(11, 15), '#d6703a'], [md(12, 5), '#b8603a']],
+  sakura: [[md(1, 1), '#5e8e40'], [md(3, 18), '#7a9a52'], [md(3, 24), '#ffd6e4'], [md(4, 10), '#ffe2ec'], [md(4, 18), '#a8cc78'], [md(5, 10), '#6aa848'], [md(9, 25), '#5e9a3e'], [md(10, 20), '#8aa448'], [md(11, 8), '#d0a040'], [md(11, 20), '#d2783a'], [md(12, 5), '#b8603a']],
   momiji: [[md(1, 1), '#4e8e36'], [md(3, 26), '#c0d070'], [md(4, 25), '#9cc85a'], [md(5, 25), '#4e8e36'], [md(10, 8), '#5a9038'], [md(10, 28), '#e8b030'], [md(11, 10), '#e05a24'], [md(11, 25), '#d8301c'], [md(12, 8), '#b02818']],
 };
 NATURE.treeColor = function (kind, doy) {
@@ -100,7 +100,7 @@ function buildFlora(V) {
   for (let k = 0; k < 900 && place.momiji.length < 50; k++) { const P = LMx.peak, cx = P.x, cz = P.z, a = R() * 6.28, r = 15 + R() * 50, x = cx + Math.cos(a) * r, z = cz + Math.sin(a) * r; if (floraOK(x, z, { flat: 0.72 }) && !busy(x, z)) { place.momiji.push([x, z, R()]); mark(x, z); } }
   for (let g = 0; g < 4; g++) { let c = null; for (let k = 0; k < 300 && !c; k++) { const a = R() * 6.28, r = VILLAGE.r * (1.0 + R() * 0.8), x = VILLAGE.x + Math.cos(a) * r, z = VILLAGE.z + Math.sin(a) * r; if (floraOK(x, z, { flat: 0.75, house: 8 })) c = [x, z]; }
     if (c) for (let k = 0; k < 40 && place.bamboo.filter(b => Math.hypot(b[0] - c[0], b[1] - c[1]) < 14).length < 11; k++) { const x = c[0] + (R() - 0.5) * 22, z = c[1] + (R() - 0.5) * 22; if (floraOK(x, z, { flat: 0.72, house: 6 }) && place.bamboo.every(b => Math.hypot(b[0] - x, b[1] - z) > 3.2)) place.bamboo.push([x, z, R()]); } }
-  { const anchors = [LMx.beach, PLACED.harbor].filter(Boolean); for (const A of anchors) for (let k = 0; k < 400 && place.palm.filter(p => Math.hypot(p[0] - A.x, p[1] - A.z) < 80).length < 7; k++) { const a = R() * 6.28, r = 10 + R() * 60, x = A.x + Math.cos(a) * r, z = A.z + Math.sin(a) * r; const h = groundH(x, z); if (h > 1.2 && h < 5 && floraOK(x, z, { minH: 1.2, road: 5, flat: 0.75 }) && place.palm.every(p => Math.hypot(p[0] - x, p[1] - z) > 7)) place.palm.push([x, z, R()]); } }
+  { const anchors = [LMx.beach].filter(Boolean); for (const A of anchors) for (let k = 0; k < 400 && place.palm.filter(p => Math.hypot(p[0] - A.x, p[1] - A.z) < 80).length < 2; k++) { const a = R() * 6.28, r = 10 + R() * 60, x = A.x + Math.cos(a) * r, z = A.z + Math.sin(a) * r; const h = groundH(x, z); if (h > 1.2 && h < 5 && floraOK(x, z, { minH: 1.2, road: 5, flat: 0.75 }) && place.palm.every(p => Math.hypot(p[0] - x, p[1] - z) > 7)) place.palm.push([x, z, R()]); } }
   const extraKeys = [];
   for (const [kind, K] of Object.entries(KINDS)) for (let vi = 0; vi < K.n; vi++) {
     const Vv = K.make(1000 + vi * 17 + kind.length * 101), fm = fol(K.tint), cm = kind === 'palm' ? frondMat : card(K.tint); VEG.fmats[kind + vi] = { fol: fm, card: cm, tint: fm.color.clone(), cardBase: cm.color.clone() };

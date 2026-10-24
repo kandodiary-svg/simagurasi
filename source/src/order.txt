@@ -5,4 +5,7 @@ income.js
 ground.js
 river.js
 places.js
+rural.js
+bus.js
+countryside.js
 main.js

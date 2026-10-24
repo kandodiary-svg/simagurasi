@@ -203,12 +203,12 @@ const TALK = {
     fish: ['シーッ、いま魚がよってきてるとこ！', 'ここ、アジの通り道なんだぜ。ナイショな！'], play: ['砂浜ダッシュ！ {P}もやるか？', '負けないぜー！'], exercise: ['体操で目をさますのが、オレ流！'],
     hi: ['{P}、おまえ最高の相棒だぜ！', 'こんどオレのひみつの釣り場、教えてやるよ。'] },
   v_hana: { morning: ['おはようございます、{P}さん。朝つゆの花、きれいでしょう？', '朝のうちに水やりをすませるの。お花も涼しいほうがうれしいから。'], noon: ['お日さまをいっぱい浴びて、花がのびのびしてるわ。', 'お茶でもいかが？ …なんて、ここ外だったわね。'], evening: ['夕方の風は、花の香りをはこんでくれるの。', 'きょうも一日、おつかれさまでした。'], night: ['夜に咲く花もあるのよ。月見草っていうの。', 'もう遅いから、気をつけて帰ってね。'], rain: ['雨は花にとってのごちそうなのよ。', 'あじさいは雨の日がいちばんきれい。'], snow: ['雪の下でも、球根はちゃんと春を待っているの。', '椿の赤が、雪によくはえるわね。'],
-    water: ['たっぷりお水をあげると、ちゃんと応えてくれるの。', 'この子たち、{P}さんにあいさつしてるみたい。'], look: ['教会の花だんもお手入れしてるの。'],
+    water: ['たっぷりお水をあげると、ちゃんと応えてくれるの。', 'この子たち、{P}さんにあいさつしてるみたい。'], look: ['神社のお花もお手入れしてるの。'],
     hi: ['{P}さんがいると、島がもっと好きになるわ。', 'こんど、{P}さんの家にもお花を持っていくわね。'] },
   v_gen: { morning: ['おう{P}、早いのう。わしはもう一仕事してきたぞ。', '朝の海は正直じゃ。風と潮を読むんじゃよ。'], noon: ['昼は網の手入れじゃ。漁師は陸でも忙しいんじゃよ。', '若いもんはええのう、元気があって。'], evening: ['夕焼けの次の日は晴れる、むかしからそう言うての。', 'きょうの海もおだやかじゃった。'], night: ['わしはもう寝るぞ。漁師の朝は早いからの。'], rain: ['雨の日は無理をせん。海をなめたらいかん。', '雨音を聞きながら一杯…いや、お茶じゃよ。'], snow: ['雪か…わしの若いころはもっと積もったもんじゃ。'],
     fish: ['しっ…あたりを待っとるところじゃ。', '釣りはの、待つのも楽しみのうちじゃ。'], look: ['あの船も、もう何十年もの付き合いじゃ。'],
     hi: ['{P}、おまえさんが来てから島が明るうなった。礼を言うぞ。', 'わしの漁師の技、少しずつおまえさんに教えてやろう。'] },
-  v_rin: { morning: ['おはよう！ 教会の前、きれいにしておいたよ。', '朝の島って、空気がすんでて大好き。'], noon: ['{I}島の人口、少しずつ増えてるんだって！', '集会所の掲示板、新しいお知らせはってきたよ。'], evening: ['ステンドグラスに夕日がさしこむ時間、見てほしいな。', 'きょうもいい一日だったね。'], night: ['見晴らしの丘から星を見るのが好きなの。', '夜の教会、窓が光ってきれいでしょ。'], rain: ['雨の日は、集会所で本を読んでるの。'], snow: ['雪の教会、まるでクリスマスカードみたい。'],
+  v_rin: { morning: ['おはよう！ 神社の参道、きれいにはいておいたよ。', '朝の島って、空気がすんでて大好き。'], noon: ['{I}島の人口、少しずつ増えてるんだって！', '集会所の掲示板、新しいお知らせはってきたよ。'], evening: ['鳥居のむこうに夕日がしずむ時間、見てほしいな。', 'きょうもいい一日だったね。'], night: ['見晴らしの丘から星を見るのが好きなの。', '夜の神社、灯籠が光ってきれいでしょ。'], rain: ['雨の日は、集会所で本を読んでるの。'], snow: ['雪の神社、まるで年賀状の絵みたい。'],
     sweep: ['ほうきでサッサッ。きれいになると気持ちいいよね。', 'みんなが使う場所だから、大事にしたいんだ。'], look: ['この島、もっともっとにぎやかにしたいな。'],
     hi: ['{P}さんが来てくれて、ほんとうによかった。島のみんなもそう言ってるよ。', 'いつか{I}島を、日本一すてきな島にしようね。'] },
   v_kai: { morning: ['いらっしゃいませ〜！ …あ、まだ開店前だった！', 'きょうの目玉商品はね…ヒミツ！'], noon: ['お昼どきはお客さんが多くて大いそがし！', '自販機の補充、ぼくの担当なんだ。'], evening: ['そろそろ閉店準備だ〜。', 'きょうの売り上げ、まあまあかな！'], night: ['夜は帳簿づけ。数字はちょっと苦手…'], rain: ['雨の日はカサがよく売れるんだよ！', 'お客さん少なくてひまだな〜。'], snow: ['雪の日は肉まんが売れるんだ！'],
@@ -253,4 +253,4 @@ LIVE.talkPages = function (n) {
 { const _nv = nearVillager; nearVillager = function () { const n = _nv(); return n && n.asleep ? null : n; }; }
 { const _u = GAME.update; GAME.update = function (dt) { const r = _u.apply(this, arguments); LIVE.t += dt || 0; try { if (GAME.p) liveChats(dt || 0.016); for (const k of Object.keys(LIVE.snowmen)) { const s = LIVE.snowmen[k]; if (TIME.weather !== 'snow' && SEASON.snow < 0.2) { s.scale.multiplyScalar(Math.pow(0.2, dt || 0.016)); if (s.scale.x < 0.06) { scene.remove(s); delete LIVE.snowmen[k]; } } } } catch (e) { if (!LIVE._err) { LIVE._err = 1; console.warn('lively', e); } } return r; }; }
 // what each villager is up to (for the people tab)
-LIVE.status = function (id) { const n = NPCS.find(q => q.def.id === id); if (!n || !n.live) return ''; if (n.asleep) return '💤 おやすみ中'; const pl = { home: '家のあたり', garden: '家の庭', plaza: '広場', shop: 'お店', hall: '集会所', church: '教会', lighthouse: '灯台', peak: '見晴らしの丘', beach: '浜', flowers: '花畑', farm: '田んぼ', falls: '滝', river: '川', harbor: '港' }[n.place] || ''; const a = n.mode === 'travel' ? '移動中' : ACT_NAME[n.act0 === 'umb' ? 'umb' : (n.rainy && WET_ACTS[n.act0]) ? 'umb' : n.act0] || ''; return `📍${pl}で${a}`; };
+LIVE.status = function (id) { const n = NPCS.find(q => q.def.id === id); if (!n || !n.live) return ''; if (n.asleep) return '💤 おやすみ中'; const pl = { home: '家のあたり', garden: '家の庭', plaza: '広場', shop: 'お店', hall: '集会所', church: '神社', lighthouse: '灯台', peak: '見晴らしの丘', beach: '浜', flowers: '花畑', farm: '田んぼ', falls: '滝', river: '川', harbor: '港' }[n.place] || ''; const a = n.mode === 'travel' ? '移動中' : ACT_NAME[n.act0 === 'umb' ? 'umb' : (n.rainy && WET_ACTS[n.act0]) ? 'umb' : n.act0] || ''; return `📍${pl}で${a}`; };

@@ -7,7 +7,7 @@ const ZONES = [null,
 const LV_PTS = [0, 30, 80, 150, 240, 350, 480];
 const LV_UNLOCK = { 2: ['④見晴らしの丘で島づくり', '「川・池」「うめる」の道具'], 3: ['⑤みかん段々畑で島づくり', '広い道', 'みかんの木'], 4: ['⑥夕日の浜で島づくり', '大きな木'], 5: ['⑦北の森で島づくり', '松の木'], 6: ['⑧灯台の岬で島づくり'], 7: ['⑨はなれ小島で島づくり'] };
 const TOOL_LV = { dig: 2, fill: 2 }, ROADW_LV = { wide: 3 }, TREE_LV = { broad0: 1, bush0: 1, mikan0: 3, broad1: 4, pine0: 5 };
-const LM_NAMES = { falls: '滝', light: '灯台', church: '教会', peak: '見晴らしの丘のてっぺん', mikan: 'みかん畑', beach: '夕日の浜', islet: 'はなれ小島' };
+const LM_NAMES = { falls: '滝', light: '灯台', church: '神社', peak: '見晴らしの丘のてっぺん', mikan: 'みかん畑', beach: '夕日の浜', islet: 'はなれ小島' };
 const MEISHO = ['falls', 'light', 'church', 'peak', 'mikan', 'beach'];
 const VNAME = id => (VILLAGER_DEF.find(v => v.id === id) || { name: '?' }).name;
 const DAILY_POOL = [
@@ -18,7 +18,7 @@ const DAILY_POOL = [
   { id: 'boat200', who: 'v_gen', text: '漁船で200m進む', n: 200, stat: 'boatM', unit: 'm', ask: 'わしの漁船、たまには若いのが動かしてくれんか。200mほどでええ。' },
   { id: 'falls', who: 'v_mio', text: '滝を見に行く', visit: 'falls', ask: '北の森の滝、今日は水がきれいなんだって。見てきてくれる？' },
   { id: 'light', who: 'v_gen', text: '灯台の岬まで行く', visit: 'light', ask: '岬の灯台がちゃんと立っとるか、見てきてくれんかの。' },
-  { id: 'church', who: 'v_rin', text: '教会に行く', visit: 'church', ask: '教会のステンドグラス、まだ見てないなら行ってみて！' },
+  { id: 'church', who: 'v_rin', text: '神社に行く', visit: 'church', ask: '丘の上の神社の大きな鳥居、まだ見てないなら行ってみて！' },
   { id: 'mikan', who: 'v_kai', text: 'みかん畑のようすを見に行く', visit: 'mikan', ask: 'みかん、そろそろ色づいたかな？ 畑のようすを見てきてほしいな。' },
   { id: 'peak', who: 'v_mio', text: '見晴らしの丘のてっぺんに登る', visit: 'peak', ask: '丘のてっぺんから島ぜんぶが見えるんだよ。登ってみて！' },
   { id: 'beach', who: 'v_hana', text: '夕日の浜に行く', visit: 'beach', ask: '西の浜はね、夕日がとってもきれいなの。行ってみて。' },
@@ -39,7 +39,7 @@ const GOALS = [
   { id: 'talkall', text: '住民6人みんなと話す', n: 6, prog: () => Object.keys(GAME.p.talked).length, pts: 20 },
   { id: 'plant10', text: '木を10本植える', n: 10, stat: 'plant', pts: 20 },
   { id: 'water30', text: '池か川をつくる（水場30マス）', n: 30, stat: 'water', pts: 20, needLv: 2 },
-  { id: 'meisho', text: '名所めぐり（滝・灯台・教会・丘のてっぺん・みかん畑・夕日の浜）', n: 6, prog: () => MEISHO.filter(k => GAME.p.visited[k]).length, pts: 30 },
+  { id: 'meisho', text: '名所めぐり（滝・灯台・神社・丘のてっぺん・みかん畑・夕日の浜）', n: 6, prog: () => MEISHO.filter(k => GAME.p.visited[k]).length, pts: 30 },
   { id: 'daily5', text: '住民のおねがいを5こかなえる', n: 5, stat: 'dailyDone', pts: 30 },
   { id: 'truck2k', text: '軽トラで合計2km走る', n: 2000, stat: 'truckM', unit: 'm', pts: 25 },
   { id: 'road100', text: '道路を合計100mつくる', n: 100, stat: 'roadM', unit: 'm', pts: 30 },
@@ -295,7 +295,7 @@ const GAME = {
     const want = new Set(this.todays().filter(m => m.visit && !this.p.daily.done[m.id]).map(m => m.visit));
     ctx.font = '800 25px "M PLUS Rounded 1c", sans-serif';
     const OFF = { falls: [-34, 0], light: [0, -26], church: [0, -26], peak: [0, -26], harbor: [0, 30], home: [0, 30], hall: [0, -26], ship: [44, 8], shop: [0, -26], motors: [0, 30] };
-    for (const [id, nm] of Object.entries({ falls: '滝', light: '灯台', church: '教会', peak: '丘のてっぺん', harbor: '港', home: 'あなたの家', hall: '集会所', ship: '出荷所', shop: '商店', motors: '島モータース' })) { const L = this.LM[id]; if (!L || L.gone) continue; const [a, b] = P(L.x, L.z), [ox, oy] = OFF[id];
+    for (const [id, nm] of Object.entries({ falls: '滝', light: '灯台', church: '神社', peak: '丘のてっぺん', harbor: '港', home: 'あなたの家', hall: '集会所', ship: '出荷所', shop: '商店', motors: '島モータース' })) { const L = this.LM[id]; if (!L || L.gone) continue; const [a, b] = P(L.x, L.z), [ox, oy] = OFF[id];
       ctx.fillStyle = '#fff'; ctx.strokeStyle = '#22323a'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(a, b, 9, 0, 6.3); ctx.fill(); ctx.stroke(); ctx.fillStyle = '#22323a'; ctx.strokeStyle = 'rgba(255,255,255,0.95)'; ctx.lineWidth = 6; ctx.strokeText(nm, a + ox, b + oy); ctx.fillText(nm, a + ox, b + oy); }
     ctx.font = '900 46px sans-serif';
     if (stat) return;

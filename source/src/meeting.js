@@ -24,7 +24,7 @@ const PROPOSALS = [
   { id: 'park', who: 'v_rin', title: '開拓地に広場をつくる', desc: 'みんなが集まれる広場がほしいの。ベンチと時計があって、子どもも大人ものんびりできる場所。', effect: '③開拓地に時計とベンチのある広場ができる', tags: ['community', 'nature'] },
   { id: 'signs', who: 'v_sora', title: '名所に案内看板を立てる', desc: '滝とか灯台とか、どこにあるか分かりにくいだろ？ 名所に看板を立てようぜ！', effect: '島の名所6か所に看板が立つ', tags: ['road', 'culture'] },
   { id: 'busstop', who: 'v_sora', title: '県道にバス停をつくる', desc: '海ぞいの県道にバス停があったら、島っぽくていいと思うんだよな！', effect: '家の近くの県道に屋根つきのバス停ができる', tags: ['road', 'community'] },
-  { id: 'lightup', who: 'v_rin', title: '教会をライトアップする', desc: '夜の教会を下から照らしたら、きっと島の名物になるよ！', effect: '夜、教会がライトで照らされる', tags: ['light', 'culture', 'scenery'] },
+  { id: 'lightup', who: 'v_rin', title: '神社をライトアップする', desc: '夜の神社と鳥居を照らしたら、きっと島の名物になるよ！', effect: '夜、神社がライトで照らされる', tags: ['light', 'culture', 'scenery'] },
   { id: 'deck', who: 'v_mio', title: '見晴らしの丘に展望デッキ', desc: '丘のてっぺんに木のデッキがあったら、島じゅうをゆっくりながめられるよ！', effect: '④見晴らしの丘のてっぺんに展望デッキと望遠鏡ができる', tags: ['scenery', 'culture'], needLv: 2 },
   { id: 'mikanStand', who: 'v_gen', title: 'みかんの無人販売所', desc: 'みかん畑の道ばたに、昔ながらの無人販売所を置きたいんじゃ。', effect: '⑤みかん段々畑の道ばたに無人販売所ができる', tags: ['tradition', 'shop'], needLv: 3 },
 ];

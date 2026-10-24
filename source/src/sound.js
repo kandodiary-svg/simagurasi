@@ -108,7 +108,7 @@ SND.update = function (dt) {
     every('furin', 7, 18, SF.furin > 0.3 && day && e.house > 0.25, () => SND.play('furin', { vol: 0.28 * e.house, pan: Math.random() * 1.2 - 0.6, rate: 0.95 + Math.random() * 0.1, bus: 'amb' }));
   }
   // church bells at 12:00 and 17:00 (3 strikes)
-  const hi = Math.floor(h); if (SND.lastHour !== null && hi !== SND.lastHour && (hi === 12 || hi === 17) && PLACED.church && !inside) for (let k = 0; k < 3; k++) SND.play('bell', { pos: PLACED.church, ref: 60, max: 450, vol: 0.9, delay: k * 2.2, bus: 'amb' }); SND.lastHour = hi;
+  const hi = Math.floor(h); if (SND.lastHour !== null && hi !== SND.lastHour && (hi === 12 || hi === 17) && PLACED.church && !inside) for (let k = 0; k < 3; k++) SND.play('bell', { pos: PLACED.church, ref: 60, max: 450, vol: 0.9, delay: k * 4.5, bus: 'amb', rate: 0.5 }); // a deep temple-like bell SND.lastHour = hi;
   // vehicles
   const v = PL.veh;
   if (v && !inside && (v.kind === 'truck' || v.kind === 'boat')) { const mx = (VSPEC[v.kind] && VSPEC[v.kind].max) || 16, sp = Math.min(1.3, Math.abs(v.v) / mx);

@@ -107,8 +107,8 @@ const EVENTS = [
     lines: ['トリック・オア・トリート！ …はい、{P}にもおかしあげる！', 'かぼちゃのランタン、夜になると光るんだよ。', 'ハロウィンって、もとは秋の収穫のお祭りなんだって。'] },
   { id: 'yakiimo', name: '焼き芋大会', icon: '🍠', from: [11, 10], to: [11, 30], hours: [13, 18], note: '広場で落ち葉のたき火。焼き芋をいただこう。', miss: { text: '広場のたき火で焼き芋をもらう', kind: 'spot', at: 'plaza' }, reward: { money: 1000, item: null, vit: 15 },
     lines: ['落ち葉がいっぱい集まったから、焼き芋するよ！', '紅葉、きれいだね。山のほうが真っ赤！'] },
-  { id: 'xmas', name: 'クリスマス', icon: '🎄', from: [12, 1], to: [12, 25], note: '広場に大きなツリー。教会もライトアップ。', miss: { text: '広場のクリスマスツリーを見に行く', kind: 'visit', at: 'plaza' }, reward: { money: 2000, item: 'ev_xmas', vit: 15 },
-    lines: ['広場のツリー、夜に見ると本当にきれいだよ。', '教会のライトアップ、もう見た？', 'サンタさん、島まで来てくれるかなあ。'] },
+  { id: 'xmas', name: 'クリスマス', icon: '🎄', from: [12, 1], to: [12, 25], note: '広場に大きなツリー。神社もライトアップ。', miss: { text: '広場のクリスマスツリーを見に行く', kind: 'visit', at: 'plaza' }, reward: { money: 2000, item: 'ev_xmas', vit: 15 },
+    lines: ['広場のツリー、夜に見ると本当にきれいだよ。', '神社のライトアップ、もう見た？', 'サンタさん、島まで来てくれるかなあ。'] },
   { id: 'omisoka', name: '大みそか', icon: '🔔', from: [12, 31], to: [12, 31], note: '年越し。夜0時に港で花火。', lines: ['今年もおつかれさま、{P}。', '年越しそば、食べた？ 0時になったら港で花火だよ！'] },
 ];
 const EV_FURN_DEF = [
@@ -200,12 +200,12 @@ SEASON.build = function () {
     ['かき氷', 'たこ焼き', '金魚すくい', 'わたあめ'].forEach((nm, k) => { const a = k / 4 * 6.283 + 0.6, x = P.x + Math.cos(a) * 16.5, z = P.z + Math.sin(a) * 16.5; yatai(g, x, groundH(x, z), z, Math.atan2(P.x - x, P.z - z), nm, k); const c = { x, z, hw: 1.15, hd: 0.55, rot: Math.atan2(P.x - x, P.z - z), kind: 'bld' }; addCollider(c); SEASON.colls.push(c); });
     H.forEach((hs, i) => { const [x, y, z] = door(hs, i % 2 ? 1 : -1); SP(g, 0.17, evMats().chochin, x, y + 2.2, z, 1.25, 8); }); }
   if (has('tsukimi')) { if (Hh) { const [x, y, z] = hallP(2.6, Hh.D / 2 + 2.0); tsukimiSet(g, x, y, z, Hh.rot); coll(x, z, 0.35); SEASON.spots.push({ ev: 'tsukimi', x, z, prompt: 'Space：お月見だんごをいただく' }); } if (PLACED.home) { const [x, y, z] = door(PLACED.home.hs, 1); tsukimiSet(g, x, y, z, PLACED.home.hs.rot); } }
-  if (has('halloween')) { H.forEach((hs, i) => { const [x, y, z] = gate(hs, i % 2 ? 1 : -1); pumpkin(g, x, y, z + 0, hs.rot, 1.3); if (i % 2 === 0) { const [x2, y2, z2] = gate(hs, i % 2 ? -1 : 1); pumpkin(g, x2, y2, z2, hs.rot + 0.4, 0.9); } const [x3, y3, z3] = door(hs, 1); pumpkin(g, x3, y3, z3, hs.rot, 0.8); });
+  if (has('halloween')) { [].forEach((hs, i) => { const [x, y, z] = gate(hs, i % 2 ? 1 : -1); pumpkin(g, x, y, z + 0, hs.rot, 1.3); if (i % 2 === 0) { const [x2, y2, z2] = gate(hs, i % 2 ? -1 : 1); pumpkin(g, x2, y2, z2, hs.rot + 0.4, 0.9); } const [x3, y3, z3] = door(hs, 1); pumpkin(g, x3, y3, z3, hs.rot, 0.8); });
     if (PLACED.shop) { const S = PLACED.shop; for (let k = 0; k < 14; k++) { const [x, z] = toWorld(S, -S.w / 2 + 0.3 + k * (S.w - 0.6) / 13, S.d / 2 + 0.55); SP(g, 0.07, k % 2 ? evMats().bulbs[1] : evMats().bulbs[4], x, S.y + 0.45 + 2.7, z, 1, 6); } for (let k = 0; k < 3; k++) { const [x, z] = toWorld(S, S.w / 2 - 0.4 - k * 0.5, S.d / 2 + 1.5); pumpkin(g, x, groundH(x, z), z, S.rot, 1.3 - k * 0.2); } }
-    if (Hh) for (let k = 0; k < 5; k++) { const [x, y, z] = hallP(-2 + k, Hh.D / 2 + 1.2); pumpkin(g, x, y, z, Hh.rot + k, 0.8 + (k % 2) * 0.4); } }
+    if (false) for (let k = 0; k < 5; k++) { const [x, y, z] = hallP(-2 + k, Hh.D / 2 + 1.2); pumpkin(g, x, y, z, Hh.rot + k, 0.8 + (k % 2) * 0.4); } }
   if (has('yakiimo')) { leafFire(g, P.x, P.y, P.z); coll(P.x, P.z, 1.0); SEASON.spots.push({ ev: 'yakiimo', x: P.x, z: P.z, r: 3.2, prompt: 'Space：焼き芋をもらう' }); }
   if (has('xmas')) { xmasTree(g, P.x, P.y, P.z); coll(P.x, P.z, 1.6); H.forEach(hs => { const [x, z] = toWorld(hs, 0, hs.d / 2 + 0.12); wreath(g, x, hs.y + 0.45 + 1.75, z, hs.rot); });
-    const C = PLACED.church; if (C) for (const sx of [-1, 1]) for (let k = 0; k < 22; k++) { const [x, z] = toWorld(C, sx * 5.35, -2 - 10.6 + k * 1.0); SP(g, 0.08, evMats().bulbs[k % 5], x, C.y + 6.5, z, 1, 5); } }
+    const C = PLACED.church; if (C) for (const sx of [-1, 1]) for (let k = 0; k < 22; k++) { const [x, z] = toWorld(C, sx * 5.2, -8.0 + k * 0.4); SP(g, 0.08, evMats().bulbs[k % 5], x, C.y + 3.55, z, 1, 5); } }
   for (const ch of [...g.children]) { if (SEASON.anim.some(a => a.o === ch || a.o.parent === ch)) continue; }
 };
 // ---------- missions & rewards ----------
