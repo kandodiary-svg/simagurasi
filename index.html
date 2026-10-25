@@ -1043,25 +1043,25 @@ function buildWater(scene) {
   const ht = new THREE.DataTexture(TERR.hData, n, n, THREE.RedFormat, THREE.HalfFloatType); ht.magFilter = ht.minFilter = THREE.LinearFilter; ht.needsUpdate = true; TERR.hTex = ht;
   waterMat = new THREE.ShaderMaterial({
     transparent: true, depthWrite: false, fog: true, side: THREE.DoubleSide,
-    uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { time: { value: 0 }, uResort: TERR.uResort, uResortC: TERR.uResortC, sunDir: { value: new THREE.Vector3(0.5, 0.8, 0.3) }, sunCol: { value: new THREE.Color(1, 0.95, 0.85) }, skyCol: { value: new THREE.Color(0.3, 0.55, 0.9) }, horCol: { value: new THREE.Color(0.7, 0.8, 0.9) }, ambient: { value: 1 }, hTex: { value: null }, nTex: { value: null }, mTex: { value: null }, wsize: { value: size } }]),
+    uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { time: { value: 0 }, uTide: { value: 0 }, uStorm: { value: 0 }, uGlow: { value: 0 }, uResort: TERR.uResort, uResortC: TERR.uResortC, sunDir: { value: new THREE.Vector3(0.5, 0.8, 0.3) }, sunCol: { value: new THREE.Color(1, 0.95, 0.85) }, skyCol: { value: new THREE.Color(0.3, 0.55, 0.9) }, horCol: { value: new THREE.Color(0.7, 0.8, 0.9) }, ambient: { value: 1 }, hTex: { value: null }, nTex: { value: null }, mTex: { value: null }, wsize: { value: size } }]),
     vertexShader: `attribute float aFoam; varying float vFoam; varying vec3 vW; #include <fog_pars_vertex>
       void main(){ vFoam = aFoam; vec4 wp = modelMatrix * vec4(position,1.0); vW = wp.xyz; vec4 mvPosition = viewMatrix * wp; gl_Position = projectionMatrix * mvPosition; #include <fog_vertex> }`.replace(/#include <(\w+)>/g, '\n#include <$1>\n'),
-    fragmentShader: `uniform float time, wsize, ambient, uResort; uniform vec3 sunDir, sunCol, skyCol, horCol, uResortC; uniform sampler2D hTex, nTex, mTex; varying vec3 vW; varying float vFoam;
+    fragmentShader: `uniform float time, wsize, ambient, uResort, uTide, uStorm, uGlow; uniform vec3 sunDir, sunCol, skyCol, horCol, uResortC; uniform sampler2D hTex, nTex, mTex; varying vec3 vW; varying float vFoam;
       #include <common>
       #include <fog_pars_fragment>
       void main(){
         vec2 huv = (vW.xz + wsize * 0.5) / wsize; bool outside = huv.x < 0.0 || huv.y < 0.0 || huv.x > 1.0 || huv.y > 1.0;
-        float th = outside ? -30.0 : texture2D(hTex, huv).r; float depth = max(0.0, vW.y - th) + step(0.05, vW.y) * 0.45;
+        float th = outside ? -30.0 : texture2D(hTex, huv).r; float isSea = 1.0 - step(0.02, abs(vW.y - uTide)); float depth = max(0.0, vW.y - th) + step(0.05, vW.y) * 0.45 * (1.0 - isSea);
         vec3 gN = normalize(cross(dFdx(vW), dFdy(vW))); float fall = 1.0 - smoothstep(0.45, 0.75, abs(gN.y));
         vec2 uv = vW.xz * 0.032;
         vec3 n1 = texture2D(nTex, uv + vec2(time * 0.011, time * 0.007)).xyz * 2.0 - 1.0;
         vec3 n2 = texture2D(nTex, uv * 2.3 - vec2(time * 0.009, -time * 0.013)).xyz * 2.0 - 1.0;
         vec3 n3 = texture2D(nTex, vW.xz * 0.004 + time * 0.002).xyz * 2.0 - 1.0;
         float calm = mix(0.55, 1.0, smoothstep(0.0, 3.0, depth));
-        vec3 N = normalize(vec3((n1.x + n2.x * 0.6 + n3.x * 0.8) * calm, 4.5, (n1.y + n2.y * 0.6 + n3.y * 0.8) * calm));
+        float chop = calm * (1.0 + uStorm * 1.8 * isSea); vec3 N = normalize(vec3((n1.x + n2.x * 0.6 + n3.x * 0.8) * chop, 4.5, (n1.y + n2.y * 0.6 + n3.y * 0.8) * chop));
         vec3 V = normalize(cameraPosition - vW);
         float fres = 0.02 + 0.98 * pow(1.0 - max(dot(N, V), 0.0), 5.0);
-        float sea = step(vW.y, 0.15) * (outside ? 0.0 : 1.0), rs = uResort * sea;
+        float sea = isSea * (outside ? 0.0 : 1.0), rs = uResort * sea;
         vec3 shallow = mix(vec3(0.12, 0.78, 0.72), vec3(0.20, 0.80, 0.76), rs), mid = mix(vec3(0.02, 0.42, 0.62), vec3(0.03, 0.60, 0.72), rs), deep = mix(vec3(0.012, 0.16, 0.36), vec3(0.01, 0.24, 0.52), rs);
         vec3 wc = mix(shallow, mid, smoothstep(0.2, mix(3.5, 5.5, rs), depth)); wc = mix(wc, deep, smoothstep(mix(3.5, 7.0, rs), mix(18.0, 26.0, rs), depth));
         float near = 1.0 - smoothstep(uResortC.z * 0.6, uResortC.z * 1.4, distance(vW.xz, uResortC.xy));
@@ -1079,7 +1079,10 @@ function buildWater(scene) {
         float bands = smoothstep(0.8, 1.0, sin(depth * 7.0 - time * 1.4 + fn * 5.0) * 0.5 + 0.5) * (1.0 - smoothstep(0.1, 1.4, depth));
         float bub = texture2D(mTex, vW.xz * 0.35 + vec2(time * 0.05, time * 0.08)).b;
         float foam = clamp(shore * smoothstep(0.3, 0.6, fn) * 0.9 + bands * 0.65 + vFoam * smoothstep(0.35, 0.65, bub + vFoam * 0.3), 0.0, 1.0) * (outside ? 0.0 : 1.0);
-        col = mix(col, vec3(0.92, 0.96, 0.98) * ambient, foam);
+        float wcap = smoothstep(0.6, 0.82, texture2D(mTex, vW.xz * 0.05 + vec2(time * 0.05, time * 0.02)).b + n1.x * 0.15) * uStorm * isSea * smoothstep(1.5, 5.0, depth); foam = max(foam, wcap * 0.85); // whitecaps in a storm
+        col = mix(col, mix(vec3(0.92, 0.96, 0.98) * ambient, vec3(0.04, 0.45, 1.0) * 1.25, uGlow), foam); // at a 夜光虫 night the breaking foam itself glows blue
+        float spk = smoothstep(0.74, 0.95, texture2D(mTex, vW.xz * 0.6 + vec2(time * 0.07, -time * 0.05)).b) * smoothstep(0.04, 0.2, depth) * (1.0 - smoothstep(0.5, 3.0, depth)) * (0.5 + 0.5 * sin(time * 3.0 + vW.x * 1.7));
+        col += vec3(0.02, 0.38, 1.0) * uGlow * clamp(bands * 0.7 + spk * 0.9, 0.0, 1.0); // and sparkles in the shallows
         float alpha = smoothstep(0.0, 0.45, depth) * mix(mix(0.42, 0.4, rs), 0.97, smoothstep(0.3, mix(6.0, 9.0, rs), depth)); alpha = max(alpha, reef * 0.8); alpha = max(alpha, foam * 0.85 * smoothstep(0.0, 0.12, depth)); alpha = mix(alpha, 1.0, fres * 0.6); if (outside) alpha = 1.0;
         if (fall > 0.0) { // falling water: streaks moving down
           float hc = vW.x * 0.9 + vW.z * 0.9; float st = texture2D(mTex, vec2(hc * 0.35, vW.y * 0.12 + time * 0.9)).b; float st2 = texture2D(mTex, vec2(hc * 0.8, vW.y * 0.3 + time * 1.6)).g;
@@ -1200,8 +1203,8 @@ function skyAt(hf) {
 }
 function updateSky(hf, focus, cam, dt, weather) {
   const s = skyAt(hf);
-  const wet = weather === 'rain', cloudy = weather === 'cloudy' || wet || weather === 'snow';
-  if (cloudy) { const gray = new THREE.Color(wet ? '#7d8a95' : '#a9b6c2'); s.top.lerp(gray, wet ? 0.75 : 0.5); s.hor.lerp(gray, wet ? 0.7 : 0.45); s.sunI *= wet ? 0.35 : 0.6; s.cloud.lerp(new THREE.Color('#b8c2cc'), 0.5); }
+  const storm = weather === 'storm', wet = weather === 'rain' || storm, cloudy = weather === 'cloudy' || wet || weather === 'snow';
+  if (cloudy) { const gray = new THREE.Color(storm ? '#5f6a74' : wet ? '#7d8a95' : '#a9b6c2'); s.top.lerp(gray, wet ? 0.8 : 0.5); s.hor.lerp(gray, wet ? 0.75 : 0.45); s.sunI *= storm ? 0.22 : wet ? 0.35 : 0.6; if (storm) s.hemiI *= 0.75; s.cloud.lerp(new THREE.Color('#b8c2cc'), 0.5); }
   // sun path: rises in the east (+x), sets in the west, tilted to the south (+z)
   const ang = (hf - 5.6) / 13 * Math.PI;
   const sunDir = new THREE.Vector3(Math.cos(ang), Math.sin(ang) * 0.85 + 0.02, 0.45).normalize();
@@ -1215,7 +1218,7 @@ function updateSky(hf, focus, cam, dt, weather) {
   SKY.mat.uniforms.sunDir.value.copy(sunDir); SKY.mat.uniforms.sunCol.value.copy(s.sunCol).convertSRGBToLinear().multiplyScalar(sunDir.y > -0.05 ? 1 : 0); SKY.mat.uniforms.night.value = night * (cloudy ? 0.2 : 1);
   SKY.dome.position.copy(cam.position);
   updateEnv(s, sunDir, night, weather);
-  scene.fog.color.copy(s.hor); scene.fog.near = wet ? 120 : 260; scene.fog.far = wet ? 1400 : 3200;
+  scene.fog.color.copy(s.hor); scene.fog.near = wet ? 120 : 260; scene.fog.far = wet ? 1400 : 3200; // (near/far are unused by the gfx.js fog)
   for (const c of SKY.clouds) { c.material.color.copy(s.cloud); c.material.opacity = cloudy ? 1 : 0.92; c.position.x += c.userData.speed * dt; if (c.position.x > 2600) c.position.x = -2600; }
   SKY.isl.children.forEach(m => m.material.color.copy(s.hor).lerp(new THREE.Color('#4f6a70'), 0.45));
   if (waterMat) { const u = waterMat.uniforms; u.sunDir.value.copy(sunDir); u.sunCol.value.copy(s.sunCol).convertSRGBToLinear().multiplyScalar(Math.min(1.4, s.sunI / 2)); u.skyCol.value.copy(s.top).convertSRGBToLinear(); u.horCol.value.copy(s.hor).convertSRGBToLinear(); u.ambient.value = 0.25 + Math.min(1, s.hemiI) * 0.8; }
@@ -1723,20 +1726,20 @@ function mergeStatic(root) {
 }
 
 // ===================== VEGETATION =====================
-const VEG = { uTime: { value: 0 }, uDayK: { value: 1 }, trees: [] }; // uDayK: foliage translucency glow, off at night
+const VEG = { uTime: { value: 0 }, uDayK: { value: 1 }, uWind: { value: 1 }, trees: [] }; // uDayK: foliage translucency glow, off at night
 function windify(mat, amount, useHeight = true) {
   const prev = mat.onBeforeCompile;
   mat.onBeforeCompile = (sh, r) => {
     if (prev) prev(sh, r);
     sh.fragmentShader = sh.fragmentShader.replace('#include <normal_fragment_begin>', THREE.ShaderChunk.normal_fragment_begin.replace('normal *= faceDirection;', '').replace('normal = normal * faceDirection;', ''));
-    sh.uniforms.uTime = VEG.uTime;
-    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nuniform float uTime;').replace('#include <begin_vertex>', `#include <begin_vertex>
+    sh.uniforms.uTime = VEG.uTime; sh.uniforms.uWind = VEG.uWind;
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nuniform float uTime; uniform float uWind;').replace('#include <begin_vertex>', `#include <begin_vertex>
       #ifdef USE_INSTANCING
         vec3 ip = instanceMatrix[3].xyz;
       #else
         vec3 ip = vec3(0.0);
       #endif
-      float sw = ${useHeight ? 'max(position.y, 0.0)' : '1.0'} * ${amount.toFixed(3)};
+      float sw = ${useHeight ? 'max(position.y, 0.0)' : '1.0'} * ${amount.toFixed(3)} * uWind;
       transformed.x += sin(uTime * 1.6 + ip.x * 0.21 + ip.z * 0.13 + position.y * 0.6) * sw;
       transformed.z += cos(uTime * 1.3 + ip.z * 0.19 + position.x * 0.5) * sw * 0.6;`);
   };
@@ -5715,7 +5718,7 @@ SND.probe = function () {
 // ---------- main update ----------
 SND.update = function (dt) {
   if (!SND.ctx || SND.ctx.state !== 'running') return; SND.t += dt;
-  const e = SND.env, h = currentHour(), rain = TIME.weather === 'rain', inside = !!GAME.inside, title = GAME.modal === 'title';
+  const e = SND.env, h = currentHour(), rain = TIME.weather === 'rain' || TIME.weather === 'storm', inside = !!GAME.inside, title = GAME.modal === 'title';
   SND.envT -= dt; if (SND.envT <= 0 && !title) { SND.envT = 0.3; try { SND.probe(); } catch (er) { } }
   const ct = SND.ctx.currentTime;
   // BGM: a little quieter at night, a little muffled indoors
@@ -7453,7 +7456,7 @@ DEV_BUILD.r_towers = function (s) { const g = new THREE.Group(), R = mulberry(99
 DEV_BUILD.r_final = function () { const g = new THREE.Group(), M = rsMats(), line = (RS.beach && RS.beach.line) || []; if (line.length > 4) { const c = line[Math.floor(line.length * 0.62)], x = c.x - c.nx * 26, z = c.z - c.nz * 26; if (freeSpot(x, z, 2, { maxH: 8 })) { const t = sub(g, x, groundH(x, z), z, Math.atan2(c.nx, c.nz)); for (const sx of [-2.2, 2.2]) CY(t, 0.12, 4.4, M.white, sx, 2.2, 0, 8); const sg = hrSign('WELCOME TO HOSHINAMI RESORT', 5.6, 0.9, '#16a0b8', '#ffffff'); sg.position.set(0, 4.0, 0.08); t.add(sg); const sg2 = sg.clone(); sg2.rotation.y = Math.PI; sg2.position.z = -0.08; t.add(sg2); } } return g; };
 for (const k of ['r_beach', 'r_marina', 'r_lagoon', 'r_towers', 'r_final']) { const f = DEV_BUILD[k]; const w = function (s) { const g = f(s); return g ? mergeLocal(g) : g; }; DEV_BUILD[k] = w; }
 // ---------- unlocking after the story ----------
-{ const _sd = STORY.syncDev; STORY.syncDev = function () { _sd.apply(this, arguments); const st = STORY.st(), p = GAME.p; if (st.ch < CHAPTERS.length) return; p.devSeen = p.devSeen || {}; const fresh = []; for (const d of RESORT_DEV) { if (!DEV.includes(d)) DEV.push(d); if (!p.devSeen[d.id]) { p.devSeen[d.id] = 1; fresh.push(d); } } if (fresh.length && p.storyDev) setTimeout(() => UI.toast('🏝️ 開発に「リゾート島計画」が追加されました（P）'), 3200); }; }
+{ const _sd = STORY.syncDev; STORY.syncDev = function () { _sd.apply(this, arguments); const st = STORY.st(), p = GAME.p; if (st.ch < 7) return; p.devSeen = p.devSeen || {}; const fresh = []; for (const d of RESORT_DEV) { if (!DEV.includes(d)) DEV.push(d); if (!p.devSeen[d.id]) { p.devSeen[d.id] = 1; fresh.push(d); } } if (fresh.length && p.storyDev) setTimeout(() => UI.toast('🏝️ 開発に「リゾート島計画」が追加されました（P）'), 3200); }; }
 { const _rk = STORY.rank; STORY.rank = function () { if (rDone('r_final')) return '世界があこがれるリゾート島'; const n = resortCount(); if (n >= 3) return '人気のリゾート島'; if (n >= 1) return 'リゾート開発中の島'; return _rk.apply(this, arguments); }; }
 // ---------- living resort: colour change, tourists, boats ----------
 const TOUR_COL = ['#e8574e', '#3f8fd8', '#f2c230', '#46a86a', '#f08fb0', '#ffffff', '#7a4ab8', '#ff8a2a', '#16a0b8', '#1f3a6a'], SKIN = ['#f2cfb0', '#e0b090', '#c8946a', '#a87050', '#f6dcc4'];
@@ -7938,7 +7941,7 @@ const CB_BUILD = {
 const CITY = { list: [], chunks: new Map(), anims: [], curB: null, rotOff: 0, type: 'hotelL', cat: 'stay', mode: 'build', CH: 160, t: 0 };
 TOOLS.push({ id: 'city', name: '街づくり', icon: '🏙️', key: 'Y', hint: '建てたい建物をえらんで、場所をクリック（R で向きを変える）。物語クリア後、お金を払えば何度でも建てられます', brush: false });
 TOOL_LV.city = 7;
-CITY.unlocked = () => !!(GAME.p && STORY.st().ch >= CHAPTERS.length);
+CITY.unlocked = () => !!(GAME.p && STORY.st().ch >= 7); // after part 1 (第一部) of the story
 CITY.addAnim = a => { a.b = CITY.curB; CITY.anims.push(a); if (CITY.curChunk) CITY.curChunk.anims.push(a); return a; };
 // ---------- shared materials / textures so that many buildings cost few draw calls ----------
 { const _wm = worldMat; worldMat = function (map, scale) { const m = _wm.apply(this, arguments); m.userData.wm = (map ? map.uuid : '-') + ':' + scale; return m; }; }
@@ -8759,7 +8762,7 @@ FSH.updatePanel = function () {
 { const _ok2 = GAME.onKey; GAME.onKey = function (e) { if (!e.repeat && e.code === 'KeyT' && this.p && !this.modal && !EDIT.on && !PL.veh && !LIFE.fish && FSH.holdKg() > 0.05) { const S = DECO.ship, H = this.LM.harbor; if ((S && Math.hypot(PL.x - S.x, PL.z - S.z) < 12) || (H && Math.hypot(PL.x - H.x, PL.z - H.z) < 60)) { FSH.openLanding(true); return true; } } return _ok2.apply(this, arguments); }; }
 { const _p2 = GAME.prompt; GAME.prompt = function () { if (this.p && !PL.veh && !this.modal && this.nearShip && this.nearShip() && FSH.holdKg() > 0.05) return `Space：出荷所　T：網の魚を水揚げ（魚倉 ${FSH.holdKg().toFixed(0)}kg）`; return _p2.apply(this, arguments); }; }
 // version label so you can tell whether the page has updated
-const GAME_VER = '33（10/25）';
+const GAME_VER = '34（10/25）';
 { const v = document.createElement('div'); v.id = 'verTag'; v.textContent = 'ver.' + GAME_VER; v.style.cssText = 'position:fixed;left:6px;bottom:4px;z-index:5;font-size:10px;color:rgba(255,255,255,.75);text-shadow:0 1px 2px rgba(0,0,0,.6);pointer-events:none;font-family:sans-serif'; document.body.appendChild(v); }
 
 // ===================== 島の収益: 建物ごとに1時間あたりの売上が入りつづける（留守のあいだも最大24時間分） =====================
@@ -9909,7 +9912,7 @@ GARDEN.update = function (dt) {
     const box = this.el.modal.querySelector('.journal'), prev = box.onclick; box.onclick = e => { const l = e.target.closest('[data-letter]'); if (l) return SHORE.readLetter(+l.dataset.letter, false); prev && prev(e); }; }; }
 { const _zt = GAME.zukanTab; GAME.zukanTab = function () { const p = this.p, Z = p.shorez || {}, V = p.vegz || {}, got = Object.keys(Z).length;
     return _zt.apply(this, arguments) + `<h3 class="bh" style="margin-top:14px">浜辺のたからもの ${got} / ${SHORE_ITEMS.length}種類　・　ひろった数 ${p.stats.shoreN || 0}こ</h3>
-    <ul class="list zukan">${SHORE_ITEMS.map(D => { const r = Z[D.id]; return `<li class="${r ? 'done' : 'lock'}"><span class="ck">${r ? '🐚' : '？'}</span><div><b>${r ? esc(D.name) : '？？？'}</b>　<span class="pr">${'★'.repeat(D.st)}</span><div class="sub">${r ? `${r}こ　${esc(D.note)}` : '砂浜の波打ちぎわ'}</div></div></li>`; }).join('')}</ul>
+    <ul class="list zukan">${SHORE_ITEMS.map(D => { const r = Z[D.id]; return `<li class="${r ? 'done' : 'lock'}"><span class="ck">${r ? '🐚' : '？'}</span><div><b>${r ? esc(D.name) : '？？？'}</b>　<span class="pr">${'★'.repeat(D.st)}</span><div class="sub">${r ? `${r}こ　${esc(D.note)}` : esc(D.hint || '砂浜の波打ちぎわ')}</div></div></li>`; }).join('')}</ul>
     <h3 class="bh" style="margin-top:14px">畑の収穫 ${Object.keys(V).length} / ${CROPS.length}種類　・　収穫した数 ${p.stats.vegN || 0}こ</h3>
     <ul class="list zukan">${CROPS.map(C => { const r = V[C.id]; const ss = C.sow.map(([m0, , m1]) => `${m0}〜${m1}月`).join('・'); return `<li class="${r ? 'done' : 'lock'}"><span class="ck">${r ? C.ic : '？'}</span><div><b>${esc(C.name)}</b><div class="sub">たねまき ${ss}${r ? `　${r}こ収穫` : ''}</div></div></li>`; }).join('')}</ul>`; }; }
 SHOPX.tabs.push({ id: 'seed', label: 'たね', body() { const b = GARDEN.bag(), now = CROPS.filter(c => GARDEN.inSeason(c)), later = CROPS.filter(c => !GARDEN.inSeason(c));
@@ -9949,6 +9952,449 @@ GOALS.push(
   { id: 'shorez8', text: '浜辺のたからもの図鑑を8種類うめる', n: 8, prog: () => Object.keys(GAME.p.shorez || {}).length, pts: 25 },
   { id: 'veg10', text: '畑で野菜を10こ収穫する', n: 10, stat: 'vegN', pts: 20 });
 STAT_KEYS.push('shoreN', 'vegN', 'waterN');
+
+// ===================== SEA: 潮の満ち引き・干潮の砂の道・干潮だけ入れる洞くつ =====================
+// 瀬戸内は潮の干満が大きい。海面がゆっくり上下し（約±0.45m・半日周期＋大潮小潮）、干潮のときだけ
+// はなれ小島へ歩いて渡れる砂の道（ほしなみの砂の道）が現れる。小島の岩の洞くつは干潮のときだけ入れる。
+const SEA = { h: 0, sea: null, bar: null, cave: null, sign: null, ready: false, chk: 0 };
+// uses the same moon-age tide model as fishing (fishing2.js TIDE): 大潮 about ±0.45 m on screen, 小潮 about ±0.2 m
+SEA.td = function (ms) { const d = new Date(ms), h = d.getHours() + d.getMinutes() / 60 + d.getSeconds() / 3600, a = TIDE.age(d); return TIDE.at(h, a); };
+SEA.at = function (ms) { const td = SEA.td(ms); return td.level * td.amp * 0.45; };
+SEA.nowMs = function () { if (TIME.mode === 'real') return Date.now(); const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime() + TIME.hf * 3600000; };
+SEA.events = function (fromMs, hours = 26) { // turning points (満潮 / 干潮) after fromMs
+  const out = [], step = 5 * 60000; let prev = SEA.at(fromMs - step), cur = SEA.at(fromMs);
+  for (let t = fromMs + step; t < fromMs + hours * 3600000; t += step) { const nx = SEA.at(t); if ((cur - prev) * (nx - cur) < 0) out.push({ type: nx < cur ? '満潮' : '干潮', ms: t - step, h: cur }); prev = cur; cur = nx; } return out;
+};
+SEA.fmt = ms => { const d = new Date(ms); return `${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`; };
+SEA.state = function () { const ms = SEA.nowMs(); return `${TIDE.name(TIDE.age(new Date(ms)))}・${TIDE.stage(SEA.td(ms))}`; };
+SEA.walkBar = () => SEA.h < 0.14; // the sand road can be walked (wading at most ankle deep)
+// ---------- the sand road to the islet ----------
+SEA.barLine = function () {
+  const I = GAME.LM && GAME.LM.islet; if (!I) return null; let best = null;
+  for (let a = 0; a < 6.283; a += 0.04) { const dx = Math.cos(a), dz = Math.sin(a); let edge = null; for (let r = 8; r < 60; r += 1) { if (groundH(I.x + dx * r, I.z + dz * r) < -0.3) { edge = r; break; } } if (edge === null) continue;
+    for (let r = edge + 4; r < 190; r += 2) { const x = I.x + dx * r, z = I.z + dz * r; if (groundH(x, z) > 0.6) { if (r - edge > 12 && (!best || r - edge < best.len)) best = { len: r - edge, a, ax: I.x + dx * (edge - 3), az: I.z + dz * (edge - 3), bx: x + dx * 3, bz: z + dz * 3 }; break; } } }
+  return best;
+};
+// the bar is a gently curving, uneven strip: it bows to one side, narrows in the middle and its edges wander
+SEA.barProf = function (B, t) { const tc = Math.max(0, Math.min(1, t)), o = Math.sin(tc * Math.PI) * B.curv + (fbm(tc * 3.1, 1.7, 4, 3) - 0.5) * 3.2, w = B.w * (0.62 + 0.62 * fbm(tc * 4.3 + 2, 3.3, 6, 3)) * (1 - 0.28 * Math.sin(tc * Math.PI)); return [o, w]; };
+SEA.barTL = function (B, x, z) { const dx = B.bx - B.ax, dz = B.bz - B.az, L2 = dx * dx + dz * dz, L = Math.sqrt(L2), t = ((x - B.ax) * dx + (z - B.az) * dz) / L2, lat = ((x - B.ax) * dz - (z - B.az) * dx) / L; return [t, lat, L]; };
+SEA.barDist = function (B, x, z) { const [t, lat, L] = SEA.barTL(B, x, z), [o, w] = SEA.barProf(B, t), along = t < 0 ? -t * L : t > 1 ? (t - 1) * L : 0; return [Math.hypot(lat - o, along), w]; };
+SEA.makeBar = function () {
+  const L = SEA.barLine(); if (!L) return null; const { n, size } = WORLD, cell = size / (n - 1), h0 = -size / 2, H = G.H, H0 = G.H0, W = G.Wl; L.w = 3.4; L.curv = (hashStr(String(Math.round(L.ax))) % 2 ? 1 : -1) * Math.min(7, L.len * 0.12);
+  const pad = 16, x0 = Math.min(L.ax, L.bx) - pad, x1 = Math.max(L.ax, L.bx) + pad, z0 = Math.min(L.az, L.bz) - pad, z1 = Math.max(L.az, L.bz) + pad; let i0 = 1e9, i1 = -1e9, j0 = 1e9, j1 = -1e9;
+  for (let j = Math.max(0, Math.floor((z0 - h0) / cell)); j <= Math.min(n - 1, Math.ceil((z1 - h0) / cell)); j++) for (let i = Math.max(0, Math.floor((x0 - h0) / cell)); i <= Math.min(n - 1, Math.ceil((x1 - h0) / cell)); i++) {
+    const x = h0 + i * cell, z = h0 + j * cell, [d, w] = SEA.barDist(L, x, z); if (d > w * 3.4) continue; const k = j * n + i;
+    const crest = -0.2 + (fbm(x * 0.08, z * 0.08, 3, 7) - 0.5) * 0.12, tgt = d < w ? crest - (d / w) * (d / w) * 0.12 : lerp(crest - 0.12, -2.6, sstep(w, w * 3.4, d));
+    if (tgt > H[k] && isNaN(W[k])) { H[k] = tgt; if (tgt > H0[k]) H0[k] = tgt; i0 = Math.min(i0, i); i1 = Math.max(i1, i); j0 = Math.min(j0, j); j1 = Math.max(j1, j); }
+  }
+  if (i1 >= i0) refreshRegion(i0 - 1, j0 - 1, i1 + 1, j1 + 1);
+  return L;
+};
+SEA.inBar = function (x, z) { const B = SEA.bar; if (!B) return false; const [d, w] = SEA.barDist(B, x, z); return d < w * 1.6; };
+SEA.onIslet = function (x, z) { const I = GAME.LM && GAME.LM.islet; return !!I && Math.hypot(x - I.x, z - I.z) < 34; };
+// ---------- a rock arch on the islet's shore that floods at high tide ----------
+SEA.makeCave = function () {
+  const I = GAME.LM.islet, B = SEA.bar; let best = null;
+  for (let a = 0; a < 6.283; a += 0.05) { const dx = Math.cos(a), dz = Math.sin(a); if (B) { const ba = Math.atan2(B.bz - I.z, B.bx - I.x); let da = Math.abs(((a - ba) % 6.283 + 9.42) % 6.283 - 3.14); if (da < 1.6) continue; } // on the far side from the sand road
+    for (let r = 4; r < 50; r += 0.5) { const x = I.x + dx * r, z = I.z + dz * r, h = groundH(x, z); if (h < 0.1) { const back = groundH(x - dx * 6, z - dz * 6); if (back > 0.6 && !collidersNear(x, z).some(c => hitsCollider(c, x, z, 3)) && (!best || back > best.back)) best = { x: x - dx * 0.8, z: z - dz * 0.8, rot: Math.atan2(dx, dz), back }; break; } } }
+  if (!best) return null;
+  // one continuous sea arch (a thick, deep tube bent into an arch) with a cliff behind it; layered sedimentary colours, dark and wet at the foot
+  const g = new THREE.Group(), rockM = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9 });
+  const dark = new THREE.Color('#4a453d'), s1 = new THREE.Color('#8a7e6c'), s2 = new THREE.Color('#c2b6a0'), s3 = new THREE.Color('#6f6658'), c = new THREE.Color();
+  const paint = (q, ox = 0, oy = 0, oz = 0) => { const P = q.attributes.position, C = new Float32Array(P.count * 3); for (let i = 0; i < P.count; i++) { const x = P.getX(i) + ox, y = P.getY(i) + oy, z = P.getZ(i) + oz, band = 0.5 + 0.5 * Math.sin(y * 5.2 + (fbm(x * 0.5 + 3, z * 0.5, 2, 3) - 0.5) * 4);
+      c.copy(s1).lerp(s2, band); c.lerp(s3, sstep(0.55, 0.9, fbm(x * 1.3, y * 1.3 + z, 5, 3))); c.lerp(dark, 1 - sstep(0.15, 0.75, y)); const v = 0.92 + (fbm(x * 4 + z * 2, y * 4, 9, 2) - 0.5) * 0.25; C.set([c.r * v, c.g * v, c.b * v], i * 3); } q.setAttribute('color', new THREE.BufferAttribute(C, 3)); return q; };
+  const bump = (q, amp, f, seed) => { q.computeVertexNormals(); const P = q.attributes.position, N = q.attributes.normal; for (let i = 0; i < P.count; i++) { const x = P.getX(i), y = P.getY(i), z = P.getZ(i), k = (fbm(x * f + seed, y * f + z * f * 0.7, seed, 4) - 0.5) * amp + (fbm(x * f * 4, z * f * 4 + y * f * 3, seed + 5, 2) - 0.5) * amp * 0.25; P.setXYZ(i, x + N.getX(i) * k, y + N.getY(i) * k, z + N.getZ(i) * k); } q.computeVertexNormals(); return q; };
+  const curve = new THREE.Curve(); curve.getPoint = (t, tg = new THREE.Vector3()) => { const th = -0.32 + t * (Math.PI + 0.64); return tg.set(Math.cos(th) * 2.7, Math.sin(th) * 3.1, 0); };
+  const arch = new THREE.TubeGeometry(curve, 56, 1.05, 16, false);
+  { const P = arch.attributes.position, v = new THREE.Vector3(), cp = new THREE.Vector3(); for (let i = 0; i < P.count; i++) { const t = Math.floor(i / 17) / 56, th = -0.32 + t * (Math.PI + 0.64); curve.getPoint(t, cp); v.fromBufferAttribute(P, i).sub(cp); const k = 0.8 + 0.75 * (1 - Math.sin(Math.max(0, Math.min(Math.PI, th)))) + (fbm(t * 6, 2.5, 4, 2) - 0.5) * 0.5; v.multiplyScalar(k).add(cp); P.setXYZ(i, v.x, v.y, v.z); } } // thick legs, thinner span
+  arch.scale(1, 1, 1.9); bump(arch, 1.1, 0.55, 2); bump(arch, 0.45, 1.6, 21); paint(arch);
+  const am = new THREE.Mesh(arch, rockM); am.castShadow = am.receiveShadow = true; g.add(am);
+  const cliff = mergeVertices(new THREE.IcosahedronGeometry(2.4, 4)); cliff.scale(2.3, 1.45, 1.3); cliff.translate(0, 1.5, -3.6); bump(cliff, 1.1, 0.45, 7); paint(cliff);
+  const cm = new THREE.Mesh(cliff, rockM); cm.castShadow = cm.receiveShadow = true; g.add(cm);
+  for (const [x, z, r, sd] of [[-3.6, 1.6, 0.55, 11], [3.4, 2.2, 0.45, 12], [-1.6, 2.6, 0.3, 13]]) { const q = mergeVertices(new THREE.IcosahedronGeometry(r, 2)); q.scale(1.3, 0.6, 1.1); bump(q, r * 0.6, 1.4, sd); q.translate(x, r * 0.2, z); paint(q); const m = new THREE.Mesh(q, rockM); m.castShadow = m.receiveShadow = true; g.add(m); }
+  // a little sparkle of star sand in a hollow at the back
+  const sand = new THREE.Mesh(new THREE.CircleGeometry(0.55, 18), new THREE.MeshStandardMaterial({ color: '#f0e6cc', roughness: 0.6, emissive: new THREE.Color('#5a4a30'), emissiveIntensity: 0.25 })); sand.rotation.x = -Math.PI / 2; sand.position.set(0, 0.04, -1.0); g.add(sand); g.userData.sand = sand;
+  const y = Math.max(-0.2, groundH(best.x, best.z)); g.position.set(best.x, y, best.z); g.rotation.y = best.rot; scene.add(g);
+  const O = { x: best.x, z: best.z, rot: best.rot };
+  for (const sx of [-1, 1]) { const [cx, cz] = toWorld(O, sx * 2.75, 0); addCollider({ x: cx, z: cz, hw: 1.15, hd: 2.0, rot: best.rot, kind: 'rock' }); }
+  { const [cx, cz] = toWorld(O, 0, -3.9); addCollider({ x: cx, z: cz, r: 2.4, kind: 'rock' }); }
+  const [sx, sz] = toWorld(O, 0, -1.0);
+  return { g, x: best.x, z: best.z, y, rot: best.rot, spot: { x: sx, z: sz } };
+};
+SEA.inCave = function (x, z) { const C = SEA.cave; return !!C && Math.hypot(x - C.spot.x, z - C.spot.z) < 2.4; };
+SEA.makeSign = function () {
+  const B = SEA.bar; if (!B) return null; const dx = B.bx - B.ax, dz = B.bz - B.az, L = Math.hypot(dx, dz), ux = dx / L, uz = dz / L; let x = B.bx + ux * 2.5, z = B.bz + uz * 2.5;
+  for (let k = 0; k < 12 && (groundH(x, z) < 0.7 || collidersNear(x, z).some(c => hitsCollider(c, x, z, 0.5))); k++) { x += ux; z += uz; }
+  const g = new THREE.Group(), wood = new THREE.MeshStandardMaterial({ color: '#8a6a48', roughness: 0.85 }); const post = new THREE.Mesh(new THREE.BoxGeometry(0.1, 1.5, 0.1), wood); post.position.y = 0.75; g.add(post);
+  const [cv, c] = cvs(512, 256); c.fillStyle = '#f2e8d0'; c.fillRect(0, 0, 512, 256); c.strokeStyle = '#7a5a3a'; c.lineWidth = 12; c.strokeRect(6, 6, 500, 244); c.fillStyle = '#3a2a1a'; c.textAlign = 'center'; c.font = '800 54px "M PLUS Rounded 1c", sans-serif'; c.fillText('ほしなみの砂の道', 256, 92); c.font = '600 32px "M PLUS Rounded 1c", sans-serif'; c.fillText('干潮のときだけ', 256, 152); c.fillText('はなれ小島へ歩いて渡れます', 256, 196);
+  const bd = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.45, 0.04), [wood, wood, wood, wood, new THREE.MeshStandardMaterial({ map: toTex(cv, false), roughness: 0.8 }), wood]); bd.position.y = 1.35; g.add(bd);
+  g.position.set(x, groundH(x, z), z); g.rotation.y = Math.atan2(-ux, -uz); g.traverse(o => { if (o.isMesh) o.castShadow = o.receiveShadow = true; }); scene.add(g); addCollider({ x, z, r: 0.25, kind: 'sign' }); return { g, x, z };
+};
+SEA.init = function () {
+  if (SEA.ready || !GAME.p || !GAME.LM || !G || !G.H) return; SEA.ready = true;
+  SEA.sea = scene.children.find(o => o.isMesh && o.material === waterMat && o.geometry.parameters && o.geometry.parameters.width === 8000) || null;
+  try { SEA.bar = SEA.makeBar(); } catch (e) { console.warn('tide bar', e); }
+  try { SEA.cave = SEA.makeCave(); } catch (e) { console.warn('tide cave', e); }
+  try { SEA.sign = SEA.makeSign(); } catch (e) { console.warn('tide sign', e); }
+};
+// keep things that float on the sea in step with the tide (they are positioned for sea level 0 by their own code)
+SEA.float = function (o) { if (!o) return; const u = o.userData; if (u.tideY === undefined || Math.abs(o.position.y - u.tideY) > 1e-6) u.tideBase = o.position.y; o.position.y = u.tideBase + SEA.h; u.tideY = o.position.y; };
+SEA.update = function (dt) {
+  if (!GAME.p) return; SEA.init(); SEA.h = SEA.at(SEA.nowMs());
+  if (SEA.sea) SEA.sea.position.y = SEA.h; if (waterMat) waterMat.uniforms.uTide.value = SEA.h;
+  for (const v of VEH) if (v.kind === 'boat' && v.mesh) SEA.float(v.mesh);
+  if (PL.veh && PL.veh.kind === 'boat' && PL.mesh) SEA.float(PL.mesh);
+  const R = typeof LIFE !== 'undefined' && LIFE.rod, F = LIFE.fish; if (R && R.bob && R.bob.visible && F && F.tgt && F.tgt.env !== 'river' && F.tgt.env !== 'pond') SEA.float(R.bob);
+  if (SEA.cave) { const s = SEA.cave.g.userData.sand; s.visible = SEA.h < 0.02; s.material.emissiveIntensity = 0.2 + Math.max(0, Math.sin(performance.now() / 400)) * 0.25; }
+  // first time the road shows: a hint
+  const p = GAME.p; p.tide = p.tide || {}; if (SEA.bar && SEA.walkBar() && !p.tide.seen && Math.hypot(PL.x - SEA.bar.bx, PL.z - SEA.bar.bz) < 40 && !GAME.inside) { p.tide.seen = 1; GAME.dirty = true; UI.toast('🌊 潮が引いて、はなれ小島へつづく砂の道が現れた！（干潮のときだけ歩いて渡れる）'); }
+  if (SEA.onIslet(PL.x, PL.z) && !PL.veh && !p.tide.walked) { p.tide.walked = 1; GAME.dirty = true; GAME.ev && GAME.ev('visit', 1, 'islet'); }
+};
+// walking: at high tide the sea is deeper. Crossing the sand road needs the water to be shallow; elsewhere you can wade up to ~0.7 m
+{ const _cw = canWalk; canWalk = function (x0, z0, x1, z1) {
+    if (!_cw(x0, z0, x1, z1)) return false; const h = SEA.h; if (h < 0.02 || !SEA.ready) return true;
+    if (!isNaN(waterLevelAt(G, x1, z1)) || deckY(x1, z1) !== null || onPierAt(x1, z1) || walkDeckY(x1, z1) !== null) return true;
+    const d1 = h - groundH(x1, z1), d0 = h - groundH(x0, z0), lim = SEA.inBar(x1, z1) || SEA.inCave(x1, z1) ? 0.32 : 0.72; return !(d1 > lim && d1 > d0); }; }
+// prompts and actions
+SEA.near = function () { if (!SEA.ready || PL.veh || GAME.inside) return null; if (SEA.sign && Math.hypot(PL.x - SEA.sign.x, PL.z - SEA.sign.z) < 1.8) return 'sign'; if (SEA.cave && SEA.inCave(PL.x, PL.z) && Math.hypot(PL.x - SEA.cave.spot.x, PL.z - SEA.cave.spot.z) < 1.6) return 'cave'; return null; };
+SEA.table = function () { const ev = SEA.events(SEA.nowMs() - 3 * 3600000, 30).filter(e => e.ms > SEA.nowMs() - 3600000).slice(0, 4); return ev.map(e => `${e.type} ${SEA.fmt(e.ms)}`).join('　'); };
+SEA.act = function (k) {
+  const p = GAME.p; if (k === 'sign') { UI.toast(`🌊 いまは ${SEA.state()}。${SEA.walkBar() ? '砂の道を渡れます！' : '砂の道は海の中…'}　${SEA.table()}`); return true; }
+  if (k === 'cave') {
+    if (SEA.h > 0.02) { UI.toast('洞くつの奥は海水でいっぱい…。潮が引いたら来てみよう'); return true; }
+    if (typeof STORY2 !== 'undefined' && STORY2.caveFind && STORY2.caveFind()) return true;
+    p.tide = p.tide || {}; if (p.tide.sand === todayKey()) { UI.toast('きょうの星の砂は、もうひろった。また明日の干潮に'); return true; }
+    p.tide.sand = todayKey(); const b = SHORE.bag(); b.hoshizuna = (b.hoshizuna || 0) + 1; p.shorez = p.shorez || {}; const first = !p.shorez.hoshizuna; p.shorez.hoshizuna = (p.shorez.hoshizuna || 0) + 1; p.stats.shoreN = (p.stats.shoreN || 0) + 1;
+    PLAY.pose = 0.75; PLAY.poseK = 'pick'; try { SND.play('ui_confirmation2', { vol: 0.6 }); } catch (e) { } UI.toast(`✨ 洞くつの奥で「星の砂」をひとつまみ見つけた！${first ? '（図鑑に登録）' : ''}　干潮の日に1回ひろえる`); GAME.dirty = true; GAME.check && GAME.check(); return true;
+  }
+  return false;
+};
+SHORE_ITEMS.push({ id: 'hoshizuna', name: '星の砂', st: 3, p: 700, kind: 'glass', col: '#f4ecd8', w: 0, hint: '干潮のとき、はなれ小島の洞くつの奥で', note: '小さな星の形をした砂。むかしの小さな生きもののから。' });
+{ const _pr = GAME.prompt; GAME.prompt = function () { if (GAME.p && !GAME.modal) { const k = SEA.near(); if (k === 'sign') return 'F：看板を読む（潮の時刻）'; if (k === 'cave') return SEA.h > 0.02 ? '洞くつは海水の中（干潮を待とう）' : 'F：洞くつの奥をしらべる'; } return _pr.apply(this, arguments); }; }
+{ const _fk = GAME.fishKey; GAME.fishKey = function () { if (!LIFE.fish && GAME.p && !GAME.modal) { const k = SEA.near(); if (k) return SEA.act(k); } return _fk.apply(this, arguments); }; }
+{ const _u = GAME.update; GAME.update = function (dt) { const r = _u.apply(this, arguments); try { SEA.update(dt || 0.016); } catch (e) { if (!SEA._err) { SEA._err = 1; console.warn('tide', e); } } return r; }; }
+// the clock card shows the next tide turn
+{ const _ck = UI.clock; UI.clock = function (hf) { _ck.apply(this, arguments); let el = document.getElementById('hTide'); if (!el) { const d = document.getElementById('hD'); if (!d) return; el = document.createElement('div'); el.id = 'hTide'; el.className = 'd'; d.after(el); }
+    if (!GAME.p) { el.textContent = ''; return; } const ev = SEA.events(SEA.nowMs() + 1800000, 14)[0]; el.textContent = `🌊 ${SEA.state()}${ev ? `　${ev.type} ${SEA.fmt(ev.ms)}` : ''}`; }; }
+
+// ===================== RARE: めずらしい出来事（記録される） =====================
+// 流れ星に願いごと（次の日、浜に「星のかけら」）・スナメリ・夜光虫の青い波・虹・朝霧の海（雲海）・渡り鳥の群れ・満月の「月の道」・台風一過
+// 台風（storm）の天気: 横なぐりの雨、強い風、白波、ときどき稲光
+const RARE_DEFS = [
+  { id: 'wish', name: '流れ星に願いごと', icon: '🌠', hint: '晴れた夜、流れ星が見えたらすぐ F', note: '願いごとをした次の日、浜に何かが流れつくといううわさ。' },
+  { id: 'sunameri', name: 'スナメリ', icon: '🐬', hint: 'おだやかな昼、港や浜から沖をながめていると', note: '瀬戸内にすむ、背びれのない小さなイルカのなかま。ほほえんでいるような顔。' },
+  { id: 'yakouchu', name: '夜光虫の青い波', icon: '💠', hint: '初夏から夏のおだやかな夜、浜で', note: '波がくだけるたびに、青白く光る。小さなプランクトンのしわざ。' },
+  { id: 'niji', name: '虹', icon: '🌈', hint: '雨があがって、お日さまが出たとき', note: '太陽を背にした空に、七色の橋。たまに二重になる。' },
+  { id: 'unkai', name: '朝霧の海', icon: '☁️', hint: '霧の濃い朝、見晴らしの丘のてっぺんから', note: '町も海も白い霧の下。丘の上だけが島のように浮かぶ。' },
+  { id: 'wataridori', name: '渡り鳥の群れ', icon: '🕊️', hint: '春と秋の昼間、空を見上げて', note: 'V の字にならんで、海の向こうへ。' },
+  { id: 'tsukinomichi', name: '月の道', icon: '🌕', hint: '満月のころの晴れた夜、海辺で', note: '月の光が海に一本の道をつくる。' },
+  { id: 'taifu', name: '台風一過', icon: '🌀', hint: '台風が通りすぎたあと', note: '嵐のあとの、うそみたいに澄んだ空。' },
+];
+const RARE = { t: 0, chk: 0, porp: null, birds: null, bow: null, road: null, shootSeen: 0, lastW: '', glow: 0, flash: 0, shower: null, forceGlow: false };
+RARE.def = id => RARE_DEFS.find(d => d.id === id);
+RARE.count = () => Object.keys((GAME.p && GAME.p.rare) || {}).length;
+RARE.luck = () => { const o = GAME.p && GAME.p.omikuji; return o && o.date === todayKey() ? (o.rank === '大吉' ? 2.2 : o.rank === '中吉' ? 1.5 : 1) : 1; };
+RARE.seen = function (id, quiet) {
+  const p = GAME.p; if (!p) return; p.rare = p.rare || {}; const first = !p.rare[id], D = RARE.def(id); if (!D) return;
+  const r = p.rare[id] || (p.rare[id] = { n: 0, first: todayKey() }); if (r.last === todayKey() && !first) return; r.n++; r.last = todayKey(); GAME.dirty = true;
+  if (first) { GAME.banner && GAME.banner(`✨ めずらしい出来事　${D.icon} ${D.name}`, `${D.note}（手帳の図鑑に記録しました　${RARE.count()}/${RARE_DEFS.length}）`); try { SND.play('jingle', { vol: 0.5 }); } catch (e) { } }
+  else if (!quiet) UI.toast(`${D.icon} ${D.name}！`);
+  GAME.check && GAME.check();
+};
+RARE.coastNear = function (x, z, r = 40) { for (let k = 0; k < 16; k++) { const a = k / 16 * 6.283; for (const d of [r * 0.4, r]) if (groundH(x + Math.cos(a) * d, z + Math.sin(a) * d) < -1.5) return [Math.cos(a), Math.sin(a), d]; } return null; };
+RARE.month = () => seasonDate().getMonth() + 1;
+// ---------- 流れ星に願いごと ----------
+RARE.shootOn = function () { const sh = NATURE.shoot; if (sh && sh.userData.on) { RARE.shootSeen = performance.now(); return true; } return performance.now() - RARE.shootSeen < 1400; };
+RARE.wish = function () {
+  const p = GAME.p; p.wish = p.wish || { n: 0 }; RARE.shootSeen = 0; if (p.wish.day === todayKey()) { UI.toast('🌠 …今夜はもう願いごとをした。また明日の夜に'); return true; }
+  p.wish.day = todayKey(); p.wish.n++; p.wish.pend = todayKey(); GAME.dirty = true; RARE.seen('wish', true);
+  UI.toast('🌠 流れ星に願いごとをした…。あしたの朝、浜に何か流れつくかも'); try { SND.play('ui_glass1', { vol: 0.5 }); } catch (e) { } return true;
+};
+SHORE_ITEMS.push({ id: 'hoshikakera', name: '星のかけら', st: 4, p: 2500, kind: 'star', col: '#ffe9a0', w: 0, hint: '流れ星に願いごとをした次の日、浜で', note: '夜空からおちてきた、ほんのり光るかけら。…ほんとうに？' });
+{ const _sm = SHORE.mesh; SHORE.mesh = function (it) { const D = SHORE.def(it.id); if (!D || D.kind !== 'star') return _sm.apply(this, arguments);
+    const g = new THREE.Group(), m = new THREE.Mesh(new THREE.OctahedronGeometry(0.05, 0), new THREE.MeshStandardMaterial({ color: '#fff0b8', roughness: 0.2, metalness: 0.1, emissive: new THREE.Color('#ffcc55'), emissiveIntensity: 0.9 })); m.scale.set(1, 1.4, 1); m.position.y = 0.045; m.rotation.z = 0.4; m.castShadow = true; g.add(m);
+    const tmp = _sm.call(this, { id: 'glass_w' }); const sp = tmp.userData.glint; tmp.remove(sp); g.add(sp); g.userData.glint = sp; return g; }; }
+{ const _sd = SHORE.daily; SHORE.daily = function () { const r = _sd.apply(this, arguments); const p = GAME.p; if (!p || !SHORE.grp || !p.wish || !p.wish.pend || p.wish.pend >= todayKey()) return r;
+    if (p.shore.got.includes(900) || SHORE.items.some(q => q.i === 900) || !SHORE.spots || !SHORE.spots.length) return r;
+    const R = mulberry(hashStr(todayKey() + 'star')), s = SHORE.spots[Math.floor(R() * SHORE.spots.length)], it = { x: s[0], z: s[1], id: 'hoshikakera', i: 900, ry: 0, ph: 0 }; const y = groundH(it.x, it.z); if (y < -0.05) return r;
+    it.mesh = SHORE.mesh(it); it.mesh.scale.setScalar(1.6); it.mesh.position.set(it.x, y, it.z); SHORE.grp.add(it.mesh); SHORE.items.push(it); return r; }; }
+{ const _pk = SHORE.pick; SHORE.pick = function (it) { const r = _pk.apply(this, arguments); if (it.id === 'hoshikakera' && GAME.p.wish) { GAME.p.wish.pend = null; setTimeout(() => UI.toast('🌠 願いごと、とどいたのかな…'), 1600); } return r; }; }
+// ---------- スナメリ ----------
+RARE.spawnPorpoise = function () {
+  const c = RARE.coastNear(PL.x, PL.z, 45); if (!c) return false; const [dx, dz] = c; let x = PL.x + dx * 40, z = PL.z + dz * 40; for (let k = 0; k < 20 && groundH(x, z) > -1.8; k++) { x += dx * 6; z += dz * 6; } if (groundH(x, z) > -1.8) return false;
+  const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.28, side: THREE.DoubleSide }), g = new THREE.Group(), list = [];
+  // a finless porpoise: round melon head, plump body tapering to the tail stock, flat flukes; dark grey back, pale belly
+  const geo = (() => { const prof = [[0, -0.86], [0.06, -0.82], [0.11, -0.6], [0.2, -0.3], [0.29, 0.02], [0.31, 0.28], [0.28, 0.52], [0.22, 0.7], [0.12, 0.82], [0, 0.87]].map(([r, y]) => new THREE.Vector2(r, y));
+    const body = new THREE.LatheGeometry(prof, 18); body.rotateX(Math.PI / 2); body.scale(1, 0.88, 1);
+    const fluke = new THREE.Shape(); fluke.moveTo(0, 0.04); fluke.quadraticCurveTo(0.18, 0.02, 0.3, -0.16); fluke.quadraticCurveTo(0.12, -0.08, 0, -0.06); fluke.quadraticCurveTo(-0.12, -0.08, -0.3, -0.16); fluke.quadraticCurveTo(-0.18, 0.02, 0, 0.04);
+    const fl = new THREE.ExtrudeGeometry(fluke, { depth: 0.025, bevelEnabled: false }); fl.rotateX(-Math.PI / 2); fl.translate(0, 0, -0.84);
+    const fin = new THREE.Shape(); fin.moveTo(0, 0); fin.quadraticCurveTo(0.2, -0.02, 0.26, -0.1); fin.quadraticCurveTo(0.12, -0.08, 0, -0.12); const fins = [1, -1].map(s => { const f = new THREE.ExtrudeGeometry(fin, { depth: 0.02, bevelEnabled: false }); f.rotateX(-Math.PI / 2); f.rotateZ(s * 0.45); if (s < 0) f.scale(-1, 1, 1); f.translate(s * 0.22, -0.12, 0.42); return f.toNonIndexed(); });
+    const keep = gq => { for (const k of Object.keys(gq.attributes)) if (!['position', 'normal', 'uv'].includes(k)) gq.deleteAttribute(k); return gq; };
+    const q = mergeGeometries([keep(body.toNonIndexed()), keep(fl.toNonIndexed()), ...fins.map(keep)]); const P = q.attributes.position, N = q.attributes.normal, C = new Float32Array(P.count * 3), top = new THREE.Color('#5c6a70'), bel = new THREE.Color('#b4bec2'), c = new THREE.Color();
+    for (let i = 0; i < P.count; i++) { c.copy(bel).lerp(top, sstep(-0.35, 0.35, N.getY(i))); C.set([c.r, c.g, c.b], i * 3); } q.setAttribute('color', new THREE.BufferAttribute(C, 3)); return q; })();
+  const ringG = new THREE.PlaneGeometry(1.6, 1.6); ringG.rotateX(-Math.PI / 2);
+  if (!RARE.ripTex) RARE.ripTex = txCanvas(128, 128, (x) => { x.clearRect(0, 0, 128, 128); for (let k = 0; k < 90; k++) { const a = Math.random() * 6.283, r = 40 + Math.random() * 14, w = 0.04 + Math.random() * 0.12; x.strokeStyle = `rgba(255,255,255,${0.25 + Math.random() * 0.45})`; x.lineWidth = 1.5 + Math.random() * 2.5; x.beginPath(); x.arc(64, 64, r, a, a + w * 6.283 * 0.25); x.stroke(); } });
+  const ringM = new THREE.MeshBasicMaterial({ map: RARE.ripTex, color: '#ffffff', transparent: true, opacity: 0, depthWrite: false });
+  const n = 1 + Math.floor(Math.random() * 3), hd = Math.atan2(-dz, dx); for (let k = 0; k < n; k++) { const m = new THREE.Mesh(geo, mat); g.add(m); const ring = new THREE.Mesh(ringG, ringM.clone()); ring.renderOrder = 7; g.add(ring); list.push({ m, ring, off: k * 1.7, lat: (k - (n - 1) / 2) * 1.6 }); }
+  scene.add(g); RARE.porp = { g, list, x, z, hd, t: 0, sp: 1.6, geo, mat, ringG, seen: false }; return true;
+};
+RARE.updPorpoise = function (dt) {
+  const P = RARE.porp; if (!P) return; P.t += dt; const fx = Math.sin(P.hd), fz = Math.cos(P.hd);
+  for (const q of P.list) { const tt = P.t - q.off, cyc = ((tt % 3.4) + 3.4) % 3.4, ph = cyc / 1.3; const along = tt * P.sp, x = P.x + fx * along + fz * q.lat, z = P.z + fz * along - fx * q.lat;
+    const up = ph < 1 && tt > 0 ? Math.sin(ph * Math.PI) : 0; q.m.position.set(x, SEA.h - 0.5 + up * 0.42, z); q.m.rotation.set(ph < 1 ? (ph - 0.5) * 1.3 : 0, P.hd, 0, 'YXZ'); q.m.visible = up > 0.02;
+    const rk = tt > 0 ? Math.min(1, cyc / 1.8) : 1; q.ring.position.set(x, SEA.h + 0.03, z); q.ring.scale.setScalar(0.7 + rk * 2.0); q.ring.material.opacity = (1 - rk) * 0.5; q.ring.visible = rk < 1; }
+  if (!P.seen && P.t > 1.2 && Math.hypot(P.x - PL.x, P.z - PL.z) < 110) { P.seen = true; RARE.seen('sunameri'); }
+  if (P.t > 15) { scene.remove(P.g); P.geo.dispose(); P.mat.dispose(); P.ringG.dispose(); RARE.porp = null; }
+};
+// ---------- 夜光虫 ----------
+RARE.glowNight = function () { const m = RARE.month(), d = seasonDate(), key = d.getFullYear() * 400 + m * 32 + d.getDate(); if (m < 5 || m > 8) return false; return ((Math.sin(key * 7.77) * 43758.5453) % 1 + 1) % 1 < 0.35; };
+// ---------- 虹（主虹と副虹） ----------
+RARE.makeBow = function () {
+  const mk = (rIn, rOut, a) => { const g = new THREE.RingGeometry(rIn, rOut, 160, 1, 0, Math.PI); const m = new THREE.ShaderMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false, uniforms: { op: { value: 0 }, rIn: { value: rIn }, rOut: { value: rOut }, rev: { value: a } },
+    vertexShader: 'varying vec2 vP; void main(){ vP = position.xy; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+    fragmentShader: `uniform float op, rIn, rOut, rev; varying vec2 vP; vec3 hue(float h){ return clamp(abs(mod(h * 6.0 + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0, 0.0, 1.0); }
+      void main(){ float t = (length(vP) - rIn) / (rOut - rIn); if (rev > 0.5) t = 1.0 - t; vec3 c = hue(mix(0.78, 0.0, t)); float edge = smoothstep(0.0, 0.18, t) * smoothstep(1.0, 0.82, t); float ends = smoothstep(0.0, 0.12, vP.y / rOut); gl_FragColor = vec4(c * edge * ends * op, 1.0); }` });
+    const o = new THREE.Mesh(g, m); o.renderOrder = -4; o.frustumCulled = false; return o; };
+  const g = new THREE.Group(); const D = 1500, a1 = Math.tan(40.5 * Math.PI / 180) * D, a2 = Math.tan(42.5 * Math.PI / 180) * D, b1 = Math.tan(50.5 * Math.PI / 180) * D, b2 = Math.tan(53.5 * Math.PI / 180) * D;
+  g.add(mk(a1, a2, 0)); g.add(mk(b1, b2, 1)); g.children[1].material.uniforms.op.value = 0; scene.add(g); return { g, D, t: 0, life: 0 };
+};
+RARE.updBow = function (dt, st) {
+  const B = RARE.bow; if (!B) return; B.t += dt; const sd = st.sunDir, show = B.t < B.life && sd.y > 0.05 && sd.y < 0.75 && TIME.weather !== 'rain' && TIME.weather !== 'storm' && !GAME.inside;
+  const k = Math.min(1, B.t / 6) * Math.min(1, Math.max(0, (B.life - B.t) / 30)); const anti = new THREE.Vector3(-sd.x, -sd.y, -sd.z);
+  B.g.visible = show; B.g.position.copy(camera.position).addScaledVector(anti, B.D); B.g.lookAt(camera.position); B.g.children[0].material.uniforms.op.value = 0.38 * k; B.g.children[1].material.uniforms.op.value = 0.08 * k;
+  if (show && k > 0.5 && !B.rec) { B.rec = true; RARE.seen('niji'); }
+  if (B.t > B.life) { scene.remove(B.g); RARE.bow = null; }
+};
+// ---------- 渡り鳥 ----------
+RARE.spawnBirds = function () {
+  const m = RARE.month(), south = m >= 8, dir = south ? -0.9 : 2.2, n = 13 + Math.floor(Math.random() * 7), g = new THREE.Group(), mat = new THREE.MeshStandardMaterial({ color: '#2e2e34', roughness: 0.8, side: THREE.DoubleSide }), list = [];
+  const wing = new THREE.PlaneGeometry(1.5, 0.42); wing.rotateX(-Math.PI / 2); wing.translate(0.75, 0, 0); const body = new THREE.ConeGeometry(0.17, 1.15, 6); body.rotateX(Math.PI / 2);
+  for (let k = 0; k < n; k++) { const b = new THREE.Group(); b.add(new THREE.Mesh(body, mat)); const wl = new THREE.Mesh(wing, mat), wr = new THREE.Mesh(wing, mat); wr.scale.x = -1; b.add(wl, wr); b.userData.w = [wl, wr]; const side = k % 2 ? 1 : -1, rank = Math.ceil(k / 2); b.userData.o = [side * rank * (3.6 + Math.random() * 0.9), -rank * (3.1 + Math.random() * 0.8)]; b.userData.ph = Math.random() * 6; g.add(b); list.push(b); }
+  const fx = Math.sin(dir), fz = Math.cos(dir), start = [PL.x - fx * 420 + fz * (Math.random() - 0.5) * 120, PL.z - fz * 420 - fx * (Math.random() - 0.5) * 120];
+  g.position.set(start[0], 85 + Math.random() * 30, start[1]); g.rotation.y = dir; scene.add(g); RARE.birds = { g, list, fx, fz, t: 0, seen: false, wing, body, mat };
+};
+RARE.updBirds = function (dt) {
+  const B = RARE.birds; if (!B) return; B.t += dt; B.g.position.x += B.fx * 13 * dt; B.g.position.z += B.fz * 13 * dt;
+  for (const b of B.list) { const [ox, oz] = b.userData.o; b.position.set(ox, Math.sin(B.t * 0.7 + ox) * 0.6, oz); const f = Math.sin(B.t * 5 + b.userData.ph) * 0.55; b.userData.w[0].rotation.z = f; b.userData.w[1].rotation.z = -f; }
+  if (!B.seen && Math.hypot(B.g.position.x - PL.x, B.g.position.z - PL.z) < 230 && !GAME.inside) { B.seen = true; RARE.seen('wataridori'); }
+  if (B.t > 70) { scene.remove(B.g); B.wing.dispose(); B.body.dispose(); B.mat.dispose(); RARE.birds = null; }
+};
+// ---------- 月の道 ----------
+RARE.makeRoad = function () {
+  const g = new THREE.PlaneGeometry(1, 1, 1, 1); g.rotateX(-Math.PI / 2); g.translate(0, 0, -0.5);
+  const m = new THREE.ShaderMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false, uniforms: { op: { value: 0 }, time: { value: 0 }, col: { value: new THREE.Color('#fff2d0') } },
+    vertexShader: 'varying vec2 vU; varying vec3 vW; void main(){ vU = vec2(position.x + 0.5, -position.z); vec4 w = modelMatrix * vec4(position, 1.0); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }',
+    fragmentShader: `uniform float op, time; uniform vec3 col; varying vec2 vU; varying vec3 vW;
+      float h(vec2 p){ return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+      void main(){ float across = abs(vU.x - 0.5) * 2.0, w = mix(0.2, 1.0, vU.y); float band = exp(-pow(across / w, 2.0) * 3.0);
+        float rip = 0.5 + 0.5 * sin(vW.x * 1.7 + vW.z * 0.9 + time * 2.0) * sin(vW.z * 1.3 - vW.x * 0.6 - time * 1.4);
+        vec2 q = floor(vW.xz * vec2(3.0, 1.3) + vec2(0.0, time * 1.2)); float sp = step(0.84, h(q + floor(time * 4.0))) * rip; float fade = smoothstep(0.0, 0.14, vU.y) * smoothstep(1.0, 0.5, vU.y);
+        gl_FragColor = vec4(col * band * fade * (0.16 + 0.3 * rip + sp * 1.3) * op, 1.0); }` });
+  const o = new THREE.Mesh(g, m); o.renderOrder = 6; o.frustumCulled = false; scene.add(o); return o;
+};
+RARE.updRoad = function (dt) {
+  const M = SEASON.moon, age = SEASON.moonAge, full = age > 0.43 && age < 0.57; let show = !!(M && M.visible && full && TIME.weather === 'clear' && !GAME.inside);
+  if (show) { const d = M.position.clone().sub(camera.position); if (d.y / d.length() > 0.55) show = false; }
+  if (!show) { if (RARE.road) RARE.road.visible = false; return; } if (!RARE.road) RARE.road = RARE.makeRoad();
+  const R = RARE.road, d = M.position.clone().sub(camera.position); d.y = 0; d.normalize(); R.visible = true; R.position.set(camera.position.x + d.x * 20, SEA.h + 0.06, camera.position.z + d.z * 20); R.rotation.y = Math.atan2(-d.x, -d.z); R.scale.set(60, 1, 1300);
+  R.material.uniforms.time.value += dt; R.material.uniforms.op.value = 0.55;
+  if ((RARE._roadT = (RARE._roadT || 0) - dt) < 0) { RARE._roadT = 3; if (RARE.coastNear(PL.x, PL.z, 60)) RARE.seen('tsukinomichi', true); }
+};
+// ---------- 流星群（物語の夜） ----------
+RARE.startShower = function (sec = 80) {
+  if (RARE.shower) return; const list = []; for (let k = 0; k < 7; k++) { const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3)); const l = new THREE.Line(g, new THREE.LineBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0, fog: false })); l.frustumCulled = false; l.renderOrder = -3; scene.add(l); list.push({ l, t: -Math.random() * 3 }); }
+  RARE.shower = { list, t: 0, sec };
+};
+RARE.updShower = function (dt) {
+  const S = RARE.shower; if (!S) return; S.t += dt; const rad = new THREE.Vector3(0.3, 0.8, -0.5).normalize();
+  for (const q of S.list) { q.t += dt; if (q.t > 1.1) { q.t = -Math.random() * 2.2; q.a = rad.clone().add(new THREE.Vector3((Math.random() - 0.5) * 1.1, (Math.random() - 0.3) * 0.5, (Math.random() - 0.5) * 1.1)).normalize(); q.d = q.a.clone().sub(rad).add(new THREE.Vector3(0, -0.3, 0)).normalize(); }
+    if (q.t < 0 || !q.a) { q.l.material.opacity = 0; continue; } const P = q.l.geometry.attributes.position, p0 = q.a.clone().multiplyScalar(2400).addScaledVector(q.d, q.t * 1100), p1 = p0.clone().addScaledVector(q.d, -220); P.setXYZ(0, p0.x, p0.y, p0.z); P.setXYZ(1, p1.x, p1.y, p1.z); P.needsUpdate = true; q.l.position.copy(camera.position); q.l.material.opacity = Math.sin(Math.min(1, q.t / 1.1) * Math.PI) * (S.t < S.sec ? 1 : 0); }
+  if (S.t > S.sec + 1.5) { for (const q of S.list) { scene.remove(q.l); q.l.geometry.dispose(); q.l.material.dispose(); } RARE.shower = null; }
+};
+// ---------- 台風の天気 ----------
+RARE.updStorm = function (dt, st) {
+  const storm = TIME.weather === 'storm' && !GAME.inside; RARE.flash = Math.max(0, RARE.flash - dt);
+  if (storm && Math.random() < dt / 9) { RARE.flash = 0.35; setTimeout(() => { try { SND.play('fw_bang' + Math.floor(Math.random() * 5), { vol: 0.35, rate: 0.35 }); } catch (e) { } }, 600 + Math.random() * 1800); }
+  if (RARE.flash > 0) { const k = RARE.flash > 0.25 || (RARE.flash < 0.15 && RARE.flash > 0.08) ? 1 : 0.2; SKY.hemi.intensity += 2.6 * k; SKY.hemi.color.lerp(new THREE.Color('#dfe8ff'), 0.6 * k); }
+  // a storm that blows over leaves a clear sky, a rainbow and a beach full of things
+  if (RARE.lastW === 'storm' && TIME.weather !== 'storm') { RARE.seen('taifu'); RARE.bow = RARE.bow || Object.assign(RARE.makeBow(), { life: 600 }); }
+  else if ((RARE.lastW === 'rain') && TIME.weather !== 'rain' && TIME.weather !== 'storm' && !RARE.bow && st.sunDir.y > 0.05 && Math.random() < 0.6 * RARE.luck()) RARE.bow = Object.assign(RARE.makeBow(), { life: 420 });
+  RARE.lastW = TIME.weather;
+};
+RARE.update = function (dt, st) {
+  if (!GAME.p || !st) return; RARE.t += dt; const hf = TIME.mode === 'real' ? GFX.solarHour(currentHour()) : currentHour(), day = hf > 7 && hf < 17, calm = TIME.weather === 'clear' || TIME.weather === 'cloudy', L = RARE.luck();
+  RARE.updStorm(dt, st); RARE.updPorpoise(dt); RARE.updBirds(dt); RARE.updBow(dt, st); RARE.updRoad(dt); RARE.updShower(dt);
+  // 夜光虫: glowing surf on some calm early-summer nights (and on the story's night)
+  const glowT = (RARE.forceGlow || (RARE.glowNight() && calm)) ? st.night : 0; RARE.glow += (glowT - RARE.glow) * Math.min(1, dt * 0.4); if (waterMat) waterMat.uniforms.uGlow.value = RARE.glow;
+  if ((RARE.chk -= dt) > 0) return; RARE.chk = 2;
+  if (GAME.inside || PL.veh && PL.veh.kind !== 'boat') return;
+  if (RARE.glow > 0.5 && SHORE.spots && SHORE.spots.some(s => Math.hypot(s[0] - PL.x, s[1] - PL.z) < 30)) RARE.seen('yakouchu');
+  if (!RARE.porp && day && calm && RARE.coastNear(PL.x, PL.z, 45) && Math.random() < 2 / 420 * L) RARE.spawnPorpoise();
+  const m = RARE.month(); if (!RARE.birds && day && TIME.weather !== 'rain' && TIME.weather !== 'storm' && (m >= 3 && m <= 4 || m >= 9 && m <= 11) && Math.random() < 2 / 600 * L) RARE.spawnBirds();
+  const pk = GAME.LM && GAME.LM.peak; if (pk && GFX.U.fogX.y > 0.38 && Math.hypot(PL.x - pk.x, PL.z - pk.z) < 26) RARE.seen('unkai');
+};
+{ const _us = updateSky; updateSky = function () { const r = _us.apply(this, arguments); try { RARE.update(arguments[3] || 0.016, r); } catch (e) { if (!RARE._err) { RARE._err = 1; console.warn('rare', e); } } return r; }; }
+// wish key
+{ const _pr = GAME.prompt; GAME.prompt = function () { if (GAME.p && !GAME.modal && !GAME.inside && !LIFE.fish && RARE.shootOn()) return 'F：流れ星に願いごとをする！'; return _pr.apply(this, arguments); }; }
+{ const _fk = GAME.fishKey; GAME.fishKey = function () { if (GAME.p && !GAME.modal && !GAME.inside && !LIFE.fish && RARE.shootOn()) return RARE.wish(); return _fk.apply(this, arguments); }; }
+// a rare stormy day in typhoon season instead of an ordinary rainy one; villagers stay home in a storm
+{ const _aw = SEASON.autoWeather; SEASON.autoWeather = function (hf) { if (typeof STORY2 !== 'undefined' && STORY2.forceW) return STORY2.forceW; const w = _aw.apply(this, arguments); const d = seasonDate(), m = d.getMonth() + 1, key = d.getFullYear() * 400 + m * 32 + d.getDate();
+    if (w === 'rain' && m >= 8 && m <= 10 && ((Math.sin(key * 3.31) * 43758.5453) % 1 + 1) % 1 < 0.12) return 'storm'; return w; }; }
+{ const _le = LIVE.entry; LIVE.entry = function (n, hf) { const E = _le.apply(this, arguments); if (TIME.weather === 'storm' && E && E.act !== 'sleep') return Object.assign({}, E, { place: 'home', act: 'sleep' }); return E; }; }
+// zukan
+{ const _zt = GAME.zukanTab; GAME.zukanTab = function () { const p = this.p, R = p.rare || {}; return _zt.apply(this, arguments) + `<h3 class="bh" style="margin-top:14px">めずらしい出来事 ${RARE.count()} / ${RARE_DEFS.length}</h3>
+    <ul class="list zukan">${RARE_DEFS.map(D => { const r = R[D.id]; return `<li class="${r ? 'done' : 'lock'}"><span class="ck">${r ? D.icon : '？'}</span><div><b>${r ? esc(D.name) : '？？？'}</b><div class="sub">${r ? `${r.first} にはじめて　${r.n}回　${esc(D.note)}` : 'ヒント：' + esc(D.hint)}</div></div></li>`; }).join('')}</ul>`; }; }
+
+// ===================== STORY 第二部「星波の夜」（終章のあと）＋ 島の仕掛け =====================
+// 第7章 干潮の道 → 第8章 灯台の灯 → 第9章 台風の夜 → 終章Ⅱ 星波の夜
+// 仕掛け: 灯台にのぼる（展望・夜は光が海を照らす。第8章で修理）、神社でお参り（鈴・二礼二拍手一礼）とおみくじ、台風（第9章）、星波の夜（夜光虫＋流星群）
+const STORY2 = { forceW: null, lh: null, shr: null, scene: 0, finT: 0 };
+STORY2.st = function () { const p = GAME.p; p.s2 = p.s2 || {}; return p.s2; };
+STORY2.active = id => { const s = STORY.st(); return CHAPTERS[s.ch] && CHAPTERS[s.ch].id === id && s.intro[id]; };
+STORY2.gen = () => NPCS.find(n => n.def.id === 'v_gen');
+CHAPTERS[6].outro = CHAPTERS[6].outro.map(l => l[1].indexOf('おしまい') >= 0 ? ['', '～ ほしなみ島ぐらし　第一部　おしまい ～　（物語は 第二部「星波の夜」へつづきます）'] : l);
+CHAPTERS.push(
+  { id: 'c7', no: '第7章', title: '干潮の道', rank: '潮のみちる島',
+    goals: [{ t: '干潮のとき、砂の道を歩いて はなれ小島へ渡る', n: 1, prog: () => (GAME.p.tide && GAME.p.tide.walked) ? 1 : 0 }, { t: 'はなれ小島の洞くつで「古い手帳」を見つける（干潮のとき）', n: 1, prog: () => STORY2.st().diary ? 1 : 0 }],
+    intro: [['', '――第二部「星波の夜」'], ['ゲンじい', '{P}、知っとるか。むかしはのう、潮が大きく引くと、はなれ小島まで砂の道ができたんじゃ。'], ['リン', 'えっ、歩いて行けるの？'], ['ゲンじい', 'うむ。リンのじいさん――灯台守のトシ坊も、よく渡っとった。小島の岩の洞くつに、何やら大事なもんをしまっとったらしい。'], ['ハナ', '潮の時刻は、左上の時計の下に出ているわよ。「干潮」のころに浜へ行ってみて。'], ['リン', 'おじいちゃんの大事なもの…。{P}さん、いっしょにさがしてくれる？']],
+    outro: [['', '――洞くつの奥、ブリキの缶の中に、潮のにおいのする手帳があった。'], ['リン', 'これ…おじいちゃんの字だ。「灯台日誌」…。'], ['リン', '「嵐のすぎた、月のない静かな夜。波は星のように光り、空からは星がふる。島の人はそれを星波（ほしなみ）とよぶ。灯台の灯は、その夜に帰る船の目じるしなり」'], ['ゲンじい', '星波…。島の名前のもとじゃ。わしも子どものころ、いちどだけ見た。'], ['カイ', 'ねえ、でも…最近、灯台の灯り、なんだか暗くない？']] },
+  { id: 'c8', no: '第8章', title: '灯台の灯', rank: '灯台の見守る島',
+    goals: [{ t: '灯台にのぼって、灯りのようすを見る（灯台の前で Space）', n: 1, prog: () => STORY2.st().lhUp ? 1 : 0 }, { t: '灯台の灯りを直す（部品代 30,000円）', n: 1, prog: () => STORY2.st().lamp === 'fixed' ? 1 : 0 }, { t: '夜、灯台の光が海を照らすのを見る', n: 1, prog: () => STORY2.st().beamSeen ? 1 : 0 }],
+    intro: [['', '――その夜から、灯台の灯りが消えてしまった。'], ['タクミ', 'レンズを回す歯車がすりへってるっす。部品さえあれば、おれが直せるっす！'], ['ゲンじい', '灯台が消えたままじゃ、夜の漁から帰る船が困る。…たのむぞ、{P}。'], ['', '💡 灯台の前で Space：灯台にのぼれます']],
+    outro: [['', '――ゆっくりと光が回りはじめ、夜の海に白い道をえがいた。'], ['ゲンじい', 'おお…。わしの親父の船も、嵐の夜はこの光をたよりに帰ってきたんじゃ。'], ['リン', 'おじいちゃん、見てる？ 灯台、ちゃんと光ってるよ。'], ['', '――ザザ…［島内放送］「台風が島に近づいています。船の点検と、戸じまりをお願いします」'], ['ソラ', 'げっ、台風！？']] },
+  { id: 'c9', no: '第9章', title: '台風の夜', rank: '嵐にまけない島',
+    goals: [{ t: '港で漁船のロープを結びなおす（船のそばで F）', n: 1, prog: () => STORY2.st().moored ? 1 : 0 }, { t: 'ゲンじいの家のようすを見に行く', n: 1, prog: () => STORY2.st().genOk ? 1 : 0 }, { t: '家に入って、台風が通りすぎるのを待つ', n: 1, prog: () => STORY2.st().waited ? 1 : 0 }, { t: '台風のあと、浜で拾いものを3つひろう', n: 3, prog: () => STORY2.st().shoreBase === undefined ? 0 : (GAME.p.stats.shoreN || 0) - STORY2.st().shoreBase }],
+    intro: [['', '――空が暗くなり、強い風が吹きはじめた。'], ['ゲンじい', '{P}！ 港の漁船のロープを見てきてくれ。波にさらわれたら大ごとじゃ。'], ['ミオ', 'みんなは家の中にいるよ。{P}さんも、用がすんだら家に入ってね！'], ['', '🌀 台風です。港 → ゲンじいの家 → 自分の家の順に']],
+    outro: [['', '――つぎの朝。うそみたいに澄んだ空に、大きな虹がかかっていた。'], ['ゲンじい', '{P}のおかげで、船も家もぶじじゃった。ありがとうよ。'], ['コタロウ', '浜にいっぱい流れついてるー！ 宝さがしだ！'], ['リン', 'ねえ…嵐のすぎた、静かな夜。おじいちゃんの手帳の「星波の夜」って、きっともうすぐだよ。'], ['ユキ', 'その夜を、絵にかきたいな。…みんなで見に行こうよ。']] },
+  { id: 'c10', no: '終章Ⅱ', title: '星波の夜', rank: '星波の島',
+    goals: [{ t: '島の「めずらしい出来事」を4つ見る（手帳の図鑑）', n: 4, prog: () => RARE.count() }, { t: '夜、夕日の浜でみんなと星波を待つ', n: 1, prog: () => STORY2.st().finale ? 1 : 0 }],
+    intro: [['リン', '星波の夜は、いつ来るかわからない。でも、この島をよく見ている人のところに来る…って、手帳に書いてあった。'], ['ゲンじい', '流れ星、霧の海、虹、スナメリ…。島のめずらしいもんを見て歩けば、きっと出会えるじゃろう。'], ['', '🌠 めずらしい出来事を4つ見たら、夜に「夕日の浜」へ']],
+    outro: [['', '――浜に集まったみんなの前で、波が、星になった。'], ['ユキ', '…きれい。絵にかけないくらい。'], ['ゲンじい', 'これじゃ…わしが子どものころに見た、星波じゃ。'], ['リン', 'おじいちゃん。灯台の光も、星も、波も、ぜんぶつながってるね。'], ['ミオ', '{P}さんが来てくれたから、この島にまた星波が来たんだよ。'], ['', '――その夜、{I}島の灯台は、いつもより長く海を照らしていた。'], ['', '～ ほしなみ島ぐらし　第二部「星波の夜」　おしまい ～　（島での暮らしは、まだまだ続きます）']] },
+);
+// the tower used to unlock after the last chapter: keep it tied to the end of part 1
+{ const _sd = STORY.syncDev; STORY.syncDev = function () { _sd.apply(this, arguments); const s = STORY.st(), p = GAME.p; if (s.done && s.done.c6) { const d = BIG_DEV.find(q => q.id === 'tower'); if (d && !DEV.includes(d)) DEV.push(d); if (d && p && p.devSeen) p.devSeen.tower = 1; } }; }
+
+// ---------- 灯台: のぼる（展望）・修理・光 ----------
+STORY2.lhNear = function () { const L = PLACED.lighthouse; return L && !PL.veh && !GAME.inside && Math.hypot(PL.x - L.x, PL.z - L.z) < 4.2; };
+STORY2.lhView = function () {
+  const s2 = STORY2.st(); s2.lhUp = 1; GAME.dirty = true; GAME.modal = 'lhview'; STORY2.lh = { yaw: Math.atan2(PL.x - PLACED.lighthouse.x, PL.z - PLACED.lighthouse.z), t: 0 };
+  let ov = document.getElementById('lhOv'); if (!ov) { ov = document.createElement('div'); ov.id = 'lhOv'; ov.style.cssText = 'position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:rgba(20,30,40,.62);color:#fff;padding:8px 16px;border-radius:999px;font:700 14px "M PLUS Rounded 1c",sans-serif;z-index:30;pointer-events:none'; document.body.appendChild(ov); }
+  ov.textContent = '🗼 灯台の上から　（Esc でおりる）'; ov.hidden = false; try { SND.play('step_wood0', { vol: 0.4 }); } catch (e) { }
+  if (STORY2.active('c8') && s2.lamp !== 'fixed') setTimeout(() => { if (GAME.modal === 'lhview') UI.toast('灯台の灯りが消えている…。タクミさんが言っていた歯車がすりへっているみたい（もう一度 Space で修理）'); }, 1500);
+  return true;
+};
+STORY2.lhFix = function () {
+  const s2 = STORY2.st(), p = GAME.p; GAME.modal = 'lhfix';
+  GAME.el.modal.innerHTML = `<div class="mbox journal"><div class="mh"><h2>🗼 灯台の修理</h2><button class="x" data-x="close" aria-label="とじる">×</button></div><div class="mb"><p>レンズを回す歯車がすりへっています。部品代を出せば、タクミさんが直してくれます。</p><p>部品代：<b>${yen(30000)}</b>　（所持金 ${yen(p.money || 0)}）</p><div class="row" style="display:flex;gap:8px"><button class="rel" data-fix="1" ${(p.money || 0) < 30000 ? 'disabled' : ''}>部品代を出して直す</button><button class="rel" data-up="1">灯台にのぼる</button><button class="rel" data-x="close">やめる</button></div></div></div>`;
+  GAME.el.modal.hidden = false; GAME.el.modal.querySelector('.journal').onclick = e => { if (e.target.closest('[data-x="close"]')) return GAME.closeModal(); if (e.target.closest('[data-up]')) { GAME.closeModal(); return STORY2.lhView(); }
+    const f = e.target.closest('[data-fix]'); if (f && !f.disabled) { p.money -= 30000; s2.lamp = 'fixed'; GAME.dirty = true; GAME.renderTracker(); GAME.closeModal(); try { SND.play('hammer1', { vol: 0.6 }); setTimeout(() => SND.play('hammer2', { vol: 0.6 }), 400); } catch (e) { } UI.toast('🔧 タクミさんが歯車を取りかえてくれた！ 夜になったら灯台の光を見てみよう'); GAME.check && GAME.check(); } };
+  return true;
+};
+{ const _co = GAME.camOverride; GAME.camOverride = function () {
+    if (GAME.modal === 'lhview' && STORY2.lh && PLACED.lighthouse) { const L = PLACED.lighthouse, V = STORY2.lh; V.t += 0.016; V.yaw += 0.0035; const a = V.yaw, r = 2.1;
+      camera.position.set(L.x + Math.sin(a) * r, L.y + 14.1, L.z + Math.cos(a) * r); camera.lookAt(L.x + Math.sin(a) * 80, L.y + 2, L.z + Math.cos(a) * 80); return true; }
+    if (STORY2.lh && GAME.modal !== 'lhview') { STORY2.lh = null; const ov = document.getElementById('lhOv'); if (ov) ov.hidden = true; }
+    return _co.apply(this, arguments); }; }
+// a soft, volumetric-looking beam (bright near the lamp and along its core, fading out along its length and at its edges)
+STORY2.beamMat = function () { if (STORY2.bm) return STORY2.bm; return STORY2.bm = new THREE.ShaderMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false, uniforms: { op: { value: 0 } },
+  vertexShader: 'varying vec2 vUv; varying vec3 vN, vV; void main(){ vUv = uv; vec4 mv = modelViewMatrix * vec4(position, 1.0); vN = normalMatrix * normal; vV = -mv.xyz; gl_Position = projectionMatrix * mv; }',
+  fragmentShader: 'uniform float op; varying vec2 vUv; varying vec3 vN, vV; void main(){ float f = abs(dot(normalize(vN), normalize(vV))); float a = pow(f, 2.0) * pow(clamp(vUv.y, 0.0, 1.0), 1.6) * smoothstep(1.0, 0.94, vUv.y); gl_FragColor = vec4(vec3(1.0, 0.95, 0.8) * a * op, 1.0); }' }); };
+// the turning beam leaves two glittering paths on the night sea
+{ const _us = updateStructures; updateStructures = function (t, night) { const r = _us.apply(this, arguments); const s2 = GAME.p && GAME.p.s2, off = !!(s2 && s2.lamp === 'broken');
+    if (BEAM.mesh && !BEAM.mesh.userData.soft) { BEAM.mesh.userData.soft = true; const m = STORY2.beamMat(), bg = new THREE.ConeGeometry(4.5, 60, 64, 1, true); bg.translate(0, -30, 0); bg.rotateZ(Math.PI / 2); BEAM.mesh.children.forEach(c => { if (c.isMesh) { c.material = m; c.geometry = bg; } }); BEAM.mats = []; }
+    STORY2.beamMat().uniforms.op.value = off ? 0 : night * 0.55;
+    const L = PLACED.lighthouse; if (!L || !BEAM.mesh) return r; const show = !off && night > 0.35 && !GAME.inside;
+    if (show && !STORY2.paths) { STORY2.paths = [RARE.makeRoad(), RARE.makeRoad()]; STORY2.paths.forEach(m => m.material.uniforms.col.value.set('#fff0c8')); }
+    if (STORY2.paths) STORY2.paths.forEach((m, k) => { m.visible = show; if (!show) return; const a = BEAM.mesh.rotation.y + k * Math.PI, dx = Math.cos(a), dz = -Math.sin(a); m.position.set(L.x + dx * 25, SEA.h + 0.07, L.z + dz * 25); m.rotation.y = Math.atan2(-dx, -dz); m.scale.set(14, 1, 420); m.material.uniforms.time.value = t; m.material.uniforms.op.value = 0.32 * night; });
+    return r; }; }
+
+// ---------- 神社: お参り・おみくじ ----------
+STORY2.shrSpot = function () { const C = PLACED.church; if (!C) return null; const [x, z] = toWorld(C, 0, 1.25); return { x, z, rot: C.rot + Math.PI }; };
+STORY2.shrNear = function () { const S = STORY2.shrSpot(); return S && !PL.veh && !GAME.inside && Math.hypot(PL.x - S.x, PL.z - S.z) < 1.7; };
+const OMIKUJI = [
+  ['大吉', 12, '願いごと：かなう。待ち人：海の向こうから来る。きょうは、めずらしいものに出会いやすい日。'],
+  ['中吉', 18, '失せ物：浜で見つかる。旅：近くの名所によし。空と海をよく見ておくとよいことがある。'],
+  ['小吉', 20, '商い：こつこつがよし。畑：水やりをわすれずに。'],
+  ['吉', 22, '学問：本を読むによし。釣り：朝まずめに分あり。'],
+  ['末吉', 18, '今はつぼみ。あせらず、あしたを待つべし。'],
+  ['凶', 10, '雨にぬれやすし。…でも大丈夫。おみくじは境内に結んで帰ろう。'],
+];
+STORY2.pray = function () {
+  const S = STORY2.shrSpot(); PL.x = S.x; PL.z = S.z; PL.rot = S.rot; STORY2.shr = { t: 0 }; GAME.modal = 'pray';
+  try { SND.play('coins', { vol: 0.5 }); setTimeout(() => SND.play('jingle', { vol: 0.55, rate: 1.2 }), 500); setTimeout(() => SND.play('place_wood', { vol: 0.5, rate: 1.6 }), 2450); setTimeout(() => SND.play('place_wood', { vol: 0.5, rate: 1.6 }), 2800); } catch (e) { }
+  setTimeout(() => { STORY2.shr = null; if (GAME.modal === 'pray') GAME.modal = null; STORY2.omikuji(); }, 4800); return true;
+};
+STORY2.omikuji = function () {
+  const p = GAME.p; p.stats.prayN = (p.stats.prayN || 0) + 1; GAME.dirty = true;
+  if (p.omikuji && p.omikuji.date === todayKey()) { UI.toast('🙏 お参りした。（おみくじは1日1回。きょうは「' + p.omikuji.rank + '」）'); return; }
+  const R = mulberry(hashStr(todayKey() + p.name + 'kuji')); let t = R() * 100, pick = OMIKUJI[0]; for (const o of OMIKUJI) { t -= o[1]; if (t <= 0) { pick = o; break; } }
+  p.omikuji = { date: todayKey(), rank: pick[0] }; GAME.modal = 'kuji';
+  GAME.el.modal.innerHTML = `<div class="mbox journal"><div class="mh"><h2>⛩️ おみくじ</h2><button class="x" data-x="close" aria-label="とじる">×</button></div><div class="mb"><div style="max-width:300px;margin:4px auto 10px;background:#fbf7ec;background-image:repeating-linear-gradient(90deg,rgba(150,120,80,.05) 0 2px,transparent 2px 7px);box-shadow:0 2px 10px rgba(60,40,20,.18);padding:0 0 14px;text-align:center;border-top:10px solid #b8322a;border-bottom:10px solid #b8322a"><div style="font:700 13px 'Shippori Mincho','Noto Serif JP',serif;letter-spacing:.4em;color:#7a2a20;padding:8px 0 2px;border-bottom:1px solid #e2cfb4">${esc(p.island)}島神社　御神籤</div><div style="font:900 52px 'Shippori Mincho','Noto Serif JP',serif;color:#b8302a;margin:10px 0 6px">${pick[0]}</div><div style="line-height:1.9;color:#3a2a20;padding:0 18px;font:500 14px 'Shippori Mincho','Noto Serif JP',serif">${esc(pick[2])}</div></div><p class="small">おみくじは1日1回。大吉・中吉の日は、めずらしい出来事に出会いやすくなります。</p></div></div>`;
+  GAME.el.modal.hidden = false; GAME.el.modal.querySelector('.journal').onclick = e => { if (e.target.closest('[data-x="close"]')) { GAME.closeModal(); if (pick[0] === '凶') UI.toast('おみくじを境内の木に結んだ。悪い運はここに置いていこう'); } };
+  try { SND.play('page', { vol: 0.6 }); } catch (e) { }
+};
+{ const _ah = animateHero; animateHero = function (dt) { const r = _ah.apply(this, arguments); const S = STORY2.shr; if (!S) return r; S.t += dt || 0.016; const t = S.t, P = PL.parts; if (!P || !P.spine) return r;
+    const bow = (a, b, deep) => { if (t < a || t > b) return 0; const k = (t - a) / (b - a); return Math.sin(k * Math.PI) * deep; };
+    const bw = bow(0.9, 1.6, 1.15) + bow(1.6, 2.3, 1.15) + bow(4.0, 4.7, 1.15) + (t > 2.9 && t < 3.9 ? 0.18 : 0);
+    P.spine.rotation.x = bw * 0.75; P.head.rotation.x = bw * 0.35; P.pelvis.rotation.x = 0;
+    const clap = t > 2.3 && t < 3.95; if (clap) { const c = (t > 2.4 && t < 2.5) || (t > 2.75 && t < 2.85) ? 0.12 : 0.22; P.upperArmL.rotation.set(-1.15, 0, -c); P.upperArmR.rotation.set(-1.15, 0, c); P.foreArmL.rotation.set(-0.5, 0, 0.6); P.foreArmR.rotation.set(-0.5, 0, -0.6); }
+    else { P.upperArmL.rotation.set(0, 0, -0.1); P.upperArmR.rotation.set(0, 0, 0.1); P.foreArmL.rotation.set(-0.15, 0, 0); P.foreArmR.rotation.set(-0.15, 0, 0); }
+    return r; }; }
+
+// ---------- 第7章: 洞くつの手帳 ----------
+STORY2.caveFind = function () { const s2 = STORY2.st(); if (!STORY2.active('c7') || s2.diary) return false; s2.diary = 1; GAME.dirty = true; PLAY.pose = 0.75; PLAY.poseK = 'pick'; try { SND.play('book_open', { vol: 0.6 }); } catch (e) { } UI.toast('📔 岩のすきまに、さびたブリキの缶…。中に「古い手帳」が入っていた！'); GAME.check && GAME.check(); return true; };
+
+// ---------- 第9章: 台風 ----------
+STORY2.debris = function () {
+  if (!SHORE.grp || !SHORE.spots || !SHORE.spots.length) return; const p = GAME.p, R = mulberry(hashStr(todayKey() + 'storm')), ids = ['driftwood', 'driftwood', 'glass_g', 'hamaguri', 'uni', 'kanizume', 'glass_c', 'itaya'];
+  ids.forEach((id, k) => { const i = 950 + k; if (p.shore.got.includes(i) || SHORE.items.some(q => q.i === i)) return; const s = SHORE.spots[Math.floor(R() * SHORE.spots.length)], it = { x: s[0] + (R() - 0.5) * 2, z: s[1] + (R() - 0.5) * 2, id, i, ry: R() * 6.28, ph: R() * 6 }, y = groundH(it.x, it.z); if (y < -0.05) return;
+    it.mesh = mergeLocal(SHORE.mesh(it)); it.mesh.scale.setScalar(['wood'].includes(SHORE.def(id).kind) ? 1 : 1.6); it.mesh.position.set(it.x, y, it.z); it.mesh.rotation.y = it.ry; SHORE.grp.add(it.mesh); SHORE.items.push(it); });
+};
+STORY2.stormStep = function (dt) {
+  const s2 = STORY2.st(); if (!STORY2.active('c9')) { if (s2.storm === 'on') s2.storm = 'after'; return; }
+  if (!s2.storm) { s2.storm = 'on'; GAME.dirty = true; }
+  if (s2.storm === 'on') {
+    STORY2.forceW = 'storm'; if (TIME.wmode !== 'auto' && TIME.weather !== 'storm') TIME.weather = 'storm';
+    const G0 = STORY2.gen(); if (s2.moored && !s2.genOk && G0 && Math.hypot(PL.x - G0.hx, PL.z - G0.hz) < 9 && !GAME.inside && STORY.ready()) { s2.genOk = 1; GAME.dirty = true; STORY.play([['ゲンじい', '（戸のむこうから）おお、{P}か！ わしは大丈夫じゃ。雨戸もしめた。'], ['ゲンじい', '船のロープも結びなおしてくれたか。ありがとうよ。…さ、おまえさんも早く家に入れ！']], () => GAME.check && GAME.check()); }
+    if (s2.moored && s2.genOk && GAME.inside) { STORY2.waitT = (STORY2.waitT || 0) + dt; if (STORY2.waitT > 6) { STORY2.waitT = 0; s2.waited = 1; s2.storm = 'after'; s2.calmUntil = Date.now() + 15 * 60000; s2.shoreBase = GAME.p.stats.shoreN || 0; STORY2.forceW = 'clear'; if (TIME.wmode !== 'auto') TIME.weather = 'clear'; GAME.dirty = true;
+      UI.toast('🌀 …ゴォォ……。風の音が、だんだん小さくなっていく。'); setTimeout(() => UI.toast('🌈 台風が通りすぎた！ 浜にいろいろ流れついているみたい'), 3500); setTimeout(() => { try { STORY2.debris(); } catch (e) { } }, 400); GAME.check && GAME.check(); } }
+  } else if (s2.storm === 'after') { STORY2.forceW = s2.calmUntil && Date.now() < s2.calmUntil ? 'clear' : null; if (s2.calmUntil && Date.now() < s2.calmUntil) STORY2.debris(); }
+};
+STORY2.boatNear = function () { const b = VEH.find(v => v.kind === 'boat'); return b && !PL.veh && Math.hypot(PL.x - b.x, PL.z - b.z) < 7 ? b : null; };
+
+// ---------- 終章Ⅱ: 星波の夜 ----------
+STORY2.finaleStep = function (dt) {
+  const s2 = STORY2.st(); if (!STORY2.active('c10') || s2.finale || STORY2.scene) return; if (RARE.count() < 4) return;
+  const hf = TIME.mode === 'real' ? GFX.solarHour(currentHour()) : currentHour(), night = hf > 19.4 || hf < 4.4, B = GAME.LM && GAME.LM.beach;
+  if (!night || !B || GAME.inside || PL.veh || Math.hypot(PL.x - B.x, PL.z - B.z) > 45 || !STORY.ready()) return;
+  STORY2.scene = 1; STORY2.forceW = 'clear'; if (TIME.wmode !== 'auto') TIME.weather = 'clear'; RARE.forceGlow = true; GAME.banner('🌊 星波の夜', 'みんなが浜に集まってきた…');
+  setTimeout(() => RARE.startShower(110), 2500);
+  STORY.play([['リン', '{P}さん！ みんなも来たよ。…ほら、風がやんだ。'], ['ゲンじい', '月のない、静かな夜じゃ。灯台の光も、ちゃんと回っとる。'], ['コタロウ', 'あっ！ 波が光った！'], ['ユキ', '青い…。波がくだけるたびに、星みたいに光ってる。'], ['ソラ', '上もだ！ 流れ星が、こんなにいっぱい…！'], ['ミオ', '願いごと、願いごと！ えっと…ずっとこの島で暮らせますように！'], ['', '――海の星と、空の星。その真ん中に、{I}島の灯台が立っていた。']],
+    () => { s2.finale = 1; GAME.dirty = true; STORY2.scene = 0; RARE.seen('yakouchu', true); setTimeout(() => { RARE.forceGlow = false; STORY2.forceW = null; }, 120000); GAME.check && GAME.check(); });
+};
+
+// ---------- prompts, keys, update ----------
+{ const _pr = GAME.prompt; GAME.prompt = function () {
+    if (GAME.p && !GAME.modal && !PL.veh && !GAME.inside) {
+      if (STORY2.lhNear()) return STORY2.active('c8') && STORY2.st().lhUp && STORY2.st().lamp !== 'fixed' ? 'Space：灯台の灯りを直す' : 'Space：灯台にのぼる';
+      if (STORY2.shrNear()) return 'Space：お参りする';
+      if (STORY2.active('c9') && STORY2.st().storm === 'on' && !STORY2.st().moored && STORY2.boatNear()) return 'F：漁船のロープを結びなおす';
+    }
+    return _pr.apply(this, arguments); }; }
+{ const _it = GAME.interact; GAME.interact = function () {
+    if (GAME.p && !PL.veh && !GAME.inside) { if (STORY2.lhNear()) return STORY2.active('c8') && STORY2.st().lhUp && STORY2.st().lamp !== 'fixed' ? STORY2.lhFix() : STORY2.lhView(); if (STORY2.shrNear()) return STORY2.pray(); }
+    return _it.apply(this, arguments); }; }
+{ const _fk = GAME.fishKey; GAME.fishKey = function () {
+    if (GAME.p && !GAME.modal && !LIFE.fish && STORY2.active('c9') && STORY2.st().storm === 'on' && !STORY2.st().moored && STORY2.boatNear()) { STORY2.st().moored = 1; GAME.dirty = true; PLAY.pose = 0.75; PLAY.poseK = 'pick'; try { SND.play('cloth', { vol: 0.6 }); } catch (e) { } UI.toast('⚓ 漁船のロープをしっかり結びなおした！ 次はゲンじいの家へ'); GAME.check && GAME.check(); return true; }
+    return _fk.apply(this, arguments); }; }
+{ const _u = GAME.update; GAME.update = function (dt) { const r = _u.apply(this, arguments); try { if (GAME.p) {
+      const s2 = STORY2.st(); dt = dt || 0.016;
+      // 第8章: the lamp goes dark when the chapter starts, and the beam has to be seen at night once fixed
+      if (STORY2.active('c8') && !s2.lamp) { s2.lamp = 'broken'; GAME.dirty = true; }
+      if (s2.lamp === 'fixed' && !s2.beamSeen && (GAME.night || 0) > 0.6 && !GAME.inside && PLACED.lighthouse && Math.hypot(PL.x - PLACED.lighthouse.x, PL.z - PLACED.lighthouse.z) < 260) { s2.beamSeen = 1; GAME.dirty = true; UI.toast('🗼 灯台の光が、夜の海をゆっくりと照らしている…'); GAME.check && GAME.check(); }
+      STORY2.stormStep(dt); STORY2.finaleStep(dt);
+      if (!STORY2.active('c9') && !STORY2.scene && STORY2.forceW === 'storm') STORY2.forceW = null;
+    } } catch (e) { if (!STORY2._err) { STORY2._err = 1; console.warn('story2', e); } } return r; }; }
 
 // ===================== CHARACTERS: livelier bodies and faces =====================
 // - a fuller walk / run cycle: knee flex at heel strike, hip drop + twist, counter-rotating torso, forward lean when running,
@@ -10143,7 +10589,8 @@ GFX.dayMist = function () {
 };
 GFX.atmo = function (hf, r, weather) {
   const U = GFX.U, night = r.night, wet = weather === 'rain' || weather === 'storm', snow = weather === 'snow', cloudy = weather === 'cloudy';
-  let d = 0.00042; if (cloudy) d = 0.0007; if (wet) d = 0.0026; if (snow) d = 0.0019;
+  const storm = weather === 'storm'; let d = 0.00042; if (cloudy) d = 0.0007; if (wet) d = storm ? 0.0034 : 0.0026; if (snow) d = 0.0019;
+  { const k = Math.min(1, (r.dt || 0.016) * 0.5); VEG.uWind.value += ((storm ? 3.4 : wet ? 1.5 : cloudy ? 1.15 : 1) - VEG.uWind.value) * k; if (waterMat) waterMat.uniforms.uStorm.value += ((storm ? 1 : wet ? 0.3 : 0) - waterMat.uniforms.uStorm.value) * k; } // wind in the trees, choppy sea
   const dawn = sstep(4.6, 5.8, hf) * (1 - sstep(7.4, 9.6, hf)), eve = sstep(16.6, 17.8, hf) * (1 - sstep(19.0, 20.2, hf));
   d *= (1 + eve * 0.45 + dawn * 0.35) * (1 - night * 0.3);
   let m = dawn * 0.78 * GFX.dayMist() * (cloudy ? 1.15 : 1) + eve * 0.05 + (wet ? 0.18 : 0) + (snow ? 0.12 : 0) + night * 0.05;
@@ -10158,8 +10605,11 @@ GFX.atmo = function (hf, r, weather) {
   const dt = Math.min(0.1, r.dt || 0.016), wt = wet ? 1 : snow ? 0.35 : 0; U.wet.x += (wt - U.wet.x) * Math.min(1, dt / (wt > U.wet.x ? 40 : 360)); if (GFX.force && GFX.force.wet !== undefined) U.wet.x = GFX.force.wet;
   for (const c of SKY.clouds) { c.material.color.multiplyScalar(wet ? 0.78 : cloudy || snow ? 0.9 : 1); c.material.opacity = wet ? 0.38 : cloudy || snow ? 0.72 : 0.95; } // under an overcast deck the puffs melt into it
   const su = SKY.mat.uniforms;
-  if (su.fogC) { su.fogC.value.copy(scene.fog.color); su.lowK.value = U.fogX.w * k; su.time.value = performance.now() / 1000; su.cloudC.value.copy(r.sky.cloud);
+  if (su.fogC) { su.fogC.value.copy(scene.fog.color); su.lowK.value = U.fogX.w * k; su.time.value = performance.now() / 1000; su.cloudC.value.copy(r.sky.cloud).multiplyScalar(storm ? 0.52 : wet ? 0.8 : 1);
     su.cirrus.value = wet ? 0 : cloudy ? 1.1 : snow ? 0.3 : 0.15 + 0.75 * ((GFX.dayMist() * 7.31) % 1); su.ovc.value = wet ? 1 : snow ? 0.85 : cloudy ? 0.55 : 0; }
+  // heavy weather on screen: rain sheets (a typhoon's are thick and slanted) and a darker exposure in a storm
+  if (typeof gradePass !== 'undefined' && gradePass) { const G = gradePass.uniforms, out = !GAME.inside, rk = out ? (storm ? 1 : weather === 'rain' ? 0.45 : 0) : 0; G.rainK.value += (rk - G.rainK.value) * Math.min(1, dt * 1.5); G.rtime.value += dt; G.slant.value = storm ? 0.42 : 0.06; G.aspect.value = innerWidth / Math.max(1, innerHeight);
+    if (RAIN) RAIN.material.opacity = storm ? 0.62 : 0.42; const ex = out ? (storm ? 0.66 : wet ? 0.86 : 1) : 1; renderer.toneMappingExposure += (ex - renderer.toneMappingExposure) * Math.min(1, dt * 1.2); if (GFX.force && GFX.force.storm) { G.rainK.value = rk; renderer.toneMappingExposure = ex; } }
 };
 // real sunrise / sunset for the Seto Inland Sea (34.35°N 133.5°E) by date; the sky's colour keys assume sunrise 5:36 and sunset 18:36,
 // so in real-time mode the clock hour is remapped onto them (late October: sunrise ≈6:20, sunset ≈17:15). Preset times (朝・昼・夕方・夜) stay as they are.
@@ -10232,14 +10682,19 @@ async function init() {
   composer.addPass(new OutputPass());
   // display grade (after tone mapping, sRGB): near-neutral saturation with the lime greens tamed, gentle filmic contrast,
   // warm highlights / cool shadows, soft vignette
-  gradePass = new ShaderPass({ uniforms: { tDiffuse: { value: null }, sat: { value: 1.05 }, gsat: { value: 0.8 }, warm: { value: 0.022 }, con: { value: 0.16 }, vig: { value: 0.2 } },
+  gradePass = new ShaderPass({ uniforms: { tDiffuse: { value: null }, sat: { value: 1.05 }, gsat: { value: 0.8 }, warm: { value: 0.022 }, con: { value: 0.16 }, vig: { value: 0.2 }, rainK: { value: 0 }, rtime: { value: 0 }, slant: { value: 0 }, aspect: { value: 1.7 } },
     vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
-    fragmentShader: `uniform sampler2D tDiffuse; uniform float sat, gsat, warm, con, vig; varying vec2 vUv;
+    fragmentShader: `uniform sampler2D tDiffuse; uniform float sat, gsat, warm, con, vig, rainK, rtime, slant, aspect; varying vec2 vUv;
+      float rh(float n){ return fract(sin(n * 12.9898) * 43758.5453); }
+      vec3 rainLayer(vec2 uv, float cols, float sp, float len, float seed){ float u = (uv.x + (uv.y - 0.5) * slant / aspect) * cols; float cx = floor(u), fx = fract(u); float r1 = rh(cx + seed), r2 = rh(cx * 1.7 + seed + 3.1);
+        float y = fract(uv.y * (1.2 + r2) + rtime * sp * (0.8 + r1 * 0.5) + r1 * 9.0); float seg = smoothstep(0.0, 0.015, y) * (1.0 - smoothstep(0.015, len, y)); float w = 1.0 - smoothstep(0.08, 0.45, abs(fx - 0.5)); return vec3(seg * w * step(0.45, r2)); }
       void main(){ vec4 c = texture2D(tDiffuse, vUv); float l = dot(c.rgb, vec3(0.2126,0.7152,0.0722));
         float gw = clamp((c.g - max(c.r, c.b)) * 5.0, 0.0, 1.0) * smoothstep(0.05, 0.25, c.g);
         c.rgb = mix(vec3(l), c.rgb, sat * mix(1.0, gsat, gw)); c.r += 0.025 * gw * c.g;
         c.rgb += vec3(warm, warm * 0.45, -warm * 0.8) * smoothstep(0.35, 0.95, l) + vec3(-0.008, 0.0, 0.012) * (1.0 - smoothstep(0.0, 0.3, l));
         c.rgb = clamp(c.rgb, 0.0, 1.0); c.rgb = mix(c.rgb, c.rgb * c.rgb * (3.0 - 2.0 * c.rgb), con);
+        if (rainK > 0.001) { // rain sheets in screen space (near streaks long and faint, far ones short and fine) + a grey, damp cast
+          vec3 rn = rainLayer(vUv, 260.0, 2.6, 0.22, 0.0) * 0.55 + rainLayer(vUv, 120.0, 3.4, 0.38, 7.0) * 0.45; c.rgb = mix(c.rgb, vec3(dot(c.rgb, vec3(0.333))) * vec3(0.93, 0.96, 1.0), rainK * 0.22); c.rgb += vec3(0.78, 0.82, 0.88) * rn * rainK * 0.2; }
         float d = distance(vUv, vec2(0.5)); c.rgb *= 1.0 - vig * smoothstep(0.38, 0.88, d); gl_FragColor = c; }` });
   composer.addPass(gradePass);
   const rs = () => { renderer.setSize(innerWidth, innerHeight, false); composer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); }; addEventListener('resize', rs); rs();
@@ -10315,7 +10770,7 @@ function loop(now) {
   const hf = currentHour(), focus = new THREE.Vector3(PL.x, PL.y, PL.z);
   const st = updateSky(hf, focus, camera, dt, TIME.weather); updateStructures(T, st.night); GAME.night = st.night;
   if (waterMat) waterMat.uniforms.time.value = T; VEG.uTime.value = T;
-  if (RAIN) { RAIN.visible = TIME.weather === 'rain'; if (RAIN.visible) { const p = RAIN.geometry.attributes.position; for (let k = 0; k < p.count; k += 2) { const L = RAIN.userData.len[k >> 1]; let y = p.getY(k) - (20 + L * 12) * dt; if (y < 0) y += 30; p.setY(k, y); p.setY(k + 1, y - L); } p.needsUpdate = true; RAIN.position.set(camera.position.x, camera.position.y - 12, camera.position.z); } }
+  if (RAIN) { RAIN.visible = TIME.weather === 'rain' || TIME.weather === 'storm'; RAIN.rotation.z = TIME.weather === 'storm' ? 0.35 : 0; if (RAIN.visible) { const p = RAIN.geometry.attributes.position; for (let k = 0; k < p.count; k += 2) { const L = RAIN.userData.len[k >> 1]; let y = p.getY(k) - (20 + L * 12) * dt; if (y < 0) y += 30; p.setY(k, y); p.setY(k + 1, y - L); } p.needsUpdate = true; RAIN.position.set(camera.position.x, camera.position.y - 12, camera.position.z); } }
   hudT -= dt; if (hudT < 0) { hudT = 0.5; UI.clock(hf); }
   const v = !PL.veh && nearVehicle(), nv = !PL.veh && !DIALOG.npc && nearVillager();
   const gp = GAME.inside ? GAME.roomPrompt() : GAME.prompt();

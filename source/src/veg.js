@@ -1,18 +1,18 @@
 // ===================== VEGETATION =====================
-const VEG = { uTime: { value: 0 }, uDayK: { value: 1 }, trees: [] }; // uDayK: foliage translucency glow, off at night
+const VEG = { uTime: { value: 0 }, uDayK: { value: 1 }, uWind: { value: 1 }, trees: [] }; // uDayK: foliage translucency glow, off at night
 function windify(mat, amount, useHeight = true) {
   const prev = mat.onBeforeCompile;
   mat.onBeforeCompile = (sh, r) => {
     if (prev) prev(sh, r);
     sh.fragmentShader = sh.fragmentShader.replace('#include <normal_fragment_begin>', THREE.ShaderChunk.normal_fragment_begin.replace('normal *= faceDirection;', '').replace('normal = normal * faceDirection;', ''));
-    sh.uniforms.uTime = VEG.uTime;
-    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nuniform float uTime;').replace('#include <begin_vertex>', `#include <begin_vertex>
+    sh.uniforms.uTime = VEG.uTime; sh.uniforms.uWind = VEG.uWind;
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nuniform float uTime; uniform float uWind;').replace('#include <begin_vertex>', `#include <begin_vertex>
       #ifdef USE_INSTANCING
         vec3 ip = instanceMatrix[3].xyz;
       #else
         vec3 ip = vec3(0.0);
       #endif
-      float sw = ${useHeight ? 'max(position.y, 0.0)' : '1.0'} * ${amount.toFixed(3)};
+      float sw = ${useHeight ? 'max(position.y, 0.0)' : '1.0'} * ${amount.toFixed(3)} * uWind;
       transformed.x += sin(uTime * 1.6 + ip.x * 0.21 + ip.z * 0.13 + position.y * 0.6) * sw;
       transformed.z += cos(uTime * 1.3 + ip.z * 0.19 + position.x * 0.5) * sw * 0.6;`);
   };

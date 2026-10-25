@@ -295,25 +295,25 @@ function buildWater(scene) {
   const ht = new THREE.DataTexture(TERR.hData, n, n, THREE.RedFormat, THREE.HalfFloatType); ht.magFilter = ht.minFilter = THREE.LinearFilter; ht.needsUpdate = true; TERR.hTex = ht;
   waterMat = new THREE.ShaderMaterial({
     transparent: true, depthWrite: false, fog: true, side: THREE.DoubleSide,
-    uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { time: { value: 0 }, uResort: TERR.uResort, uResortC: TERR.uResortC, sunDir: { value: new THREE.Vector3(0.5, 0.8, 0.3) }, sunCol: { value: new THREE.Color(1, 0.95, 0.85) }, skyCol: { value: new THREE.Color(0.3, 0.55, 0.9) }, horCol: { value: new THREE.Color(0.7, 0.8, 0.9) }, ambient: { value: 1 }, hTex: { value: null }, nTex: { value: null }, mTex: { value: null }, wsize: { value: size } }]),
+    uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { time: { value: 0 }, uTide: { value: 0 }, uStorm: { value: 0 }, uGlow: { value: 0 }, uResort: TERR.uResort, uResortC: TERR.uResortC, sunDir: { value: new THREE.Vector3(0.5, 0.8, 0.3) }, sunCol: { value: new THREE.Color(1, 0.95, 0.85) }, skyCol: { value: new THREE.Color(0.3, 0.55, 0.9) }, horCol: { value: new THREE.Color(0.7, 0.8, 0.9) }, ambient: { value: 1 }, hTex: { value: null }, nTex: { value: null }, mTex: { value: null }, wsize: { value: size } }]),
     vertexShader: `attribute float aFoam; varying float vFoam; varying vec3 vW; #include <fog_pars_vertex>
       void main(){ vFoam = aFoam; vec4 wp = modelMatrix * vec4(position,1.0); vW = wp.xyz; vec4 mvPosition = viewMatrix * wp; gl_Position = projectionMatrix * mvPosition; #include <fog_vertex> }`.replace(/#include <(\w+)>/g, '\n#include <$1>\n'),
-    fragmentShader: `uniform float time, wsize, ambient, uResort; uniform vec3 sunDir, sunCol, skyCol, horCol, uResortC; uniform sampler2D hTex, nTex, mTex; varying vec3 vW; varying float vFoam;
+    fragmentShader: `uniform float time, wsize, ambient, uResort, uTide, uStorm, uGlow; uniform vec3 sunDir, sunCol, skyCol, horCol, uResortC; uniform sampler2D hTex, nTex, mTex; varying vec3 vW; varying float vFoam;
       #include <common>
       #include <fog_pars_fragment>
       void main(){
         vec2 huv = (vW.xz + wsize * 0.5) / wsize; bool outside = huv.x < 0.0 || huv.y < 0.0 || huv.x > 1.0 || huv.y > 1.0;
-        float th = outside ? -30.0 : texture2D(hTex, huv).r; float depth = max(0.0, vW.y - th) + step(0.05, vW.y) * 0.45;
+        float th = outside ? -30.0 : texture2D(hTex, huv).r; float isSea = 1.0 - step(0.02, abs(vW.y - uTide)); float depth = max(0.0, vW.y - th) + step(0.05, vW.y) * 0.45 * (1.0 - isSea);
         vec3 gN = normalize(cross(dFdx(vW), dFdy(vW))); float fall = 1.0 - smoothstep(0.45, 0.75, abs(gN.y));
         vec2 uv = vW.xz * 0.032;
         vec3 n1 = texture2D(nTex, uv + vec2(time * 0.011, time * 0.007)).xyz * 2.0 - 1.0;
         vec3 n2 = texture2D(nTex, uv * 2.3 - vec2(time * 0.009, -time * 0.013)).xyz * 2.0 - 1.0;
         vec3 n3 = texture2D(nTex, vW.xz * 0.004 + time * 0.002).xyz * 2.0 - 1.0;
         float calm = mix(0.55, 1.0, smoothstep(0.0, 3.0, depth));
-        vec3 N = normalize(vec3((n1.x + n2.x * 0.6 + n3.x * 0.8) * calm, 4.5, (n1.y + n2.y * 0.6 + n3.y * 0.8) * calm));
+        float chop = calm * (1.0 + uStorm * 1.8 * isSea); vec3 N = normalize(vec3((n1.x + n2.x * 0.6 + n3.x * 0.8) * chop, 4.5, (n1.y + n2.y * 0.6 + n3.y * 0.8) * chop));
         vec3 V = normalize(cameraPosition - vW);
         float fres = 0.02 + 0.98 * pow(1.0 - max(dot(N, V), 0.0), 5.0);
-        float sea = step(vW.y, 0.15) * (outside ? 0.0 : 1.0), rs = uResort * sea;
+        float sea = isSea * (outside ? 0.0 : 1.0), rs = uResort * sea;
         vec3 shallow = mix(vec3(0.12, 0.78, 0.72), vec3(0.20, 0.80, 0.76), rs), mid = mix(vec3(0.02, 0.42, 0.62), vec3(0.03, 0.60, 0.72), rs), deep = mix(vec3(0.012, 0.16, 0.36), vec3(0.01, 0.24, 0.52), rs);
         vec3 wc = mix(shallow, mid, smoothstep(0.2, mix(3.5, 5.5, rs), depth)); wc = mix(wc, deep, smoothstep(mix(3.5, 7.0, rs), mix(18.0, 26.0, rs), depth));
         float near = 1.0 - smoothstep(uResortC.z * 0.6, uResortC.z * 1.4, distance(vW.xz, uResortC.xy));
@@ -331,7 +331,10 @@ function buildWater(scene) {
         float bands = smoothstep(0.8, 1.0, sin(depth * 7.0 - time * 1.4 + fn * 5.0) * 0.5 + 0.5) * (1.0 - smoothstep(0.1, 1.4, depth));
         float bub = texture2D(mTex, vW.xz * 0.35 + vec2(time * 0.05, time * 0.08)).b;
         float foam = clamp(shore * smoothstep(0.3, 0.6, fn) * 0.9 + bands * 0.65 + vFoam * smoothstep(0.35, 0.65, bub + vFoam * 0.3), 0.0, 1.0) * (outside ? 0.0 : 1.0);
-        col = mix(col, vec3(0.92, 0.96, 0.98) * ambient, foam);
+        float wcap = smoothstep(0.6, 0.82, texture2D(mTex, vW.xz * 0.05 + vec2(time * 0.05, time * 0.02)).b + n1.x * 0.15) * uStorm * isSea * smoothstep(1.5, 5.0, depth); foam = max(foam, wcap * 0.85); // whitecaps in a storm
+        col = mix(col, mix(vec3(0.92, 0.96, 0.98) * ambient, vec3(0.04, 0.45, 1.0) * 1.25, uGlow), foam); // at a 夜光虫 night the breaking foam itself glows blue
+        float spk = smoothstep(0.74, 0.95, texture2D(mTex, vW.xz * 0.6 + vec2(time * 0.07, -time * 0.05)).b) * smoothstep(0.04, 0.2, depth) * (1.0 - smoothstep(0.5, 3.0, depth)) * (0.5 + 0.5 * sin(time * 3.0 + vW.x * 1.7));
+        col += vec3(0.02, 0.38, 1.0) * uGlow * clamp(bands * 0.7 + spk * 0.9, 0.0, 1.0); // and sparkles in the shallows
         float alpha = smoothstep(0.0, 0.45, depth) * mix(mix(0.42, 0.4, rs), 0.97, smoothstep(0.3, mix(6.0, 9.0, rs), depth)); alpha = max(alpha, reef * 0.8); alpha = max(alpha, foam * 0.85 * smoothstep(0.0, 0.12, depth)); alpha = mix(alpha, 1.0, fres * 0.6); if (outside) alpha = 1.0;
         if (fall > 0.0) { // falling water: streaks moving down
           float hc = vW.x * 0.9 + vW.z * 0.9; float st = texture2D(mTex, vec2(hc * 0.35, vW.y * 0.12 + time * 0.9)).b; float st2 = texture2D(mTex, vec2(hc * 0.8, vW.y * 0.3 + time * 1.6)).g;

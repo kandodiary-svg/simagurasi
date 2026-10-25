@@ -62,7 +62,8 @@ GFX.dayMist = function () {
 };
 GFX.atmo = function (hf, r, weather) {
   const U = GFX.U, night = r.night, wet = weather === 'rain' || weather === 'storm', snow = weather === 'snow', cloudy = weather === 'cloudy';
-  let d = 0.00042; if (cloudy) d = 0.0007; if (wet) d = 0.0026; if (snow) d = 0.0019;
+  const storm = weather === 'storm'; let d = 0.00042; if (cloudy) d = 0.0007; if (wet) d = storm ? 0.0034 : 0.0026; if (snow) d = 0.0019;
+  { const k = Math.min(1, (r.dt || 0.016) * 0.5); VEG.uWind.value += ((storm ? 3.4 : wet ? 1.5 : cloudy ? 1.15 : 1) - VEG.uWind.value) * k; if (waterMat) waterMat.uniforms.uStorm.value += ((storm ? 1 : wet ? 0.3 : 0) - waterMat.uniforms.uStorm.value) * k; } // wind in the trees, choppy sea
   const dawn = sstep(4.6, 5.8, hf) * (1 - sstep(7.4, 9.6, hf)), eve = sstep(16.6, 17.8, hf) * (1 - sstep(19.0, 20.2, hf));
   d *= (1 + eve * 0.45 + dawn * 0.35) * (1 - night * 0.3);
   let m = dawn * 0.78 * GFX.dayMist() * (cloudy ? 1.15 : 1) + eve * 0.05 + (wet ? 0.18 : 0) + (snow ? 0.12 : 0) + night * 0.05;
@@ -77,8 +78,11 @@ GFX.atmo = function (hf, r, weather) {
   const dt = Math.min(0.1, r.dt || 0.016), wt = wet ? 1 : snow ? 0.35 : 0; U.wet.x += (wt - U.wet.x) * Math.min(1, dt / (wt > U.wet.x ? 40 : 360)); if (GFX.force && GFX.force.wet !== undefined) U.wet.x = GFX.force.wet;
   for (const c of SKY.clouds) { c.material.color.multiplyScalar(wet ? 0.78 : cloudy || snow ? 0.9 : 1); c.material.opacity = wet ? 0.38 : cloudy || snow ? 0.72 : 0.95; } // under an overcast deck the puffs melt into it
   const su = SKY.mat.uniforms;
-  if (su.fogC) { su.fogC.value.copy(scene.fog.color); su.lowK.value = U.fogX.w * k; su.time.value = performance.now() / 1000; su.cloudC.value.copy(r.sky.cloud);
+  if (su.fogC) { su.fogC.value.copy(scene.fog.color); su.lowK.value = U.fogX.w * k; su.time.value = performance.now() / 1000; su.cloudC.value.copy(r.sky.cloud).multiplyScalar(storm ? 0.52 : wet ? 0.8 : 1);
     su.cirrus.value = wet ? 0 : cloudy ? 1.1 : snow ? 0.3 : 0.15 + 0.75 * ((GFX.dayMist() * 7.31) % 1); su.ovc.value = wet ? 1 : snow ? 0.85 : cloudy ? 0.55 : 0; }
+  // heavy weather on screen: rain sheets (a typhoon's are thick and slanted) and a darker exposure in a storm
+  if (typeof gradePass !== 'undefined' && gradePass) { const G = gradePass.uniforms, out = !GAME.inside, rk = out ? (storm ? 1 : weather === 'rain' ? 0.45 : 0) : 0; G.rainK.value += (rk - G.rainK.value) * Math.min(1, dt * 1.5); G.rtime.value += dt; G.slant.value = storm ? 0.42 : 0.06; G.aspect.value = innerWidth / Math.max(1, innerHeight);
+    if (RAIN) RAIN.material.opacity = storm ? 0.62 : 0.42; const ex = out ? (storm ? 0.66 : wet ? 0.86 : 1) : 1; renderer.toneMappingExposure += (ex - renderer.toneMappingExposure) * Math.min(1, dt * 1.2); if (GFX.force && GFX.force.storm) { G.rainK.value = rk; renderer.toneMappingExposure = ex; } }
 };
 // real sunrise / sunset for the Seto Inland Sea (34.35°N 133.5°E) by date; the sky's colour keys assume sunrise 5:36 and sunset 18:36,
 // so in real-time mode the clock hour is remapped onto them (late October: sunrise ≈6:20, sunset ≈17:15). Preset times (朝・昼・夕方・夜) stay as they are.

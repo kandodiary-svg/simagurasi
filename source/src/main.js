@@ -14,14 +14,19 @@ async function init() {
   composer.addPass(new OutputPass());
   // display grade (after tone mapping, sRGB): near-neutral saturation with the lime greens tamed, gentle filmic contrast,
   // warm highlights / cool shadows, soft vignette
-  gradePass = new ShaderPass({ uniforms: { tDiffuse: { value: null }, sat: { value: 1.05 }, gsat: { value: 0.8 }, warm: { value: 0.022 }, con: { value: 0.16 }, vig: { value: 0.2 } },
+  gradePass = new ShaderPass({ uniforms: { tDiffuse: { value: null }, sat: { value: 1.05 }, gsat: { value: 0.8 }, warm: { value: 0.022 }, con: { value: 0.16 }, vig: { value: 0.2 }, rainK: { value: 0 }, rtime: { value: 0 }, slant: { value: 0 }, aspect: { value: 1.7 } },
     vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
-    fragmentShader: `uniform sampler2D tDiffuse; uniform float sat, gsat, warm, con, vig; varying vec2 vUv;
+    fragmentShader: `uniform sampler2D tDiffuse; uniform float sat, gsat, warm, con, vig, rainK, rtime, slant, aspect; varying vec2 vUv;
+      float rh(float n){ return fract(sin(n * 12.9898) * 43758.5453); }
+      vec3 rainLayer(vec2 uv, float cols, float sp, float len, float seed){ float u = (uv.x + (uv.y - 0.5) * slant / aspect) * cols; float cx = floor(u), fx = fract(u); float r1 = rh(cx + seed), r2 = rh(cx * 1.7 + seed + 3.1);
+        float y = fract(uv.y * (1.2 + r2) + rtime * sp * (0.8 + r1 * 0.5) + r1 * 9.0); float seg = smoothstep(0.0, 0.015, y) * (1.0 - smoothstep(0.015, len, y)); float w = 1.0 - smoothstep(0.08, 0.45, abs(fx - 0.5)); return vec3(seg * w * step(0.45, r2)); }
       void main(){ vec4 c = texture2D(tDiffuse, vUv); float l = dot(c.rgb, vec3(0.2126,0.7152,0.0722));
         float gw = clamp((c.g - max(c.r, c.b)) * 5.0, 0.0, 1.0) * smoothstep(0.05, 0.25, c.g);
         c.rgb = mix(vec3(l), c.rgb, sat * mix(1.0, gsat, gw)); c.r += 0.025 * gw * c.g;
         c.rgb += vec3(warm, warm * 0.45, -warm * 0.8) * smoothstep(0.35, 0.95, l) + vec3(-0.008, 0.0, 0.012) * (1.0 - smoothstep(0.0, 0.3, l));
         c.rgb = clamp(c.rgb, 0.0, 1.0); c.rgb = mix(c.rgb, c.rgb * c.rgb * (3.0 - 2.0 * c.rgb), con);
+        if (rainK > 0.001) { // rain sheets in screen space (near streaks long and faint, far ones short and fine) + a grey, damp cast
+          vec3 rn = rainLayer(vUv, 260.0, 2.6, 0.22, 0.0) * 0.55 + rainLayer(vUv, 120.0, 3.4, 0.38, 7.0) * 0.45; c.rgb = mix(c.rgb, vec3(dot(c.rgb, vec3(0.333))) * vec3(0.93, 0.96, 1.0), rainK * 0.22); c.rgb += vec3(0.78, 0.82, 0.88) * rn * rainK * 0.2; }
         float d = distance(vUv, vec2(0.5)); c.rgb *= 1.0 - vig * smoothstep(0.38, 0.88, d); gl_FragColor = c; }` });
   composer.addPass(gradePass);
   const rs = () => { renderer.setSize(innerWidth, innerHeight, false); composer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); }; addEventListener('resize', rs); rs();
@@ -97,7 +102,7 @@ function loop(now) {
   const hf = currentHour(), focus = new THREE.Vector3(PL.x, PL.y, PL.z);
   const st = updateSky(hf, focus, camera, dt, TIME.weather); updateStructures(T, st.night); GAME.night = st.night;
   if (waterMat) waterMat.uniforms.time.value = T; VEG.uTime.value = T;
-  if (RAIN) { RAIN.visible = TIME.weather === 'rain'; if (RAIN.visible) { const p = RAIN.geometry.attributes.position; for (let k = 0; k < p.count; k += 2) { const L = RAIN.userData.len[k >> 1]; let y = p.getY(k) - (20 + L * 12) * dt; if (y < 0) y += 30; p.setY(k, y); p.setY(k + 1, y - L); } p.needsUpdate = true; RAIN.position.set(camera.position.x, camera.position.y - 12, camera.position.z); } }
+  if (RAIN) { RAIN.visible = TIME.weather === 'rain' || TIME.weather === 'storm'; RAIN.rotation.z = TIME.weather === 'storm' ? 0.35 : 0; if (RAIN.visible) { const p = RAIN.geometry.attributes.position; for (let k = 0; k < p.count; k += 2) { const L = RAIN.userData.len[k >> 1]; let y = p.getY(k) - (20 + L * 12) * dt; if (y < 0) y += 30; p.setY(k, y); p.setY(k + 1, y - L); } p.needsUpdate = true; RAIN.position.set(camera.position.x, camera.position.y - 12, camera.position.z); } }
   hudT -= dt; if (hudT < 0) { hudT = 0.5; UI.clock(hf); }
   const v = !PL.veh && nearVehicle(), nv = !PL.veh && !DIALOG.npc && nearVillager();
   const gp = GAME.inside ? GAME.roomPrompt() : GAME.prompt();

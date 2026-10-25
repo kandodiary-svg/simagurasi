@@ -42,6 +42,9 @@ rural.js
 bus.js
 countryside.js
 play.js
+tide.js
+rare.js
+story2.js
 chara.js
 gfx.js
 main.js

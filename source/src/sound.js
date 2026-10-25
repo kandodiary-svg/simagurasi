@@ -76,7 +76,7 @@ SND.probe = function () {
 // ---------- main update ----------
 SND.update = function (dt) {
   if (!SND.ctx || SND.ctx.state !== 'running') return; SND.t += dt;
-  const e = SND.env, h = currentHour(), rain = TIME.weather === 'rain', inside = !!GAME.inside, title = GAME.modal === 'title';
+  const e = SND.env, h = currentHour(), rain = TIME.weather === 'rain' || TIME.weather === 'storm', inside = !!GAME.inside, title = GAME.modal === 'title';
   SND.envT -= dt; if (SND.envT <= 0 && !title) { SND.envT = 0.3; try { SND.probe(); } catch (er) { } }
   const ct = SND.ctx.currentTime;
   // BGM: a little quieter at night, a little muffled indoors

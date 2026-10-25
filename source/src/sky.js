@@ -98,8 +98,8 @@ function skyAt(hf) {
 }
 function updateSky(hf, focus, cam, dt, weather) {
   const s = skyAt(hf);
-  const wet = weather === 'rain', cloudy = weather === 'cloudy' || wet || weather === 'snow';
-  if (cloudy) { const gray = new THREE.Color(wet ? '#7d8a95' : '#a9b6c2'); s.top.lerp(gray, wet ? 0.75 : 0.5); s.hor.lerp(gray, wet ? 0.7 : 0.45); s.sunI *= wet ? 0.35 : 0.6; s.cloud.lerp(new THREE.Color('#b8c2cc'), 0.5); }
+  const storm = weather === 'storm', wet = weather === 'rain' || storm, cloudy = weather === 'cloudy' || wet || weather === 'snow';
+  if (cloudy) { const gray = new THREE.Color(storm ? '#5f6a74' : wet ? '#7d8a95' : '#a9b6c2'); s.top.lerp(gray, wet ? 0.8 : 0.5); s.hor.lerp(gray, wet ? 0.75 : 0.45); s.sunI *= storm ? 0.22 : wet ? 0.35 : 0.6; if (storm) s.hemiI *= 0.75; s.cloud.lerp(new THREE.Color('#b8c2cc'), 0.5); }
   // sun path: rises in the east (+x), sets in the west, tilted to the south (+z)
   const ang = (hf - 5.6) / 13 * Math.PI;
   const sunDir = new THREE.Vector3(Math.cos(ang), Math.sin(ang) * 0.85 + 0.02, 0.45).normalize();
@@ -113,7 +113,7 @@ function updateSky(hf, focus, cam, dt, weather) {
   SKY.mat.uniforms.sunDir.value.copy(sunDir); SKY.mat.uniforms.sunCol.value.copy(s.sunCol).convertSRGBToLinear().multiplyScalar(sunDir.y > -0.05 ? 1 : 0); SKY.mat.uniforms.night.value = night * (cloudy ? 0.2 : 1);
   SKY.dome.position.copy(cam.position);
   updateEnv(s, sunDir, night, weather);
-  scene.fog.color.copy(s.hor); scene.fog.near = wet ? 120 : 260; scene.fog.far = wet ? 1400 : 3200;
+  scene.fog.color.copy(s.hor); scene.fog.near = wet ? 120 : 260; scene.fog.far = wet ? 1400 : 3200; // (near/far are unused by the gfx.js fog)
   for (const c of SKY.clouds) { c.material.color.copy(s.cloud); c.material.opacity = cloudy ? 1 : 0.92; c.position.x += c.userData.speed * dt; if (c.position.x > 2600) c.position.x = -2600; }
   SKY.isl.children.forEach(m => m.material.color.copy(s.hor).lerp(new THREE.Color('#4f6a70'), 0.45));
   if (waterMat) { const u = waterMat.uniforms; u.sunDir.value.copy(sunDir); u.sunCol.value.copy(s.sunCol).convertSRGBToLinear().multiplyScalar(Math.min(1.4, s.sunI / 2)); u.skyCol.value.copy(s.top).convertSRGBToLinear(); u.horCol.value.copy(s.hor).convertSRGBToLinear(); u.ambient.value = 0.25 + Math.min(1, s.hemiI) * 0.8; }

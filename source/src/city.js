@@ -2,7 +2,7 @@
 const CITY = { list: [], chunks: new Map(), anims: [], curB: null, rotOff: 0, type: 'hotelL', cat: 'stay', mode: 'build', CH: 160, t: 0 };
 TOOLS.push({ id: 'city', name: '街づくり', icon: '🏙️', key: 'Y', hint: '建てたい建物をえらんで、場所をクリック（R で向きを変える）。物語クリア後、お金を払えば何度でも建てられます', brush: false });
 TOOL_LV.city = 7;
-CITY.unlocked = () => !!(GAME.p && STORY.st().ch >= CHAPTERS.length);
+CITY.unlocked = () => !!(GAME.p && STORY.st().ch >= 7); // after part 1 (第一部) of the story
 CITY.addAnim = a => { a.b = CITY.curB; CITY.anims.push(a); if (CITY.curChunk) CITY.curChunk.anims.push(a); return a; };
 // ---------- shared materials / textures so that many buildings cost few draw calls ----------
 { const _wm = worldMat; worldMat = function (map, scale) { const m = _wm.apply(this, arguments); m.userData.wm = (map ? map.uuid : '-') + ':' + scale; return m; }; }
