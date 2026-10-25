@@ -16,9 +16,9 @@ const PAL = [
   { d: md(4, 25), grass: [0.98, 1.08, 0.85], tuft: '#c8f4a0', broad: [[1.08, 1.18, 0.85], [1.12, 1.2, 0.82], [1.02, 1.12, 0.88], [1.1, 1.2, 0.85]], bush: [1.05, 1.12, 0.88], pine: [1, 1, 1] },
   { d: md(7, 20), grass: [0.92, 1.0, 0.86], tuft: '#d8f0a8', broad: [[1, 1, 1], [1, 1, 1], [1, 1, 1], [1, 1, 1]], bush: [1, 1, 1], pine: [1, 1, 1] },
   { d: md(9, 10), grass: [1.0, 0.98, 0.8], tuft: '#e4eca0', broad: [[1.05, 1.0, 0.85], [1.1, 1.05, 0.8], [1, 1, 0.9], [1.08, 1.0, 0.82]], bush: [1.02, 1, 0.88], pine: [1, 1, 1] },
-  { d: md(10, 20), grass: [1.2, 0.92, 0.72], tuft: '#f6dc90', broad: [[1.35, 0.95, 0.55], [1.6, 1.15, 0.4], [1, 1, 0.8], [1.55, 0.85, 0.45]], bush: [1.2, 0.95, 0.6], pine: [0.95, 0.98, 0.92] },
-  { d: md(11, 18), grass: [1.45, 0.82, 0.72], tuft: '#ffd080', broad: [[2.2, 0.5, 0.35], [1.9, 1.35, 0.35], [0.95, 0.95, 0.8], [2.0, 0.85, 0.3]], bush: [1.5, 0.8, 0.45], pine: [0.9, 0.95, 0.88] },
-  { d: md(12, 10), grass: [1.45, 0.75, 0.9], tuft: '#f6d48c', broad: [[1.5, 0.6, 0.42], [1.3, 0.9, 0.5], [0.85, 0.92, 0.8], [1.4, 0.7, 0.4]], bush: [1.1, 0.85, 0.6], pine: [0.86, 0.9, 0.85] },
+  { d: md(10, 20), grass: [1.2, 0.92, 0.72], tuft: '#f6dc90', broad: [[1.06, 1.0, 0.84], [1.1, 1.04, 0.8], [1, 1, 0.86], [1.08, 1.0, 0.82]], bush: [1.2, 0.95, 0.6], pine: [0.95, 0.98, 0.92] },
+  { d: md(11, 18), grass: [1.45, 0.82, 0.72], tuft: '#ffd080', broad: [[1.1, 0.95, 0.78], [1.12, 1.0, 0.75], [0.95, 0.95, 0.82], [1.1, 0.95, 0.76]], bush: [1.5, 0.8, 0.45], pine: [0.9, 0.95, 0.88] },
+  { d: md(12, 10), grass: [1.45, 0.75, 0.9], tuft: '#f6d48c', broad: [[1.05, 0.9, 0.75], [1.05, 0.95, 0.75], [0.85, 0.92, 0.8], [1.05, 0.9, 0.74]], bush: [1.1, 0.85, 0.6], pine: [0.86, 0.9, 0.85] },
 ];
 function palAt(doy) {
   let a = PAL[PAL.length - 1], b = PAL[0];
@@ -32,6 +32,8 @@ SEASON.apply = function () {
   const d = seasonDate(), doy = md(d.getMonth() + 1, d.getDate()); SEASON.doy = doy; SEASON.key = seasonKey(doy);
   const P = palAt(doy), sn = SEASON.snow, mixS = (c) => c.map((v, i) => v + (SNOWY[i] - v) * sn * 0.55);
   SEASON.u.grass.value.setRGB(...P.grass); SEASON.u.snow.value = sn;
+  { const D = [[md(1, 1), 0.52], [md(3, 1), 0.45], [md(4, 10), 0.16], [md(5, 15), 0.06], [md(7, 25), 0.1], [md(8, 25), 0.18], [md(9, 25), 0.22], [md(10, 25), 0.32], [md(11, 25), 0.46], [md(12, 31), 0.52]]; let dv = 0.6; for (let i = 0; i < D.length - 1; i++) if (doy >= D[i][0] && doy <= D[i + 1][0]) { const t = (doy - D[i][0]) / Math.max(1, D[i + 1][0] - D[i][0]); dv = D[i][1] + (D[i + 1][1] - D[i][1]) * t; } (SEASON.u.dry || (SEASON.u.dry = { value: 0 })).value = dv; }
+  try { if (typeof KOYO !== 'undefined') KOYO.apply(doy); } catch (e) { console.warn('koyo', e); }
   const bare = inDoy(doy, md(12, 8), md(3, 15)), sak = rampDoy(doy, md(3, 22), md(3, 31), md(4, 8), md(4, 16));
   const FM = VEG.fmats || {};
   for (const [k, o] of Object.entries(FM)) {

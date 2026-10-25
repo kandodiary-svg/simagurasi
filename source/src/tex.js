@@ -52,7 +52,7 @@ function makeTextures() {
   }
   // ---- asphalt ----
   {
-    const S = 512, A = hex('#34373d'), B = hex('#4b4e55');
+    const S = 512, A = hex('#474744'), B = hex('#5c5c57');
     TEX.asphalt = toTex(pixelTex(S, (i, j) => { const n = pfbm(i / 60, j / 60, 8.53, 41, 4); let col = mixc(A, B, n); const f = (hash2(i, j, 17) - 0.5) * 34, sp = hash2(i, j, 18) > 0.985 ? 40 : 0; return [col[0] + f + sp, col[1] + f + sp, col[2] + f + sp]; })[0]);
   }
   // ---- concrete ----

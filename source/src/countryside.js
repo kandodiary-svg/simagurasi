@@ -147,7 +147,7 @@ CTRY.festival = function (g) {
   const m = CTRY.month(), C = PLACED.church; if (!C || !(m === 10 || (m === 11 && new Date().getDate() <= 5))) return;
   const red = stdM('#c8282a', 0.8, 0, { side: THREE.DoubleSide }), white = stdM('#f4f0e6', 0.8, 0, { side: THREE.DoubleSide }), pole = stdM('#8a6644', 0.8);
   for (const sx of [-1, 1]) for (let k = 0; k < 4; k++) { const [x, z] = toWorld(C, sx * 1.6, 11 - k * 2.6), y = C.y; const s = sub(g, x, y, z, C.rot); CY(s, 0.03, 3.4, pole, 0, 1.7, 0, 6); const f = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 2.0), k % 2 ? white : red); f.position.set(sx * 0.27, 2.25, 0); f.rotation.y = Math.PI / 2; s.add(f); B(s, 0.03, 0.03, 0.6, pole, sx * 0.27, 3.27, 0).rotation.y = Math.PI / 2; }
-  const ch = stdM('#f2d090', 0.6, 0, { emissive: new THREE.Color('#ffb050'), emissiveIntensity: 0.4 }); for (let k = 0; k < 7; k++) { const [x, z] = toWorld(C, -1.8 + k * 0.6, 12.6); const l = SP(g, 0.14, ch, x, C.y + 3.55, z, 1.3, 8); }
+  const ch = stdM('#f2d090', 0.6, 0, { emissive: new THREE.Color('#ffb050'), emissiveIntensity: 0.4 }), cap = stdM('#2a2422', 0.7); for (const sx of [-1, 1]) for (let k = 0; k < 4; k++) { const [x, z] = toWorld(C, sx * 2.05, 11 - k * 2.6 - 1.3); const s2 = sub(g, x, C.y, z, C.rot); CY(s2, 0.025, 2.9, pole, 0, 1.45, 0, 6); B(s2, 0.03, 0.03, 0.45, pole, 0, 2.85, 0).rotation.x = 0; SP(s2, 0.17, ch, 0, 2.42, 0.2, 1.35, 10); CY(s2, 0.1, 0.05, cap, 0, 2.66, 0.2, 10); CY(s2, 0.1, 0.05, cap, 0, 2.18, 0.2, 10); }
 };
 { const _cb2 = CTRY.build; CTRY.build = function () { _cb2.apply(this, arguments); try { CTRY.festival(CTRY.group); } catch (e) { console.warn('fest', e); } }; }
 // keep the shrine grounds free of grass and flowers

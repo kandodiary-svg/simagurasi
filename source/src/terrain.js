@@ -38,15 +38,19 @@ function editable(k) { return !G.prot[k] && G.roadDist[k] > 4.4 && G.H0[k] > -4;
 function terrainMaterial() {
   const m = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.96, metalness: 0 });
   m.onBeforeCompile = sh => {
-    Object.assign(sh.uniforms, { tGrass: { value: TEX.grass }, tDirt: { value: TEX.dirt }, tRock: { value: TEX.rock }, tSand: { value: TEX.sand }, tMacro: { value: TEX.macro }, uGrassTint: SEASON.u.grass, uSnow: SEASON.u.snow, uResort: TERR.uResort });
+    Object.assign(sh.uniforms, { tGrass: { value: TEX.grass }, tDirt: { value: TEX.dirt }, tRock: { value: TEX.rock }, tSand: { value: TEX.sand }, tMacro: { value: TEX.macro }, uGrassTint: SEASON.u.grass, uDry: SEASON.u.dry || (SEASON.u.dry = { value: 0.2 }), uSnow: SEASON.u.snow, uResort: TERR.uResort });
     sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nattribute vec4 splat; varying vec4 vSplat; varying vec3 vWPos; varying vec3 vWNor;')
       .replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvSplat = splat; vWPos = (modelMatrix * vec4(transformed, 1.0)).xyz; vWNor = normalize(mat3(modelMatrix) * objectNormal);');
-    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform sampler2D tGrass, tDirt, tRock, tSand, tMacro; uniform vec3 uGrassTint; uniform float uSnow, uResort; varying vec4 vSplat; varying vec3 vWPos; varying vec3 vWNor;')
+    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform sampler2D tGrass, tDirt, tRock, tSand, tMacro; uniform vec3 uGrassTint; uniform float uDry, uSnow, uResort; varying vec4 vSplat; varying vec3 vWPos; varying vec3 vWNor;')
       .replace('#include <map_fragment>', `
         vec2 wuv = vWPos.xz;
         vec3 mc = texture2D(tMacro, wuv * 0.0045).rgb; float m2 = texture2D(tMacro, wuv * 0.019).g; float nz = texture2D(tMacro, wuv * 0.07).b;
         vec3 grass = mix(texture2D(tGrass, wuv * 0.21).rgb, texture2D(tGrass, wuv * 0.057 + 0.3).rgb, 0.45);
         grass *= uGrassTint; grass *= 0.68 + 0.55 * mc.r; grass = mix(grass, grass * vec3(0.8, 0.92, 0.85), smoothstep(0.35, 0.15, mc.g)); grass = mix(grass, grass * vec3(1.12, 1.02, 0.7), smoothstep(0.52, 0.78, m2) * 0.8);
+        { float gl = dot(grass, vec3(0.3, 0.59, 0.11)); grass = mix(grass, vec3(gl), 0.14);
+          float dp = smoothstep(0.42, 0.7, mc.b * 0.6 + m2 * 0.4 + (nz - 0.5) * 0.25);
+          vec3 straw = vec3(0.6, 0.53, 0.33) * (gl / 0.5) * (0.92 + 0.22 * nz);
+          grass = mix(grass, straw * (0.9 + 0.2 * mc.r), clamp(uDry * (0.12 + 0.95 * dp), 0.0, 0.7)); }
         vec3 dirt = texture2D(tDirt, wuv * 0.23).rgb * (0.85 + 0.3 * mc.g);
         vec3 an = abs(normalize(vWNor)); an = pow(an, vec3(4.0)); an /= (an.x + an.y + an.z);
         vec3 rock = texture2D(tRock, vWPos.zy * 0.11).rgb * an.x + texture2D(tRock, wuv * 0.11).rgb * an.y + texture2D(tRock, vWPos.xy * 0.11).rgb * an.z;
@@ -314,7 +318,7 @@ function buildWater(scene) {
         vec3 V = normalize(cameraPosition - vW);
         float fres = 0.02 + 0.98 * pow(1.0 - max(dot(N, V), 0.0), 5.0);
         float sea = isSea * (outside ? 0.0 : 1.0), rs = uResort * sea;
-        vec3 shallow = mix(vec3(0.12, 0.78, 0.72), vec3(0.20, 0.80, 0.76), rs), mid = mix(vec3(0.02, 0.42, 0.62), vec3(0.03, 0.60, 0.72), rs), deep = mix(vec3(0.012, 0.16, 0.36), vec3(0.01, 0.24, 0.52), rs);
+        vec3 shallow = mix(vec3(0.2, 0.54, 0.48), vec3(0.20, 0.80, 0.76), rs), mid = mix(vec3(0.07, 0.34, 0.39), vec3(0.03, 0.60, 0.72), rs), deep = mix(vec3(0.03, 0.17, 0.25), vec3(0.01, 0.24, 0.52), rs);
         vec3 wc = mix(shallow, mid, smoothstep(0.2, mix(3.5, 5.5, rs), depth)); wc = mix(wc, deep, smoothstep(mix(3.5, 7.0, rs), mix(18.0, 26.0, rs), depth));
         float near = 1.0 - smoothstep(uResortC.z * 0.6, uResortC.z * 1.4, distance(vW.xz, uResortC.xy));
         float rk = texture2D(mTex, vW.xz * 0.018).r * 0.6 + texture2D(mTex, vW.xz * 0.05 + 0.3).g * 0.4;

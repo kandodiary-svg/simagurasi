@@ -607,7 +607,7 @@ function makeTextures() {
   }
   // ---- asphalt ----
   {
-    const S = 512, A = hex('#34373d'), B = hex('#4b4e55');
+    const S = 512, A = hex('#474744'), B = hex('#5c5c57');
     TEX.asphalt = toTex(pixelTex(S, (i, j) => { const n = pfbm(i / 60, j / 60, 8.53, 41, 4); let col = mixc(A, B, n); const f = (hash2(i, j, 17) - 0.5) * 34, sp = hash2(i, j, 18) > 0.985 ? 40 : 0; return [col[0] + f + sp, col[1] + f + sp, col[2] + f + sp]; })[0]);
   }
   // ---- concrete ----
@@ -786,15 +786,19 @@ function editable(k) { return !G.prot[k] && G.roadDist[k] > 4.4 && G.H0[k] > -4;
 function terrainMaterial() {
   const m = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.96, metalness: 0 });
   m.onBeforeCompile = sh => {
-    Object.assign(sh.uniforms, { tGrass: { value: TEX.grass }, tDirt: { value: TEX.dirt }, tRock: { value: TEX.rock }, tSand: { value: TEX.sand }, tMacro: { value: TEX.macro }, uGrassTint: SEASON.u.grass, uSnow: SEASON.u.snow, uResort: TERR.uResort });
+    Object.assign(sh.uniforms, { tGrass: { value: TEX.grass }, tDirt: { value: TEX.dirt }, tRock: { value: TEX.rock }, tSand: { value: TEX.sand }, tMacro: { value: TEX.macro }, uGrassTint: SEASON.u.grass, uDry: SEASON.u.dry || (SEASON.u.dry = { value: 0.2 }), uSnow: SEASON.u.snow, uResort: TERR.uResort });
     sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nattribute vec4 splat; varying vec4 vSplat; varying vec3 vWPos; varying vec3 vWNor;')
       .replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvSplat = splat; vWPos = (modelMatrix * vec4(transformed, 1.0)).xyz; vWNor = normalize(mat3(modelMatrix) * objectNormal);');
-    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform sampler2D tGrass, tDirt, tRock, tSand, tMacro; uniform vec3 uGrassTint; uniform float uSnow, uResort; varying vec4 vSplat; varying vec3 vWPos; varying vec3 vWNor;')
+    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform sampler2D tGrass, tDirt, tRock, tSand, tMacro; uniform vec3 uGrassTint; uniform float uDry, uSnow, uResort; varying vec4 vSplat; varying vec3 vWPos; varying vec3 vWNor;')
       .replace('#include <map_fragment>', `
         vec2 wuv = vWPos.xz;
         vec3 mc = texture2D(tMacro, wuv * 0.0045).rgb; float m2 = texture2D(tMacro, wuv * 0.019).g; float nz = texture2D(tMacro, wuv * 0.07).b;
         vec3 grass = mix(texture2D(tGrass, wuv * 0.21).rgb, texture2D(tGrass, wuv * 0.057 + 0.3).rgb, 0.45);
         grass *= uGrassTint; grass *= 0.68 + 0.55 * mc.r; grass = mix(grass, grass * vec3(0.8, 0.92, 0.85), smoothstep(0.35, 0.15, mc.g)); grass = mix(grass, grass * vec3(1.12, 1.02, 0.7), smoothstep(0.52, 0.78, m2) * 0.8);
+        { float gl = dot(grass, vec3(0.3, 0.59, 0.11)); grass = mix(grass, vec3(gl), 0.14);
+          float dp = smoothstep(0.42, 0.7, mc.b * 0.6 + m2 * 0.4 + (nz - 0.5) * 0.25);
+          vec3 straw = vec3(0.6, 0.53, 0.33) * (gl / 0.5) * (0.92 + 0.22 * nz);
+          grass = mix(grass, straw * (0.9 + 0.2 * mc.r), clamp(uDry * (0.12 + 0.95 * dp), 0.0, 0.7)); }
         vec3 dirt = texture2D(tDirt, wuv * 0.23).rgb * (0.85 + 0.3 * mc.g);
         vec3 an = abs(normalize(vWNor)); an = pow(an, vec3(4.0)); an /= (an.x + an.y + an.z);
         vec3 rock = texture2D(tRock, vWPos.zy * 0.11).rgb * an.x + texture2D(tRock, wuv * 0.11).rgb * an.y + texture2D(tRock, vWPos.xy * 0.11).rgb * an.z;
@@ -1062,7 +1066,7 @@ function buildWater(scene) {
         vec3 V = normalize(cameraPosition - vW);
         float fres = 0.02 + 0.98 * pow(1.0 - max(dot(N, V), 0.0), 5.0);
         float sea = isSea * (outside ? 0.0 : 1.0), rs = uResort * sea;
-        vec3 shallow = mix(vec3(0.12, 0.78, 0.72), vec3(0.20, 0.80, 0.76), rs), mid = mix(vec3(0.02, 0.42, 0.62), vec3(0.03, 0.60, 0.72), rs), deep = mix(vec3(0.012, 0.16, 0.36), vec3(0.01, 0.24, 0.52), rs);
+        vec3 shallow = mix(vec3(0.2, 0.54, 0.48), vec3(0.20, 0.80, 0.76), rs), mid = mix(vec3(0.07, 0.34, 0.39), vec3(0.03, 0.60, 0.72), rs), deep = mix(vec3(0.03, 0.17, 0.25), vec3(0.01, 0.24, 0.52), rs);
         vec3 wc = mix(shallow, mid, smoothstep(0.2, mix(3.5, 5.5, rs), depth)); wc = mix(wc, deep, smoothstep(mix(3.5, 7.0, rs), mix(18.0, 26.0, rs), depth));
         float near = 1.0 - smoothstep(uResortC.z * 0.6, uResortC.z * 1.4, distance(vW.xz, uResortC.xy));
         float rk = texture2D(mTex, vW.xz * 0.018).r * 0.6 + texture2D(mTex, vW.xz * 0.05 + 0.3).g * 0.4;
@@ -5000,7 +5004,7 @@ function shopFront(g, hs, o) {
   // striped awning with scalloped valance
   const aw = W + 0.2, ad = 1.7, am = pick2(A.awn, R), ay = B0 + 2.75; const a = new THREE.Mesh(new THREE.PlaneGeometry(aw, ad), am); a.rotation.x = -Math.PI / 2 + 0.38; a.position.set(0, ay - Math.sin(0.38) * ad / 2, fz + Math.cos(0.38) * ad / 2); a.castShadow = true; g.add(a);
   const vy = ay - Math.sin(0.38) * ad, vz = fz + Math.cos(0.38) * ad, nS = Math.round(aw / 0.4); const sm = A.awnSolid[A.awn.indexOf(am)];
-  for (let k = 0; k < nS; k++) { const sc = new THREE.Mesh(new THREE.CircleGeometry(aw / nS / 2, 10, Math.PI, Math.PI), k % 2 ? MAT.white : sm); sc.position.set(-aw / 2 + (k + 0.5) * aw / nS, vy, vz); g.add(sc); const back = sc.clone(); back.rotation.y = Math.PI; g.add(back); }
+  B(g, aw, 0.3, 0.03, sm, 0, vy - 0.14, vz); void nS; // a plain straight valance (日よけテント), like a Japanese corner shop
   for (const sx of [-1, 1]) ROD(g, 0.03, A.railM, [sx * (aw / 2 - 0.1), ay, fz], [sx * (aw / 2 - 0.1), vy, vz]);
   // vending machines, banners, bench, red post
   vendingMachine(g, -W / 2 + 0.55, z + 1.0, 0, 0); vendingMachine(g, -W / 2 + 1.6, z + 1.0, 0, 1);
@@ -5862,9 +5866,9 @@ const PAL = [
   { d: md(4, 25), grass: [0.98, 1.08, 0.85], tuft: '#c8f4a0', broad: [[1.08, 1.18, 0.85], [1.12, 1.2, 0.82], [1.02, 1.12, 0.88], [1.1, 1.2, 0.85]], bush: [1.05, 1.12, 0.88], pine: [1, 1, 1] },
   { d: md(7, 20), grass: [0.92, 1.0, 0.86], tuft: '#d8f0a8', broad: [[1, 1, 1], [1, 1, 1], [1, 1, 1], [1, 1, 1]], bush: [1, 1, 1], pine: [1, 1, 1] },
   { d: md(9, 10), grass: [1.0, 0.98, 0.8], tuft: '#e4eca0', broad: [[1.05, 1.0, 0.85], [1.1, 1.05, 0.8], [1, 1, 0.9], [1.08, 1.0, 0.82]], bush: [1.02, 1, 0.88], pine: [1, 1, 1] },
-  { d: md(10, 20), grass: [1.2, 0.92, 0.72], tuft: '#f6dc90', broad: [[1.35, 0.95, 0.55], [1.6, 1.15, 0.4], [1, 1, 0.8], [1.55, 0.85, 0.45]], bush: [1.2, 0.95, 0.6], pine: [0.95, 0.98, 0.92] },
-  { d: md(11, 18), grass: [1.45, 0.82, 0.72], tuft: '#ffd080', broad: [[2.2, 0.5, 0.35], [1.9, 1.35, 0.35], [0.95, 0.95, 0.8], [2.0, 0.85, 0.3]], bush: [1.5, 0.8, 0.45], pine: [0.9, 0.95, 0.88] },
-  { d: md(12, 10), grass: [1.45, 0.75, 0.9], tuft: '#f6d48c', broad: [[1.5, 0.6, 0.42], [1.3, 0.9, 0.5], [0.85, 0.92, 0.8], [1.4, 0.7, 0.4]], bush: [1.1, 0.85, 0.6], pine: [0.86, 0.9, 0.85] },
+  { d: md(10, 20), grass: [1.2, 0.92, 0.72], tuft: '#f6dc90', broad: [[1.06, 1.0, 0.84], [1.1, 1.04, 0.8], [1, 1, 0.86], [1.08, 1.0, 0.82]], bush: [1.2, 0.95, 0.6], pine: [0.95, 0.98, 0.92] },
+  { d: md(11, 18), grass: [1.45, 0.82, 0.72], tuft: '#ffd080', broad: [[1.1, 0.95, 0.78], [1.12, 1.0, 0.75], [0.95, 0.95, 0.82], [1.1, 0.95, 0.76]], bush: [1.5, 0.8, 0.45], pine: [0.9, 0.95, 0.88] },
+  { d: md(12, 10), grass: [1.45, 0.75, 0.9], tuft: '#f6d48c', broad: [[1.05, 0.9, 0.75], [1.05, 0.95, 0.75], [0.85, 0.92, 0.8], [1.05, 0.9, 0.74]], bush: [1.1, 0.85, 0.6], pine: [0.86, 0.9, 0.85] },
 ];
 function palAt(doy) {
   let a = PAL[PAL.length - 1], b = PAL[0];
@@ -5878,6 +5882,8 @@ SEASON.apply = function () {
   const d = seasonDate(), doy = md(d.getMonth() + 1, d.getDate()); SEASON.doy = doy; SEASON.key = seasonKey(doy);
   const P = palAt(doy), sn = SEASON.snow, mixS = (c) => c.map((v, i) => v + (SNOWY[i] - v) * sn * 0.55);
   SEASON.u.grass.value.setRGB(...P.grass); SEASON.u.snow.value = sn;
+  { const D = [[md(1, 1), 0.52], [md(3, 1), 0.45], [md(4, 10), 0.16], [md(5, 15), 0.06], [md(7, 25), 0.1], [md(8, 25), 0.18], [md(9, 25), 0.22], [md(10, 25), 0.32], [md(11, 25), 0.46], [md(12, 31), 0.52]]; let dv = 0.6; for (let i = 0; i < D.length - 1; i++) if (doy >= D[i][0] && doy <= D[i + 1][0]) { const t = (doy - D[i][0]) / Math.max(1, D[i + 1][0] - D[i][0]); dv = D[i][1] + (D[i + 1][1] - D[i][1]) * t; } (SEASON.u.dry || (SEASON.u.dry = { value: 0 })).value = dv; }
+  try { if (typeof KOYO !== 'undefined') KOYO.apply(doy); } catch (e) { console.warn('koyo', e); }
   const bare = inDoy(doy, md(12, 8), md(3, 15)), sak = rampDoy(doy, md(3, 22), md(3, 31), md(4, 8), md(4, 16));
   const FM = VEG.fmats || {};
   for (const [k, o] of Object.entries(FM)) {
@@ -8777,7 +8783,7 @@ FSH.updatePanel = function () {
 { const _ok2 = GAME.onKey; GAME.onKey = function (e) { if (!e.repeat && e.code === 'KeyT' && this.p && !this.modal && !EDIT.on && !PL.veh && !LIFE.fish && FSH.holdKg() > 0.05) { const S = DECO.ship, H = this.LM.harbor; if ((S && Math.hypot(PL.x - S.x, PL.z - S.z) < 12) || (H && Math.hypot(PL.x - H.x, PL.z - H.z) < 60)) { FSH.openLanding(true); return true; } } return _ok2.apply(this, arguments); }; }
 { const _p2 = GAME.prompt; GAME.prompt = function () { if (this.p && !PL.veh && !this.modal && this.nearShip && this.nearShip() && FSH.holdKg() > 0.05) return `Space：出荷所　T：網の魚を水揚げ（魚倉 ${FSH.holdKg().toFixed(0)}kg）`; return _p2.apply(this, arguments); }; }
 // version label so you can tell whether the page has updated
-const GAME_VER = '36（10/25）';
+const GAME_VER = '37（10/26）';
 { const v = document.createElement('div'); v.id = 'verTag'; v.textContent = 'ver.' + GAME_VER; v.style.cssText = 'position:fixed;left:6px;bottom:4px;z-index:5;font-size:10px;color:rgba(255,255,255,.75);text-shadow:0 1px 2px rgba(0,0,0,.6);pointer-events:none;font-family:sans-serif'; document.body.appendChild(v); }
 
 // ===================== 島の収益: 建物ごとに1時間あたりの売上が入りつづける（留守のあいだも最大24時間分） =====================
@@ -9623,7 +9629,7 @@ CTRY.festival = function (g) {
   const m = CTRY.month(), C = PLACED.church; if (!C || !(m === 10 || (m === 11 && new Date().getDate() <= 5))) return;
   const red = stdM('#c8282a', 0.8, 0, { side: THREE.DoubleSide }), white = stdM('#f4f0e6', 0.8, 0, { side: THREE.DoubleSide }), pole = stdM('#8a6644', 0.8);
   for (const sx of [-1, 1]) for (let k = 0; k < 4; k++) { const [x, z] = toWorld(C, sx * 1.6, 11 - k * 2.6), y = C.y; const s = sub(g, x, y, z, C.rot); CY(s, 0.03, 3.4, pole, 0, 1.7, 0, 6); const f = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 2.0), k % 2 ? white : red); f.position.set(sx * 0.27, 2.25, 0); f.rotation.y = Math.PI / 2; s.add(f); B(s, 0.03, 0.03, 0.6, pole, sx * 0.27, 3.27, 0).rotation.y = Math.PI / 2; }
-  const ch = stdM('#f2d090', 0.6, 0, { emissive: new THREE.Color('#ffb050'), emissiveIntensity: 0.4 }); for (let k = 0; k < 7; k++) { const [x, z] = toWorld(C, -1.8 + k * 0.6, 12.6); const l = SP(g, 0.14, ch, x, C.y + 3.55, z, 1.3, 8); }
+  const ch = stdM('#f2d090', 0.6, 0, { emissive: new THREE.Color('#ffb050'), emissiveIntensity: 0.4 }), cap = stdM('#2a2422', 0.7); for (const sx of [-1, 1]) for (let k = 0; k < 4; k++) { const [x, z] = toWorld(C, sx * 2.05, 11 - k * 2.6 - 1.3); const s2 = sub(g, x, C.y, z, C.rot); CY(s2, 0.025, 2.9, pole, 0, 1.45, 0, 6); B(s2, 0.03, 0.03, 0.45, pole, 0, 2.85, 0).rotation.x = 0; SP(s2, 0.17, ch, 0, 2.42, 0.2, 1.35, 10); CY(s2, 0.1, 0.05, cap, 0, 2.66, 0.2, 10); CY(s2, 0.1, 0.05, cap, 0, 2.18, 0.2, 10); }
 };
 { const _cb2 = CTRY.build; CTRY.build = function () { _cb2.apply(this, arguments); try { CTRY.festival(CTRY.group); } catch (e) { console.warn('fest', e); } }; }
 // keep the shrine grounds free of grass and flowers
@@ -10763,10 +10769,12 @@ PERF.cull = function (now) {
   if (composer && !composer._perf) { const _r = composer.render.bind(composer); composer.render = function (dt) { PERF.tick(); return _r(dt); }; composer._perf = true; }
   PERF.btn(); return r; }; }
 
-// ===================== カメラ: 木の葉や幹でキャラが隠れないように（カメラとキャラの間だけ、葉を透かす） =====================
-// Only the leaves/trunks on the line between the camera and you are dissolved (screen-door dither), plus anything the camera
-// is right inside of. Shadows are untouched (they use their own depth material), so the forest still looks like a forest.
-const SEE = { p: { value: new THREE.Vector3() }, on: { value: 0 }, mats: new Set() };
+// ===================== カメラ: 木の葉や幹・建物・車でキャラが隠れないように =====================
+// 1) the camera never sits inside a tree crown: it drops under the crown (still behind you) or, if that would be too low, moves closer
+// 2) when a building or a parked car is in the way it rises over it instead of collapsing onto the back of your head
+// 3) whatever still crosses the line of sight (a trunk, a crown edge) is cut out in a narrow tube around that line:
+//    clear in the middle, a thin dithered rim. Shadows are untouched (they use their own depth material).
+const SEE = { p: { value: new THREE.Vector3() }, on: { value: 0 }, mats: new Set(), adj: new THREE.Vector3(), grid: null, sig: '' };
 SEE.patch = function (m) {
   if (!m || SEE.mats.has(m) || !m.isMeshStandardMaterial) return; SEE.mats.add(m);
   const prev = m.onBeforeCompile;
@@ -10783,11 +10791,11 @@ SEE.patch = function (m) {
       if (uSeeOn > 0.5) {
         vec3 ab = uSeeP - cameraPosition; float L2 = max(dot(ab, ab), 1e-4);
         float t = clamp(dot(vSeeW - cameraPosition, ab) / L2, 0.0, 1.0);
-        float pd = length(vSeeW - (cameraPosition + ab * t)), rr = mix(1.0, 1.8, t);
-        float k = smoothstep(rr, rr * 0.45, pd) * smoothstep(0.985, 0.88, t);
-        k = max(k, smoothstep(2.6, 1.2, length(vSeeW - cameraPosition)));
+        float pd = length(vSeeW - (cameraPosition + ab * t)), rr = mix(0.55, 1.25, t);
+        float k = smoothstep(rr, rr * 0.72, pd) * smoothstep(0.97, 0.86, t);
+        k = max(k, smoothstep(0.9, 0.45, length(vSeeW - cameraPosition)));
         float ign = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
-        if (ign < k * 0.9) discard;
+        if (ign < k) discard;
       }`);
   };
   m.needsUpdate = true;
@@ -10797,8 +10805,63 @@ SEE.patchTrees = function () {
   for (const k in VEG.userSets || {}) for (const st of VEG.userSets[k] || []) st && st.mesh && SEE.patch(st.mesh.material);
 };
 { const _b = buildVegetation; buildVegetation = function () { const r = _b.apply(this, arguments); try { SEE.patchTrees(); } catch (e) { console.warn('see', e); } return r; }; }
+// ---------- tree crowns (rough ellipsoids per kind, scaled like the instances) ----------
+SEE.CROWN = { broad: [5.7, 3.9, 3.0], pine: [6.2, 2.7, 2.6], sakura: [4.6, 3.6, 2.4], palm: [6.6, 2.8, 1.5], bamboo: [5.2, 1.6, 4.0], mikan: [1.9, 1.5, 1.3] };
+SEE.scaleOf = (it) => it.kind === 'mikan' ? 0.9 + it.r * 0.2 : it.kind === 'sakura' ? 1.15 + it.r * 0.35 : it.kind === 'bamboo' || it.kind === 'palm' ? 0.9 + it.r * 0.25 : 0.8 + it.r * 0.45;
+SEE.buildGrid = function () {
+  const g = new Map(), add = (it) => { if (!SEE.CROWN[it.kind]) return; const k = Math.floor(it.x / 8) + ',' + Math.floor(it.z / 8); (g.get(k) || g.set(k, []).get(k)).push(it); };
+  for (const it of VEG.items || []) if (it.type === 'tree' && !(VEG.removed && VEG.removed[it.id])) add(it);
+  for (const it of VEG.userTrees || []) add(it);
+  SEE.grid = g;
+};
+SEE.inCrown = function (x, y, z, pad = 1) {
+  if (!SEE.grid) return null; const cx = Math.floor(x / 8), cz = Math.floor(z / 8); let hit = null;
+  for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) for (const it of SEE.grid.get((cx + a) + ',' + (cz + b)) || []) {
+    const C = SEE.CROWN[it.kind], s = SEE.scaleOf(it), g = groundH(it.x, it.z), rh = C[1] * s * pad, rv = C[2] * s * pad, cy = g + C[0] * s;
+    const q = ((x - it.x) ** 2 + (z - it.z) ** 2) / (rh * rh) + ((y - cy) ** 2) / (rv * rv);
+    if (q < 1 && (!hit || cy - rv < hit.bottom)) hit = { bottom: cy - rv, it };
+  }
+  return hit;
+};
+// buildings (footprint colliders up to ~9 m) and parked cars
+SEE.blocked = function (p) {
+  const gy = groundH(p.x, p.z);
+  // garden walls and fences (thin footprints) are low: the camera may look over them; houses and sheds block up to ~9 m
+  const hy = p.y - gy;
+  if (hy < 9) for (const c of collidersNear(p.x, p.z)) { if (c.r !== undefined || c.off) continue; const thin = Math.min(c.hw || 0, c.hd || 0) < 0.2; if (thin && hy > 1.5) continue; if (hitsCollider(c, p.x, p.z, 0.05)) return true; }
+  if (p.y - gy < 2.0) for (const v of VEH) { if (v === PL.veh || !v.mesh || !v.mesh.visible) continue; if (Math.hypot(v.x - p.x, v.z - p.z) < (v.kind === 'bus' || v.kind === 'ferry' || v.kind === 'boat' ? 3.2 : 1.7)) return true; }
+  return false;
+};
+SEE.freeLen = function (from, dir, full) { for (let t = 0.8; t < full; t += 0.35) { const p = from.clone().addScaledVector(dir, t); if (SEE.blocked(p)) return Math.max(0.8, t - 0.35); } return full; };
+SEE.fix = function (dt) {
+  const T = CAM.target, cam = camera.position.clone(), want = cam.clone();
+  // a. something solid behind you squeezed the camera: rise over it instead
+  const full = CAM.dist, d0 = cam.distanceTo(T);
+  if (d0 < full * 0.62 && full > 2.5) {
+    // try a little higher first; never steeper than ~55° (a straight-down view hides the scene), as far back as is free
+    let best = null;
+    for (const dp of [0, 0.3, 0.55, 0.8]) { const pt = Math.min(0.95, CAM.pitch + dp), cp = Math.cos(pt), dir = new THREE.Vector3(Math.sin(CAM.yaw) * cp, Math.sin(pt), Math.cos(CAM.yaw) * cp);
+      const L = SEE.freeLen(T, dir, full); if (!best || L > best.L + 0.3) best = { L, dir }; if (L >= full * 0.82) break; }
+    if (best && best.L > d0 + 0.4) want.copy(T).addScaledVector(best.dir, Math.min(best.L, full));
+  }
+  // b. out of tree crowns: under the crown if there is room, otherwise closer
+  const hit = SEE.inCrown(want.x, want.y, want.z, 1.05);
+  if (hit) {
+    const low = hit.bottom - 0.35, gy = Math.max(groundH(want.x, want.z), 0) + 0.6;
+    if (low > Math.max(gy, T.y - 0.25)) want.y = low;
+    else { const dir = want.clone().sub(T), L = dir.length(); dir.normalize(); let lo = 1.3, hi = L; for (let k = 0; k < 7; k++) { const m = (lo + hi) / 2, p = T.clone().addScaledVector(dir, m); if (SEE.inCrown(p.x, p.y, p.z, 1.05)) hi = m; else lo = m; } want.copy(T).addScaledVector(dir, lo); }
+  }
+  const delta = want.sub(cam), k = Math.min(1, dt * 7);
+  SEE.adj.lerp(delta, delta.lengthSq() > SEE.adj.lengthSq() ? Math.min(1, dt * 12) : k);
+  if (SEE.adj.lengthSq() > 1e-6) { camera.position.add(SEE.adj); camera.lookAt(T); }
+};
 { const _u = updateCamera; updateCamera = function (dt) { const r = _u.apply(this, arguments);
   const on = !SEE.disabled && CAM.mode === 'third' && !GAME.inside && !window.__freecam && GAME.modal !== 'title' && !(GAME.camOverride && GAME.camOverride());
+  if (on) {
+    const now = performance.now();
+    if (!SEE.grid || now - (SEE.sigT || 0) > 1500) { SEE.sigT = now; const sig = ((VEG.items || []).length) + ':' + (VEG.removed ? VEG.removed.reduce((a, b) => a + b, 0) : 0) + ':' + (VEG.userTrees || []).length; if (sig !== SEE.sig) { SEE.sig = sig; SEE.buildGrid(); } }
+    if (!SEE.noFix) try { SEE.fix(dt || 0.016); } catch (e) { }
+  } else SEE.adj.set(0, 0, 0);
   SEE.on.value = on ? 1 : 0; if (on) SEE.p.value.copy(CAM.target); return r; }; }
 
 // ===================== 秋の道ばた: ススキ・コスモス・彼岸花（季節で出たり消えたり） =====================
@@ -10929,6 +10992,293 @@ FLORA.refresh = function () {
 { const _u = updateStructures; updateStructures = function (t, night) { const r = _u.apply(this, arguments);
   const now = performance.now(); if (FLORA.built && now - (FLORA._t || 0) > 2000) { FLORA._t = now; if (FLORA.dirty && !EDIT.on) { FLORA.dirty = false; FLORA.refresh(); } else if (FLORA.when().key !== FLORA.key) FLORA.refresh(); }
   return r; }; }
+
+// ===================== 紅葉: 木ごとに色がちがう（常緑樹は緑のまま、落葉樹が少しずつ色づく） =====================
+// Seto Inland Sea islands are mostly evergreen broadleaf (シイ・カシ・クスノキ), so most trees stay green all year.
+// About 4 in 10 broadleaf trees are deciduous (ハゼ・コナラ・ヤマザクラ…): each turns on its own day between late October and
+// late November — yellow, orange or red — then browns before winter. Every tree also gets a slight colour of its own.
+const KOYO = { doy: -1 };
+KOYO.h = (n) => { let x = (n * 2654435761) >>> 0; x ^= x >>> 15; x = Math.imul(x, 2246822519) >>> 0; x ^= x >>> 13; return (x >>> 0) / 4294967296; };
+KOYO.col = function (it, doy, out) {
+  const id = it.id !== undefined ? it.id : Math.floor((it.x * 73.1 + it.z * 19.7) * 10), a = KOYO.h(id + 1), b = KOYO.h(id + 7), c = KOYO.h(id + 13);
+  // everyone: a little brighter / darker, a little yellower / bluer
+  out.setRGB(0.9 + a * 0.16, 0.9 + b * 0.14, 0.86 + c * 0.16);
+  if (it.kind === 'momiji') { if (doy >= 288 && doy <= 350) out.g *= 0.72 + b * 0.42; return out; } // maples: some redder, some more orange than their neighbours
+  if (it.kind !== 'broad' || a > 0.4) return out;
+  const start = 293 + Math.floor(b * 26), peak = start + 16 + Math.floor(c * 8), brown = peak + 18; // day-of-year: from ~10/20
+  const d = doy < 90 ? doy + 365 : doy;
+  let k = d < start ? 0 : d < peak ? (d - start) / (peak - start) : 1; k = k * k * (3 - 2 * k);
+  const T = c < 0.4 ? [1.55, 1.08, 0.32] : c < 0.75 ? [1.6, 0.78, 0.3] : [1.62, 0.45, 0.3];
+  let r = out.r + (T[0] - out.r) * k, g = out.g + (T[1] - out.g) * k, bl = out.b + (T[2] - out.b) * k;
+  if (d > brown) { const q = Math.min(1, (d - brown) / 20); r += (0.95 - r) * q; g += (0.62 - g) * q; bl += (0.4 - bl) * q; }
+  return out.setRGB(r, g, bl);
+};
+KOYO.apply = function (doy) {
+  if (!VEG.sets || !VEG.fmats) return; const sig = doy + ':' + VEG.sets.length + ':' + (VEG.userTrees || []).length; if (sig === KOYO.sig) return; KOYO.sig = sig; KOYO.doy = doy;
+  const fol = new Set(); for (const k in VEG.fmats) { fol.add(VEG.fmats[k].fol); fol.add(VEG.fmats[k].card); }
+  const c = new THREE.Color();
+  const paint = (mesh, list) => { if (!mesh || !fol.has(mesh.material) || !list || !list.length) return; for (let i = 0; i < list.length && i < mesh.count; i++) mesh.setColorAt(i, KOYO.col(list[i], doy, c)); if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true; };
+  for (const st of VEG.sets) if (st.kind === 'tree') paint(st.mesh, st.items);
+  for (const key in VEG.userSets || {}) { const list = (VEG.userTrees || []).filter(t => t.key === key); for (const st of VEG.userSets[key] || []) if (st && st.mesh) paint(st.mesh, list); }
+};
+// planted trees get their colours too
+{ const _r = VEG.rebuildUser; if (_r) VEG.rebuildUser = function () { const r = _r.apply(this, arguments); try { if (KOYO.doy >= 0) { KOYO.sig = ''; KOYO.apply(KOYO.doy); } } catch (e) { } return r; }; }
+
+// ===================== 瀬戸内の海辺: 牡蠣いかだ と 消波ブロック =====================
+// 牡蠣いかだ: bamboo rafts on black and white floats, moored in groups off a quiet shore; they rise and fall with the tide.
+// 消波ブロック: tetrapods piled at the waterline where a coast road runs right above the sea (not on the swimming beaches).
+const SEASIDE = { built: false, rafts: [], grp: null, t: 0 };
+SEASIDE.tetraGeo = function () {
+  const parts = [], dirs = [[1, 1, 1], [1, -1, -1], [-1, 1, -1], [-1, -1, 1]];
+  for (const d of dirs) { const v = new THREE.Vector3(...d).normalize(), g = new THREE.CylinderGeometry(0.2, 0.4, 1.05, 8); g.translate(0, 0.52, 0); g.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), v)); parts.push(g.toNonIndexed()); }
+  const c = new THREE.IcosahedronGeometry(0.42, 0); parts.push(c.toNonIndexed());
+  for (const p of parts) { if (p.attributes.uv) p.deleteAttribute('uv'); }
+  const g = mergeGeometries(parts); g.computeVertexNormals(); return g;
+};
+SEASIDE.raftGeo = function () {
+  const bam = [], flo = [], L = 16, W = 8;
+  for (let i = 0; i < 6; i++) { const g = new THREE.CylinderGeometry(0.06, 0.06, L, 6); g.rotateX(Math.PI / 2); g.translate(-W / 2 + i * W / 5, 0.32, 0); bam.push(g.toNonIndexed()); }
+  for (let j = 0; j < 9; j++) { const g = new THREE.CylinderGeometry(0.055, 0.055, W + 0.6, 6); g.rotateZ(Math.PI / 2); g.translate(0, 0.42, -L / 2 + j * L / 8); bam.push(g.toNonIndexed()); }
+  for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) { const g = new THREE.CylinderGeometry(0.36, 0.36, 1.1, 10); g.rotateZ(Math.PI / 2); g.translate(-W / 2 + 0.6 + i * (W - 1.2) / 2, 0.05, -L / 2 + 1.5 + j * (L - 3) / 2); flo.push(g.toNonIndexed()); }
+  for (const a of [...bam, ...flo]) if (a.attributes.uv) a.deleteAttribute('uv');
+  return { bam: mergeGeometries(bam), flo: mergeGeometries(flo) };
+};
+SEASIDE.okSea = (x, z, d0, d1) => { const h = groundH(x, z); return h < -d0 && h > -d1; };
+SEASIDE.place = function () {
+  const R = mulberry(5150), H = PLACED.harbor, B = GAME.LM && GAME.LM.beach, I = GAME.LM && GAME.LM.islet, far = (x, z) => (!H || Math.hypot(x - H.x, z - H.z) > 70) && (!I || Math.hypot(x - I.x, z - I.z) > 60);
+  const half = WORLD.size / 2 - 20, rafts = [], tetras = [];
+  // rafts: a calm shelf 4–14 m deep, 30–110 m off the shore, in two groups
+  for (let g = 0, tries = 0; g < 2 && tries < 4000; tries++) {
+    const x = (R() - 0.5) * 2 * half, z = (R() - 0.5) * 2 * half; if (!SEASIDE.okSea(x, z, 4, 14) || !far(x, z)) continue;
+    let shore = 1e9; for (let a = 0; a < 6.28; a += 0.4) for (let r = 10; r < 120; r += 10) if (groundH(x + Math.cos(a) * r, z + Math.sin(a) * r) > 0.2) { shore = Math.min(shore, r); break; }
+    if (shore < 30 || shore > 110 || rafts.some(q => Math.hypot(q.x - x, q.z - z) < 140)) continue;
+    const rot = R() * 3.14; let n = 0;
+    for (let k = 0; k < 3; k++) { const ox = x + Math.cos(rot) * k * 11, oz = z - Math.sin(rot) * k * 11; if (SEASIDE.okSea(ox, oz, 3.5, 16) && far(ox, oz)) { rafts.push({ x: ox, z: oz, rot: rot + (R() - 0.5) * 0.12, ph: R() * 6 }); n++; } }
+    if (n) g++;
+  }
+  // tetrapods: shore cells with a road just above and deep water just below
+  const { n, size } = WORLD, cs = size / (n - 1), h0 = -size / 2, spots = [];
+  for (let j = 4; j < n - 4; j += 3) for (let i = 4; i < n - 4; i += 3) {
+    const x = h0 + i * cs, z = h0 + j * cs, h = groundH(x, z); if (h < 0.3 || h > 2.6) continue; const rd = roadDistAt(x, z); if (rd > 12 || rd < 3) continue;
+    if (B && Math.hypot(x - B.x, z - B.z) < 60) continue; if (!far(x, z)) continue; if (typeof RS !== 'undefined' && RS.beach && RS.beach.line && RS.beach.line.some(c => Math.hypot(c.x - x, c.z - z) < 40)) continue;
+    let sea = null; for (const d of [8, 12, 16]) { for (let a = 0; a < 6.28; a += 0.4) { if (groundH(x + Math.cos(a) * d, z + Math.sin(a) * d) < -0.9) { sea = [Math.cos(a), Math.sin(a)]; break; } } if (sea) break; } if (!sea) continue;
+    // walk out to the waterline: the blocks sit where land meets sea
+    let wx = x, wz = z; for (let k = 0; k < 40 && groundH(wx, wz) > 0.15; k++) { wx += sea[0] * 0.5; wz += sea[1] * 0.5; }
+    if (groundH(wx, wz) > 0.4) continue;
+    // not on sand: tetrapods armour rocky / concrete shores below a road, never a swimming beach
+    { let sandy = 0; for (const [dx, dz] of [[0, 0], [3, 0], [-3, 0], [0, 3], [0, -3]]) { const [ii, jj] = toIdx(wx + dx, wz + dz), kk = jj * WORLD.n + ii; if (TERR.spl && TERR.spl[kk * 4 + 3] > 0.3) sandy++; } if (sandy >= 2) continue; }
+    spots.push({ x: wx, z: wz, sea });
+  }
+  const used = [];
+  for (let t = 0; t < spots.length * 2 && used.length < 7; t++) { const s = spots[Math.floor(R() * spots.length)]; if (!s || used.some(u => Math.hypot(u.x - s.x, u.z - s.z) < 45)) continue; used.push(s);
+    const tx = -s.sea[1], tz = s.sea[0], cnt = 8 + Math.floor(R() * 5);
+    for (let k = 0; k < cnt; k++) { const along = (k - cnt / 2) * 1.6 + (R() - 0.5) * 0.6, out = -0.5 + R() * 2.6, x = s.x + s.sea[0] * out + tx * along, z = s.z + s.sea[1] * out + tz * along, gh = groundH(x, z);
+      if (gh > 0.8 || gh < -3) continue; tetras.push({ x, z, y: Math.max(gh, -1.6) + 0.35 + (k % 3 === 0 ? 0.7 : 0), r: [R() * 6.28, R() * 6.28, R() * 6.28], s: 0.9 + R() * 0.25 }); }
+  }
+  return { rafts, tetras };
+};
+SEASIDE.build = function () {
+  if (SEASIDE.built || !GAME.LM) return; SEASIDE.built = true;
+  const { rafts, tetras } = SEASIDE.place(), g = SEASIDE.grp = new THREE.Group(); g.name = 'seaside'; scene.add(g);
+  if (tetras.length) {
+    const im = new THREE.InstancedMesh(SEASIDE.tetraGeo(), new THREE.MeshStandardMaterial({ color: '#a8a59c', roughness: 1 }), tetras.length), m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), c = new THREE.Color();
+    tetras.forEach((t, i) => { q.setFromEuler(new THREE.Euler(...t.r)); m4.compose(new THREE.Vector3(t.x, t.y, t.z), q, new THREE.Vector3(t.s, t.s, t.s)); im.setMatrixAt(i, m4); const v = 0.82 + KOYO.h(i + 3) * 0.22; im.setColorAt(i, c.setRGB(v, v * 0.99, v * 0.95)); });
+    im.castShadow = true; im.receiveShadow = true; g.add(im); SEASIDE.tetra = im;
+  }
+  if (rafts.length) {
+    const G2 = SEASIDE.raftGeo(), bm = new THREE.MeshStandardMaterial({ color: '#c9b588', roughness: 0.85 }), fm = new THREE.MeshStandardMaterial({ color: '#2b2d30', roughness: 0.5 }), fw = new THREE.MeshStandardMaterial({ color: '#e8e6e0', roughness: 0.5 });
+    for (const r of rafts) { const o = new THREE.Group(); o.add(new THREE.Mesh(G2.bam, bm)); const fl = new THREE.Mesh(G2.flo, KOYO.h(Math.round(r.x)) < 0.5 ? fm : fw); o.add(fl); o.traverse(m => { if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; } }); o.position.set(r.x, 0, r.z); o.rotation.y = r.rot; g.add(o); r.o = o; }
+  }
+  SEASIDE.rafts = rafts; SEASIDE.n = { rafts: rafts.length, tetras: tetras.length };
+};
+SEASIDE.update = function (dt) {
+  if (!SEASIDE.grp) return; SEASIDE.t += dt; const tide = typeof SEA !== 'undefined' && SEA.h !== undefined ? SEA.h : 0, st = TIME.weather === 'storm' ? 3 : 1;
+  for (const r of SEASIDE.rafts) { r.o.position.y = tide - 0.05 + Math.sin(SEASIDE.t * 0.9 + r.ph) * 0.05 * st; r.o.rotation.x = Math.sin(SEASIDE.t * 0.7 + r.ph) * 0.012 * st; r.o.rotation.z = Math.cos(SEASIDE.t * 0.6 + r.ph) * 0.012 * st; }
+};
+{ const _b = GAME.begin; GAME.begin = function () { const r = _b.apply(this, arguments); setTimeout(() => { try { SEASIDE.build(); } catch (e) { console.warn('seaside', e); } }, 0); return r; }; }
+{ const _u = updateStructures; updateStructures = function (t, night) { const r = _u.apply(this, arguments); const now = performance.now(), dt = Math.min(0.1, (now - (SEASIDE._l || now)) / 1000); SEASIDE._l = now; SEASIDE.update(dt); return r; }; }
+
+// ===================== 山の幸ひろい と 料理 =====================
+// 山の幸: 季節ごとに林の中や林のふち・竹やぶに、毎日ちがう場所で見つかる（F でひろう）。
+//   秋 栗・しいたけ・あけび・山柿 ／ 冬 ゆず ／ 春 たけのこ・わらび・しいたけ ／ 初夏 木いちご
+// 料理: 家のキッチン・ちゃぶ台（ローテーブル）・こたつ・ダイニングで Space。魚・野菜・みかん・山の幸から22品。
+//   できた料理は住民へのプレゼント（なかよし +3、好物なら +5）、商店で買い取り、料理帳に記録。
+const FORAGE_ITEMS = [
+  { id: 'kuri', name: '栗', ic: '🌰', win: [[9, 20, 11, 10]], near: 'forest', p: 120, kind: 'kuri', note: 'イガの中に、つやつやの実が3つ。' },
+  { id: 'kinoko', name: 'しいたけ', ic: '🍄', win: [[9, 25, 11, 30], [3, 15, 4, 30]], near: 'forest', p: 150, kind: 'kinoko', note: '雨のあとに、ひょっこり顔を出す。' },
+  { id: 'akebi', name: 'あけび', ic: '🫐', win: [[9, 10, 10, 31]], near: 'forest', p: 320, kind: 'akebi', rare: true, note: 'むらさきの実がぱっくり。中の白い実があまい。' },
+  { id: 'kaki', name: '山柿', ic: '🟠', win: [[10, 1, 11, 30]], near: 'edge', p: 110, kind: 'kaki', note: 'しぶい実も、干せばあまくなる。' },
+  { id: 'yuzu', name: 'ゆず', ic: '🍋', win: [[11, 10, 12, 31], [1, 1, 1, 31]], near: 'edge', p: 160, kind: 'yuzu', note: '冬至はゆず湯に。香りがいい。' },
+  { id: 'takenoko', name: 'たけのこ', ic: '🎋', win: [[3, 25, 5, 10]], near: 'bamboo', p: 260, kind: 'takenoko', note: '土から頭を出したところが食べごろ。' },
+  { id: 'warabi', name: 'わらび', ic: '🌿', win: [[3, 20, 5, 20]], near: 'edge', p: 120, kind: 'warabi', note: 'くるっと巻いた若い芽。あく抜きしてから。' },
+  { id: 'kiichigo', name: '木いちご', ic: '🍓', win: [[5, 20, 7, 10]], near: 'edge', p: 140, kind: 'berry', note: 'オレンジ色の小さな実。つまみ食い注意。' },
+];
+const RECIPES = [
+  { id: 'yakizakana', name: '焼き魚', ic: '🐟', need: [{ k: 'fish', n: 1 }], p: 500, note: '塩をふって、じっくり。皮がぱりっとしたら食べごろ。' },
+  { id: 'nitsuke', name: '魚の煮つけ', ic: '🍲', need: [{ k: 'fish', n: 1 }, { k: 'vegAny', ids: ['daikon', 'negi', 'tamanegi'], n: 1 }], p: 950, note: 'しょうゆとみりんで甘からく。島のおふくろの味。' },
+  { id: 'sashimi', name: 'お刺身', ic: '🍣', need: [{ k: 'fish', n: 1, min: 30 }], p: 1300, note: '30cm 以上の新鮮な魚で。しょうゆとわさびで。' },
+  { id: 'arajiru', name: 'あら汁', ic: '🥣', need: [{ k: 'fish', n: 1 }, { k: 'veg', id: 'negi', n: 1 }], p: 800, note: '魚のあらから、いいだしが出る。' },
+  { id: 'yosenabe', name: '寄せ鍋', ic: '🍲', need: [{ k: 'fish', n: 1 }, { k: 'veg', id: 'hourensou', n: 1 }, { k: 'veg', id: 'negi', n: 1 }, { k: 'forage', id: 'kinoko', n: 1 }], p: 2200, note: 'みんなでつつく冬のごちそう。' },
+  { id: 'kurigohan', name: '栗ごはん', ic: '🍚', need: [{ k: 'forage', id: 'kuri', n: 3 }], p: 1000, note: '秋いちばんのごはん。ほくほく。' },
+  { id: 'kinokojiru', name: 'きのこ汁', ic: '🍄', need: [{ k: 'forage', id: 'kinoko', n: 2 }, { k: 'vegAny', ids: ['negi', 'daikon'], n: 1 }], p: 900, note: 'しいたけのだしが、からだにしみる。' },
+  { id: 'hoshigaki', name: '干し柿', ic: '🟠', need: [{ k: 'forage', id: 'kaki', n: 3 }], p: 800, note: 'のき下につるして、あまくなるのを待つ。' },
+  { id: 'akebi_sweet', name: 'あけびのおやつ', ic: '🫐', need: [{ k: 'forage', id: 'akebi', n: 2 }], p: 900, note: 'そのまま食べても、皮を炒めてもいい。' },
+  { id: 'yuzucha', name: 'ゆず茶', ic: '🍵', need: [{ k: 'forage', id: 'yuzu', n: 2 }], p: 700, note: 'はちみつと合わせて、ほっとひと息。' },
+  { id: 'takenokogohan', name: 'たけのこごはん', ic: '🍚', need: [{ k: 'forage', id: 'takenoko', n: 2 }], p: 1200, note: '春の香り。おこげがうまい。' },
+  { id: 'tempura', name: '山菜の天ぷら', ic: '🍤', need: [{ k: 'forage', id: 'warabi', n: 2 }, { k: 'vegAny', ids: ['tamanegi', 'jagaimo', 'satsumaimo'], n: 1 }], p: 1000, note: 'さくっと揚げて、塩で。' },
+  { id: 'berryjam', name: '木いちごジャム', ic: '🍯', need: [{ k: 'forage', id: 'kiichigo', n: 4 }], p: 900, note: 'パンにもヨーグルトにも。' },
+  { id: 'mikanjuice', name: 'みかんジュース', ic: '🧃', need: [{ k: 'mikan', n: 3 }], p: 550, note: 'しぼりたて。島の朝の定番。' },
+  { id: 'mikanjelly', name: 'みかんゼリー', ic: '🍮', need: [{ k: 'mikan', n: 5 }], p: 1000, note: 'つるんとひんやり。' },
+  { id: 'yakiimo', name: '焼きいも', ic: '🍠', need: [{ k: 'veg', id: 'satsumaimo', n: 1 }], p: 650, note: '落ち葉のたき火で、ほっくほく。' },
+  { id: 'nikkorogashi', name: 'じゃがいもの煮っころがし', ic: '🥔', need: [{ k: 'veg', id: 'jagaimo', n: 2 }], p: 750, note: '甘からいたれがからんで、ごはんがすすむ。' },
+  { id: 'furofuki', name: 'ふろふき大根', ic: '⚪', need: [{ k: 'veg', id: 'daikon', n: 2 }], p: 800, note: 'やわらかく煮て、ゆずみそをのせて。' },
+  { id: 'asazuke', name: 'かぶの浅漬け', ic: '🥗', need: [{ k: 'veg', id: 'kabu', n: 2 }], p: 550, note: 'ぱりぱりの歯ごたえ。' },
+  { id: 'tomatosalad', name: 'トマトときゅうりのサラダ', ic: '🥗', need: [{ k: 'veg', id: 'tomato', n: 2 }, { k: 'veg', id: 'kyuri', n: 1 }], p: 700, note: '夏の畑の色をそのまま。' },
+  { id: 'yakinasu', name: '焼きなす', ic: '🍆', need: [{ k: 'veg', id: 'nasu', n: 2 }], p: 650, note: 'しょうがじょうゆで。' },
+  { id: 'edamame', name: '枝豆の塩ゆで', ic: '🫛', need: [{ k: 'veg', id: 'edamame', n: 2 }], p: 550, note: '夏の夕方、縁側で。' },
+];
+const DISH_LOVE = { v_gen: ['nitsuke', 'arajiru'], v_hana: ['mikanjelly', 'berryjam'], v_mio: ['sashimi', 'yosenabe'], v_sora: ['yakizakana', 'kurigohan'], v_rin: ['kinokojiru', 'hoshigaki'], v_kai: ['mikanjuice', 'tomatosalad'], v_nagi: ['sashimi', 'takenokogohan'], v_takumi: ['yakiimo', 'nikkorogashi'], v_yuki: ['yuzucha', 'tempura'], v_kota: ['yakiimo', 'edamame'] };
+STAT_KEYS.push('forageN', 'cookN');
+const FORAGE = { items: [], key: '', grp: null, spots: null, t: 0, CAP: 40 };
+FORAGE.def = id => FORAGE_ITEMS.find(q => q.id === id);
+FORAGE.bag = function () { const b = GAME.bag(); b.forage = b.forage || {}; b.dish = b.dish || {}; return b; };
+FORAGE.count = function () { const f = FORAGE.bag().forage; return Object.values(f).reduce((s, v) => s + v, 0); };
+FORAGE.inWin = function (D, d = typeof seasonDate === 'function' ? seasonDate() : new Date()) { const v = (d.getMonth() + 1) * 100 + d.getDate(); return D.win.some(([m0, d0, m1, d1]) => v >= m0 * 100 + d0 && v <= m1 * 100 + d1); };
+FORAGE.season = () => FORAGE_ITEMS.filter(D => FORAGE.inWin(D));
+// ---------- where things grow ----------
+FORAGE.scan = function () {
+  const trees = (VEG.items || []).filter(it => it.type === 'tree' && (it.kind === 'broad' || it.kind === 'bamboo' || it.kind === 'momiji') && !VEG.removed[it.id]), grid = new Map();
+  for (const t of trees) { const k = Math.floor(t.x / 12) + ',' + Math.floor(t.z / 12); (grid.get(k) || grid.set(k, []).get(k)).push(t); }
+  const nb = t => { let n = 0; const cx = Math.floor(t.x / 12), cz = Math.floor(t.z / 12); for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) for (const q of grid.get((cx + a) + ',' + (cz + b)) || []) if (q !== t && Math.hypot(q.x - t.x, q.z - t.z) < 12) n++; return n; };
+  const S = { forest: [], edge: [], bamboo: [] }, R = mulberry(4401);
+  for (const t of trees) { const kind = t.kind === 'bamboo' ? 'bamboo' : nb(t) >= 4 ? 'forest' : 'edge';
+    for (let k = 0; k < 2; k++) { const a = R() * 6.283, d = 1.4 + R() * 2.2, x = t.x + Math.cos(a) * d, z = t.z + Math.sin(a) * d;
+      if (groundH(x, z) < 1.2 || waterDepthAt(x, z) > 0.01 || roadDistAt(x, z) < 2.8 || groundN(x, z).y < 0.8) continue;
+      if (collidersNear(x, z).some(c => !c.off && hitsCollider(c, x, z, 0.35))) continue; S[kind].push([x, z]); } }
+  return S;
+};
+FORAGE.mat = (c, r = 0.6, o = {}) => (FORAGE._m = FORAGE._m || {})[c + r] || (FORAGE._m[c + r] = new THREE.MeshStandardMaterial(Object.assign({ color: c, roughness: r }, o)));
+FORAGE.mesh = function (D) {
+  const g = new THREE.Group(), M = FORAGE.mat, add = (geo, m, x, y, z, s) => { const o = new THREE.Mesh(geo, m); o.position.set(x, y, z); if (s) o.scale.set(...s); g.add(o); return o; };
+  if (D.kind === 'kuri') { add(new THREE.IcosahedronGeometry(0.075, 1), M('#7a8a3a', 0.9, { flatShading: true }), 0, 0.05, 0, [1, 0.7, 1]); for (let k = 0; k < 3; k++) add(new THREE.SphereGeometry(0.032, 10, 8), M('#6a3a1e', 0.35), Math.cos(k * 2.1) * 0.04, 0.085, Math.sin(k * 2.1) * 0.04, [1, 0.9, 1]); }
+  else if (D.kind === 'kinoko') { for (let k = 0; k < 3; k++) { const x = (k - 1) * 0.06, z = (k % 2) * 0.04, s = 1 - k * 0.2; add(new THREE.CylinderGeometry(0.014 * s, 0.018 * s, 0.06 * s, 8), M('#efe6d2', 0.8), x, 0.03 * s, z); add(new THREE.SphereGeometry(0.05 * s, 12, 6, 0, 6.283, 0, Math.PI / 2), M('#7a4a2a', 0.7), x, 0.055 * s, z, [1, 0.55, 1]); } }
+  else if (D.kind === 'akebi') { add(new THREE.SphereGeometry(0.045, 12, 8), M('#8a4aa8', 0.5), 0, 0.04, 0, [0.85, 0.75, 1.9]); add(new THREE.SphereGeometry(0.03, 10, 6), M('#f2eee6', 0.6), 0, 0.07, 0, [0.6, 0.4, 1.5]); }
+  else if (D.kind === 'kaki') { for (let k = 0; k < 2; k++) { add(new THREE.SphereGeometry(0.048, 14, 10), M('#e8702a', 0.4), k * 0.09 - 0.04, 0.04, k * 0.03, [1, 0.8, 1]); add(new THREE.CylinderGeometry(0.03, 0.03, 0.008, 6), M('#4a6a2a', 0.8), k * 0.09 - 0.04, 0.078, k * 0.03); } }
+  else if (D.kind === 'yuzu') { for (let k = 0; k < 2; k++) add(new THREE.IcosahedronGeometry(0.045, 2), M('#f2c230', 0.75), k * 0.09 - 0.04, 0.045, k * 0.02); }
+  else if (D.kind === 'takenoko') { add(new THREE.ConeGeometry(0.07, 0.24, 9), M('#7a5a32', 0.85), 0, 0.12, 0); add(new THREE.ConeGeometry(0.05, 0.12, 8), M('#9a7a3a', 0.8), 0, 0.2, 0); add(new THREE.ConeGeometry(0.02, 0.06, 6), M('#7a9a3a', 0.7), 0, 0.28, 0); }
+  else if (D.kind === 'warabi') { for (let k = 0; k < 4; k++) { const a = k * 1.6, o = add(new THREE.TorusGeometry(0.03, 0.006, 4, 10, 4.2), M('#5f7f2f', 0.8), Math.cos(a) * 0.03, 0.17, Math.sin(a) * 0.03); o.rotation.y = a; add(new THREE.CylinderGeometry(0.005, 0.006, 0.16, 5), M('#6a8a32', 0.8), Math.cos(a) * 0.03, 0.08, Math.sin(a) * 0.03); } }
+  else { for (let k = 0; k < 6; k++) add(new THREE.SphereGeometry(0.018, 8, 6), M('#f0802a', 0.35), Math.cos(k) * 0.03, 0.06 + (k % 2) * 0.02, Math.sin(k) * 0.03); add(new THREE.SphereGeometry(0.06, 8, 6), M('#4f7a2f', 0.9), 0, 0.03, 0, [1.4, 0.5, 1.2]); }
+  g.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  if (!FORAGE.glintTex) FORAGE.glintTex = txCanvas(64, 64, x => { const gr = x.createRadialGradient(32, 32, 0, 32, 32, 30); gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.2, 'rgba(255,248,220,0.8)'); gr.addColorStop(1, 'rgba(255,240,200,0)'); x.fillStyle = gr; x.fillRect(0, 0, 64, 64); });
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: FORAGE.glintTex, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0 })); sp.scale.setScalar(0.3); sp.position.y = 0.16; sp.renderOrder = 6; g.add(sp); g.userData.glint = sp;
+  return g;
+};
+FORAGE.daily = function () {
+  const p = GAME.p; if (!p || !G || !G.H || !VEG.items) return; const key = todayKey(); p.forage = p.forage || {}; if (p.forage.day !== key) { p.forage.day = key; p.forage.got = []; }
+  const sk = key + (p.created || '') + p.name; if (FORAGE.key === sk && FORAGE.grp) return; FORAGE.key = sk;
+  if (!FORAGE.spots) FORAGE.spots = FORAGE.scan();
+  if (FORAGE.grp) scene.remove(FORAGE.grp); FORAGE.grp = new THREE.Group(); FORAGE.grp.name = 'forage'; scene.add(FORAGE.grp); FORAGE.items = [];
+  const defs = FORAGE.season(); if (!defs.length) return;
+  const R = mulberry(hashStr(key + p.name + 'forage')), N = 9 + Math.floor(R() * 5), pick = [];
+  for (let t = 0; t < 800 && pick.length < N; t++) {
+    let D = defs[Math.floor(R() * defs.length)]; if (D.rare && R() < 0.65) D = defs.find(q => !q.rare) || D;
+    const S = FORAGE.spots[D.near]; const list = S && S.length ? S : FORAGE.spots.forest.length ? FORAGE.spots.forest : FORAGE.spots.edge; if (!list.length) break;
+    const s = list[Math.floor(R() * list.length)]; if (pick.some(q => Math.hypot(q.x - s[0], q.z - s[1]) < 14)) continue; pick.push({ x: s[0], z: s[1], id: D.id, ry: R() * 6.28, i: pick.length });
+  }
+  for (const it of pick) { if (p.forage.got.includes(it.i)) continue; const y = groundH(it.x, it.z); it.mesh = mergeLocal(FORAGE.mesh(FORAGE.def(it.id))); it.mesh.scale.setScalar(1.7); it.mesh.position.set(it.x, y, it.z); it.mesh.rotation.y = it.ry; it.ph = R() * 10; FORAGE.grp.add(it.mesh); FORAGE.items.push(it); }
+};
+FORAGE.target = function () { if (PL.veh || !GAME.p || GAME.inside) return null; const fx = Math.sin(PL.rot), fz = Math.cos(PL.rot); let best = null, bs = 1e9; for (const it of FORAGE.items) { const dx = it.x - PL.x, dz = it.z - PL.z, d = Math.hypot(dx, dz); if (d > 1.7) continue; const sc = d - (dx * fx + dz * fz) / (d || 1) * 0.5; if (sc < bs) { bs = sc; best = it; } } return best; };
+FORAGE.pick = function (it) {
+  const p = GAME.p, D = FORAGE.def(it.id); PL.rot = Math.atan2(it.x - PL.x, it.z - PL.z); if (typeof PLAY !== 'undefined') { PLAY.pose = 0.75; PLAY.poseK = 'pick'; }
+  if (FORAGE.count() >= FORAGE.CAP) { UI.toast(`かごがいっぱい（${FORAGE.CAP}こ）。料理するか、商店で売ろう`); return true; }
+  setTimeout(() => {
+    if (!FORAGE.items.includes(it)) return; FORAGE.grp.remove(it.mesh); FORAGE.items.splice(FORAGE.items.indexOf(it), 1); p.forage.got.push(it.i);
+    const b = FORAGE.bag(); b.forage[D.id] = (b.forage[D.id] || 0) + 1; p.foragez = p.foragez || {}; const first = !p.foragez[D.id]; p.foragez[D.id] = (p.foragez[D.id] || 0) + 1; p.stats.forageN = (p.stats.forageN || 0) + 1;
+    try { SND.play('rustle', { vol: 0.6 }); } catch (e) { }
+    UI.toast(`${D.ic} ${D.name}をひろった！${first ? '（図鑑に登録）' : ''}`); if (first) setTimeout(() => UI.toast(`📖 ${D.note}`), 900);
+    GAME.dirty = true; GAME.check && GAME.check(); GAME.renderTracker && GAME.renderTracker();
+  }, 420);
+  return true;
+};
+FORAGE.update = function (dt) {
+  if (!GAME.p) return; FORAGE.t += dt; if ((FORAGE.chk = (FORAGE.chk || 0) - dt) < 0) { FORAGE.chk = 3; try { FORAGE.daily(); } catch (e) { console.warn('forage', e); } }
+  if (!FORAGE.grp) return; FORAGE.grp.visible = !GAME.inside; if (GAME.inside) return;
+  const cp = camera.position, night = GAME.night || 0;
+  for (const it of FORAGE.items) { const sp = it.mesh.userData.glint; if (!sp) continue; const d = Math.hypot(it.x - cp.x, it.z - cp.z); if (d > 40) { sp.visible = false; continue; } sp.visible = true; const tw = Math.max(0, Math.sin(FORAGE.t * 1.9 + it.ph)) ** 4; sp.material.opacity = Math.max(tw, d < 12 ? 0.2 : 0) * (0.9 - night * 0.5) * Math.min(1, (40 - d) / 10) * sstep(1.5, 4.5, d); sp.scale.setScalar(0.12 + tw * 0.3); }
+};
+// ---------- cooking ----------
+const COOK = {};
+COOK.fishFor = (sp) => { const b = GAME.bag(); return b.fish.map((f, i) => ({ f, i })).filter(o => !sp.min || o.f.size >= sp.min).sort((a, c) => a.f.size - c.f.size); };
+COOK.have = function (sp) { const b = FORAGE.bag(), gb = typeof GARDEN !== 'undefined' ? GARDEN.bag() : { veg: {} };
+  if (sp.k === 'fish') return COOK.fishFor(sp).length; if (sp.k === 'mikan') return b.mikan || 0; if (sp.k === 'veg') return gb.veg[sp.id] || 0; if (sp.k === 'forage') return b.forage[sp.id] || 0;
+  if (sp.k === 'vegAny') return sp.ids.reduce((s, id) => s + (gb.veg[id] || 0), 0); return 0; };
+COOK.label = function (sp) { if (sp.k === 'fish') return sp.min ? `魚（${sp.min}cm 以上）` : '魚（なんでも）'; if (sp.k === 'mikan') return 'みかん'; if (sp.k === 'veg') { const C = GARDEN.crop(sp.id); return C ? C.name : sp.id; } if (sp.k === 'forage') return FORAGE.def(sp.id).name; if (sp.k === 'vegAny') return sp.ids.map(id => (GARDEN.crop(id) || {}).name).filter(Boolean).join('・') + 'のどれか'; return '?'; };
+COOK.can = R => R.need.every(sp => COOK.have(sp) >= sp.n);
+COOK.take = function (sp) { const b = FORAGE.bag(), gb = GARDEN.bag();
+  if (sp.k === 'fish') { const idx = COOK.fishFor(sp).slice(0, sp.n).map(o => o.i).sort((a, c) => c - a); for (const i of idx) b.fish.splice(i, 1); }
+  else if (sp.k === 'mikan') b.mikan -= sp.n; else if (sp.k === 'veg') gb.veg[sp.id] -= sp.n; else if (sp.k === 'forage') b.forage[sp.id] -= sp.n;
+  else if (sp.k === 'vegAny') { let n = sp.n; for (const id of [...sp.ids].sort((a, c) => (gb.veg[c] || 0) - (gb.veg[a] || 0))) { const t = Math.min(n, gb.veg[id] || 0); gb.veg[id] = (gb.veg[id] || 0) - t; n -= t; if (!n) break; } } };
+COOK.make = function (R) {
+  const p = GAME.p; if (!COOK.can(R)) return false; for (const sp of R.need) COOK.take(sp);
+  const b = FORAGE.bag(); b.dish[R.id] = (b.dish[R.id] || 0) + 1; p.cooked = p.cooked || {}; const first = !p.cooked[R.id]; p.cooked[R.id] = (p.cooked[R.id] || 0) + 1; p.stats.cookN = (p.stats.cookN || 0) + 1;
+  try { SND.play('chop', { vol: 0.5 }); setTimeout(() => SND.play('chop', { vol: 0.45 }), 220); } catch (e) { }
+  UI.toast(`🍳 ${R.ic} ${R.name}ができた！${first ? '（料理帳に記録）' : ''}`); GAME.dirty = true; GAME.check && GAME.check(); GAME.renderTracker && GAME.renderTracker(); return true;
+};
+GAME.openCook = function (tab, where) {
+  if (!this.p) return; this.modal = 'cook'; COOK.tab = tab || COOK.tab || 'make'; if (where) COOK.where = where; const p = this.p, C = p.cooked || {}, b = FORAGE.bag();
+  const row = R => { const ok = COOK.can(R); return `<li class="${ok ? '' : 'lock'}"><span class="ck">${R.ic}</span><div><b>${esc(R.name)}</b>${C[R.id] ? `　<span class="pr">${C[R.id]}回</span>` : ''}<div class="sub">${R.need.map(sp => { const h = COOK.have(sp); return `<span class="${h >= sp.n ? 'okn' : 'ngn'}">${esc(COOK.label(sp))} ${h}/${sp.n}</span>`; }).join('　')}</div></div><button class="rel" data-cook="${R.id}" ${ok ? '' : 'disabled'}>つくる</button></li>`; };
+  const list = COOK.tab === 'make' ? [...RECIPES].sort((a, c) => COOK.can(c) - COOK.can(a)) : RECIPES;
+  const body = COOK.tab === 'make' ? `<ul class="list cooklist">${list.map(row).join('')}</ul><p class="small">材料は、魚（クーラーボックス）・畑の野菜・みかん・山の幸。できた料理はバッグに入り、住民へのプレゼント（なかよし +3、好物なら +5）や、商店の買い取りに。</p>`
+    : `<ul class="list zukan">${RECIPES.map(R => `<li class="${C[R.id] ? 'done' : 'lock'}"><span class="ck">${C[R.id] ? R.ic : '？'}</span><div><b>${esc(R.name)}</b>　<span class="pr">${yen(R.p)}</span><div class="sub">${C[R.id] ? `${C[R.id]}回つくった　${esc(R.note)}` : R.need.map(sp => esc(COOK.label(sp)) + '×' + sp.n).join('・')}</div></div></li>`).join('')}</ul>`;
+  const dishN = Object.values(b.dish).reduce((s, v) => s + v, 0);
+  this.el.modal.innerHTML = `<div class="mbox journal cookbox"><div class="mh"><h2>🍳 ${COOK.where === 'kitchen' ? '台所' : 'カセットコンロで料理'}</h2><span class="isl">料理帳 ${Object.keys(C).length}/${RECIPES.length}・持っている料理 ${dishN}</span><button class="x" data-x="close" aria-label="とじる">×</button></div>
+    <div class="tabs"><button data-ct="make" class="${COOK.tab === 'make' ? 'on' : ''}">つくる</button><button data-ct="book" class="${COOK.tab === 'book' ? 'on' : ''}">料理帳</button></div><div class="mb">${body}</div></div>`;
+  this.el.modal.hidden = false;
+  this.el.modal.querySelector('.cookbox').onclick = e => { if (e.target.closest('[data-x="close"]')) return this.closeModal(); const t = e.target.closest('[data-ct]'); if (t) return this.openCook(t.dataset.ct);
+    const c = e.target.closest('[data-cook]'); if (c && !c.disabled) { const R = RECIPES.find(q => q.id === c.dataset.cook); if (COOK.make(R)) this.openCook('make'); } };
+};
+// at home: next to the kitchen, the low table, the kotatsu or the dining set
+COOK.FURN = ['kitchen', 'table_low', 'kotatsu', 'dining'];
+COOK.near = function () { if (!GAME.inside || GAME.place || GAME.roomEdit || !GAME.p) return null; let best = null, bd = 1.5; for (const it of GAME.home().items) { if (!COOK.FURN.includes(it.id)) continue; const F = FURN.find(f => f.id === it.id); if (!F) continue; const d = Math.hypot(PL.x - it.x, PL.z - it.z) - Math.max(F.w, F.d) / 2; if (d < bd) { bd = d; best = it; } } return best; };
+{ const _rp = GAME.roomPrompt; GAME.roomPrompt = function () { const r = _rp.apply(this, arguments); if (r) return r; return COOK.near() ? 'Space：料理する' : ''; }; }
+{ const _ra = GAME.roomAct; GAME.roomAct = function () { const S = ROOM.size; if (!(PL.z > S.d / 2 - 1.0 && Math.abs(PL.x) < 1)) { const n = this.roomNear(); if (!n) { const c = COOK.near(); if (c) return this.openCook('make', c.id === 'kitchen' ? 'kitchen' : 'table'); } } return _ra.apply(this, arguments); }; }
+// ---------- F key / prompt / update ----------
+{ const _fk = GAME.fishKey; GAME.fishKey = function () { if (!LIFE.fish && !PL.veh && !EDIT.on && !GAME.inside && GAME.p) { const it = FORAGE.target(); if (it) return FORAGE.pick(it); } return _fk.apply(this, arguments); }; }
+{ const _pr = GAME.prompt; GAME.prompt = function () { if (!LIFE.fish && !PL.veh && !EDIT.on && !GAME.inside && GAME.p) { const it = FORAGE.target(); if (it) return `F：${FORAGE.def(it.id).name}をひろう`; } return _pr.apply(this, arguments); }; }
+{ const _u = updateStructures; updateStructures = function (t, night) { const r = _u.apply(this, arguments); const now = performance.now(), dt = Math.min(0.1, (now - (FORAGE._l || now)) / 1000); FORAGE._l = now; try { FORAGE.update(dt); } catch (e) { } return r; }; }
+// ---------- bag, gifts, selling, zukan, requests ----------
+{ const _ob = GAME.openBag; GAME.openBag = function () { _ob.apply(this, arguments); const mb = this.el.modal.querySelector('.mb'); if (!mb) return; const b = FORAGE.bag();
+  const fr = FORAGE_ITEMS.filter(D => b.forage[D.id] > 0).map(D => `<li><span class="ic">${D.ic}</span><div><b>${esc(D.name)}</b> ×${b.forage[D.id]}</div></li>`).join('');
+  const ds = RECIPES.filter(R => b.dish[R.id] > 0).map(R => `<li><span class="ic">${R.ic}</span><div><b>${esc(R.name)}</b> ×${b.dish[R.id]}<div class="sub">買い取り ${yen(R.p)}</div></div></li>`).join('');
+  const h = document.createElement('div'); h.innerHTML = `<h3 class="bh">山の幸（${FORAGE.count()}/${FORAGE.CAP}）</h3><ul class="list">${fr || '<li><div class="sub">持っていません（季節の山の幸は、林の中で F でひろえます）</div></li>'}</ul><h3 class="bh">料理</h3><ul class="list">${ds || '<li><div class="sub">持っていません（家のテーブルやキッチンで Space）</div></li>'}</ul>`;
+  const tl = mb.querySelectorAll('h3.bh'); mb.insertBefore(h, tl[tl.length - 1] || null); }; }
+{ const _gb = GAME.giftables; GAME.giftables = function () { const b = FORAGE.bag(); return _gb.apply(this, arguments) || Object.values(b.dish).some(v => v > 0) || Object.values(b.forage).some(v => v > 0); }; }
+{ const _og = GAME.openGift; GAME.openGift = function (n) { _og.call(this, n); const box = this.el.modal.querySelector('.gifts'); if (!box) return; const b = FORAGE.bag();
+  box.insertAdjacentHTML('afterbegin', RECIPES.filter(R => b.dish[R.id] > 0).map(R => `<button class="gi" data-gd="${R.id}"><span>${R.ic}</span><b>${esc(R.name)}</b><small>手料理</small></button>`).join(''));
+  box.insertAdjacentHTML('beforeend', FORAGE_ITEMS.filter(D => b.forage[D.id] > 0).map(D => `<button class="gi" data-gfo="${D.id}"><span>${D.ic}</span><b>${esc(D.name)}</b><small>山の幸</small></button>`).join(''));
+  const jb = this.el.modal.querySelector('.journal'), prev = jb.onclick; jb.onclick = e => { const a = e.target.closest('[data-gd],[data-gfo]'); if (!a) return prev && prev(e);
+    const dish = !!a.dataset.gd, id = a.dataset.gd || a.dataset.gfo, name = dish ? RECIPES.find(R => R.id === id).name : FORAGE.def(id).name; if (dish) b.dish[id]--; else b.forage[id]--;
+    const vid = n.def.id, love = dish && (DISH_LOVE[vid] || []).includes(id), pts = love ? 5 : dish ? 3 : 2, p = this.p;
+    p.friend[vid] = (p.friend[vid] || 0) + pts; p.daily.gifted = p.daily.gifted || {}; p.daily.gifted[vid] = 1; p.stats.giftN++; if (love) { p.dishKnown = p.dishKnown || {}; p.dishKnown[vid] = 1; } this.modal = null; this.el.modal.hidden = true; this.el.modal.innerHTML = '';
+    const t = love ? `${name}！？ これ、わたしの大好物なの…！ ${p.name}さんが作ったの？ すごくおいしい！` : dish ? `${p.name}さんの手料理！ いいにおい〜。あったかいうちにいただくね。` : `${name}！ もうそんな季節なんだね。ありがとう！`;
+    DIALOG.npc = n; DIALOG.pages = [t]; DIALOG.i = 0; DIALOG.choices = null; UI.dialog(n.def.name, t); UI.toast(`🎁 ${name}をプレゼントした　なかよし +${pts}${love ? '（大好物！）' : ''}`); this.dirty = true; this.save(); }; }; }
+SHOPX.tabs.push({ id: 'dish', label: '料理・山の幸の買い取り', body() { const b = FORAGE.bag();
+    const rows = RECIPES.filter(R => b.dish[R.id] > 0).map(R => `<li><div class="th">${R.ic}</div><div class="in"><b>${esc(R.name)} ×${b.dish[R.id]}</b><span class="own">1皿 ${yen(R.p)}</span></div><button class="buy" data-selld="${R.id}">1皿売る</button></li>`)
+      .concat(FORAGE_ITEMS.filter(D => b.forage[D.id] > 0).map(D => `<li><div class="th">${D.ic}</div><div class="in"><b>${esc(D.name)} ×${b.forage[D.id]}</b><span class="own">1こ ${yen(D.p)}</span></div><button class="buy" data-sellf="${D.id}">1こ売る</button></li>`));
+    return rows.length ? `<ul class="glist">${rows.join('')}</ul>` : '<p>売れるものを持っていません。家で作った料理や、林でひろった山の幸を買い取ります。</p>'; },
+  click(e) { const b = FORAGE.bag(); let got = 0;
+    const d = e.target.closest('[data-selld]'); if (d) { const R = RECIPES.find(q => q.id === d.dataset.selld); if (b.dish[R.id] > 0) { b.dish[R.id]--; got = R.p; UI.toast(`${R.ic} ${R.name}が ${yen(R.p)} で売れた！`); } }
+    const f = e.target.closest('[data-sellf]'); if (f) { const D = FORAGE.def(f.dataset.sellf); if (b.forage[D.id] > 0) { b.forage[D.id]--; got = D.p; UI.toast(`${D.ic} ${D.name}が ${yen(D.p)} で売れた！`); } }
+    if (d || f) { if (got) this.addMoney(got); this.dirty = true; this.openShop('dish'); return true; } return false; } });
+{ const _zt = GAME.zukanTab; GAME.zukanTab = function () { const p = this.p, Z = p.foragez || {}, C = p.cooked || {};
+  return _zt.apply(this, arguments) + `<h3 class="bh" style="margin-top:14px">山の幸 ${Object.keys(Z).length} / ${FORAGE_ITEMS.length}種類　・　ひろった数 ${p.stats.forageN || 0}こ</h3>
+    <ul class="list zukan">${FORAGE_ITEMS.map(D => { const r = Z[D.id]; const ss = D.win.map(([m0, , m1]) => m0 === m1 ? `${m0}月` : `${m0}〜${m1}月`).join('・'); return `<li class="${r ? 'done' : 'lock'}"><span class="ck">${r ? D.ic : '？'}</span><div><b>${r ? esc(D.name) : '？？？'}</b><div class="sub">${ss}　${r ? `${r}こ　${esc(D.note)}` : D.near === 'bamboo' ? '竹やぶ' : D.near === 'forest' ? '林のおく' : '林のふち'}</div></div></li>`; }).join('')}</ul>
+    <h3 class="bh" style="margin-top:14px">料理帳 ${Object.keys(C).length} / ${RECIPES.length}品</h3><p class="small">家のキッチン・ちゃぶ台・こたつで料理できます。</p>`; }; }
+DAILY_POOL.push(
+  { id: 'forage2', who: 'v_rin', text: '林で山の幸を2つひろう', n: 2, stat: 'forageN', need: () => FORAGE.season().length > 0, ask: '林のなかに、いまの季節の山の幸がかくれてるよ。2つ見つけてきてくれる？' },
+  { id: 'cook1', who: 'v_hana', text: '家で料理を1品つくる', n: 1, stat: 'cookN', ask: 'とれたての魚や野菜で、なにか作ってみたら？ 家のちゃぶ台でも料理できるのよ。' });
+GOALS.push({ id: 'cook10', text: '料理を10品つくる', n: 10, stat: 'cookN', pts: 20 }, { id: 'forage15', text: '山の幸を15こひろう', n: 15, stat: 'forageN', pts: 15 });
+{ const st = document.createElement('style'); st.textContent = `#game .cookbox{max-width:700px}#game .cookbox .tabs{display:flex;gap:6px;padding:0 16px}#game .cookbox .tabs button{border:none;background:#eee6d6;color:#5a4d3e;border-radius:10px;padding:6px 14px;font-weight:700;cursor:pointer;margin-bottom:6px}#game .cookbox .tabs button.on{background:#2f7a4a;color:#fff}#game .cookbox .mb{max-height:min(70vh,620px);overflow:auto}#game .cooklist li{align-items:center}#game .cooklist li.lock{opacity:.6}#game .cooklist .okn{color:#2f7a4a;font-weight:700}#game .cooklist .ngn{color:#a0643a}#game .cooklist button{white-space:nowrap}`; document.head.appendChild(st); }
 
 // ===================== 写真モード（X）とアルバム・島の名所めぐり =====================
 // X で写真モード: 画面の表示が消えて、カメラを自由に動かせる（ドラッグ＝回す、ホイール＝近づく／はなれる、WASD＝移動、R/F＝上下、Q/E＝回す）。
@@ -11359,6 +11709,59 @@ SAFE.open = function (fromTitle) {
   const host = box.querySelector('.cont') || box.querySelector('form') || box; host.insertAdjacentHTML('beforeend', `<div class="safeent">${s ? `<p class="small">このブラウザの島：道路 ${s.roads} 本${s.saved ? '・最終保存 ' + SAFE.when(s.saved) : ''}</p>` : ''}<button type="button" data-x="safe">💾 データの読み込み・バックアップ</button></div>`);
   host.querySelector('[data-x="safe"]').onclick = () => SAFE.open(true); }; }
 { const st = document.createElement('style'); st.textContent = `#game .safebox{max-width:640px}#game .safebox .mb{max-height:min(74vh,640px);overflow:auto}#game .safebox .cur{background:#f3efe4;border-radius:10px;padding:8px 10px;margin:8px 0}#game .safebox .h{font-weight:800;margin:12px 0 6px}#game .safebox .btnrow{display:flex;flex-wrap:wrap;gap:6px}#game .safebox textarea{width:100%;height:90px;margin:8px 0 4px;font:11px/1.3 ui-monospace,monospace;border-radius:8px;border:1px solid #cbbfa5;padding:6px;box-sizing:border-box}#game .safebox .msg{min-height:1.2em;margin:8px 0 0;font-size:13px;color:#2d6a3e}#game .safebox .msg.bad{color:#b0342a}#game .safebox .msg .warn{margin-left:8px;background:#c8462f;color:#fff;border-color:#c8462f}#game .safebox .bk li{align-items:center}#game .safebox .bk .kd{font-size:12px;opacity:.75}#game .safebox .bk button{white-space:nowrap}#saveDot{position:absolute;left:50%;top:12px;transform:translateX(-50%);padding:3px 9px;border-radius:10px;background:rgba(20,40,50,.55);color:#fff;font-size:12px;pointer-events:none;opacity:0;z-index:30}#saveDot.on{animation:saveDot 1.6s ease-out}@keyframes saveDot{0%{opacity:0}12%{opacity:1}70%{opacity:1}100%{opacity:0}}#staleBox{position:fixed;inset:0;z-index:9999;display:grid;place-items:center;background:rgba(10,25,35,.55)}#staleBox .ghost{background:#e9e4d8;color:#3a3f40}#staleBox .msg{font-size:12px;color:#6a5a40;margin:6px 0 0}#staleBox .sb{max-width:440px;margin:16px;background:#fffdf7;border-radius:16px;padding:18px 20px;box-shadow:0 8px 30px rgba(0,0,0,.3);font-size:14px;line-height:1.6;color:#2b3133}#staleBox button{margin:6px 6px 0 0;padding:9px 16px;border-radius:12px;border:none;background:#2f7a4a;color:#fff;font-weight:800;font-size:15px;cursor:pointer}#game .safeent{margin-top:10px;text-align:center}#game .safeent p{margin:0 0 2px;color:#5d6a6e;font-size:12px}#game .safeent button{background:none;border:none;color:#2a6f8f;text-decoration:underline;font-size:13px;cursor:pointer;padding:4px}`; document.head.appendChild(st); }
+
+// ===================== 画面表示の整理: 設定は ⚙ にまとめる・左の手帳は小さく・操作説明は慣れたら消える =====================
+const HUD2 = { open: false, compact: true };
+try { HUD2.open = localStorage.getItem('hoshinami.ctlOpen') === '1'; HUD2.compact = localStorage.getItem('hoshinami.sideFull') !== '1'; } catch (e) { }
+HUD2.store = (k, v) => { try { localStorage.setItem(k, v); } catch (e) { } };
+// ---------- right: time / view / weather / season / sound / quality / data → behind ⚙ ----------
+HUD2.setupCtl = function () {
+  const card = document.querySelector('#hud .card.ctl'); if (!card || card.querySelector('.ctlBar')) return;
+  const bar = document.createElement('div'); bar.className = 'ctlBar';
+  bar.innerHTML = `<button class="cg" data-c="set" title="時間・天気・季節・視点・音・画質・データ">⚙ 設定</button>`;
+  const more = document.createElement('div'); more.className = 'ctlMore';
+  while (card.firstChild) more.appendChild(card.firstChild);
+  card.appendChild(bar); card.appendChild(more);
+  const ph = more.querySelector('#photoBtn'); if (ph) bar.insertBefore(ph, bar.firstChild);
+  const help = document.createElement('div'); help.className = 'row'; help.innerHTML = '<button data-c="help">❔ 操作説明</button>'; more.appendChild(help);
+  // rows other modules add later go behind ⚙ as well
+  new MutationObserver(ms => { for (const m of ms) for (const n of m.addedNodes) if (n.parentNode === card && n !== bar && n !== more) { more.appendChild(n); const p = more.querySelector('#photoBtn'); if (p) bar.insertBefore(p, bar.firstChild); } }).observe(card, { childList: true });
+  card.addEventListener('click', e => { const b = e.target.closest('[data-c]'); if (!b) return; e.stopPropagation();
+    if (b.dataset.c === 'set') { HUD2.open = !HUD2.open; HUD2.store('hoshinami.ctlOpen', HUD2.open ? '1' : '0'); HUD2.apply(); }
+    if (b.dataset.c === 'help') { const h = document.getElementById('help'); if (h) { h.hidden = !h.hidden; h.style.display = ''; } }
+    document.getElementById('c').focus(); });
+  HUD2.apply();
+};
+HUD2.apply = function () { const card = document.querySelector('#hud .card.ctl'); if (!card) return; card.classList.toggle('open', HUD2.open); const b = card.querySelector('[data-c="set"]'); if (b) b.textContent = HUD2.open ? '⚙ 設定 ▴' : '⚙ 設定'; };
+// ---------- left: the tracker can fold down to money, 元気度 and one summary line ----------
+HUD2.side = function () {
+  const s = GAME.el && GAME.el.side; if (!s || !GAME.p) return;
+  s.classList.toggle('compact', HUD2.compact);
+  let t = s.querySelector('.foldBtn'); if (!t) { t = document.createElement('button'); t.className = 'foldBtn'; t.onclick = e => { e.stopPropagation(); HUD2.compact = !HUD2.compact; HUD2.store('hoshinami.sideFull', HUD2.compact ? '0' : '1'); HUD2.side(); document.getElementById('c').focus(); }; s.appendChild(t); }
+  t.textContent = HUD2.compact ? '▾ くわしく' : '▴ たたむ'; t.title = HUD2.compact ? 'おねがい・物語・行事をひらく' : '小さくする';
+  let sm = s.querySelector('.sum'); if (!sm) { sm = document.createElement('div'); sm.className = 'sum'; const vit = s.querySelector('.vit'); vit && vit.nextSibling ? s.insertBefore(sm, vit.nextSibling) : s.appendChild(sm); }
+  if (!HUD2.compact) { sm.hidden = true; return; } sm.hidden = false;
+  let done = 0, all = 0; try { const td = GAME.todays(); all = td.length; done = td.filter(m => GAME.p.daily.done[m.id]).length; } catch (e) { }
+  const parts = [`📋 おねがい ${done}/${all}`];
+  try { if (typeof STORY !== 'undefined' && STORY.st) { const S = STORY.st(), C = CHAPTERS[S.ch]; if (C) { const g = (C.goals || []), gd = g.filter(q => { try { return q.prog() >= q.n; } catch (e) { return false; } }).length; parts.push(`📜 ${C.no || ''} ${C.title || ''} ${g.length ? gd + '/' + g.length : ''}`.trim()); } } } catch (e) { }
+  const html = parts.map(esc).join('<br>');
+  if (sm._h !== html) { sm.innerHTML = html; sm._h = html; }
+};
+{ const _rt = GAME.renderTracker; GAME.renderTracker = function () { const r = _rt.apply(this, arguments); try { HUD2.side(); } catch (e) { } return r; }; }
+// the tracker sits right under the clock card, whatever height the clock card has (the tide line made it taller)
+HUD2.place = function () { const c = document.querySelector('#hud .card.clock'), s = GAME.el && GAME.el.side; if (!c || !s || c.offsetParent === null) return; const b = c.offsetTop + c.offsetHeight + 8; if (Math.abs((parseFloat(s.style.top) || 0) - b) > 1) s.style.top = b + 'px'; };
+{ const _c = UI.clock; UI.clock = function () { const r = _c.apply(this, arguments); try { HUD2.place(); } catch (e) { } return r; }; }
+// ---------- the controls line disappears once you have played a while (⚙ → ❔ brings it back) ----------
+HUD2.helpTimer = function () {
+  let seen = false; try { seen = localStorage.getItem('hoshinami.helpSeen') === '1'; } catch (e) { }
+  const h = document.getElementById('help'); if (!h) return; if (seen) { h.hidden = true; return; }
+  clearTimeout(HUD2._ht); HUD2._ht = setTimeout(() => { if (!h.matches(':hover')) h.hidden = true; HUD2.store('hoshinami.helpSeen', '1'); }, 150000);
+};
+{ const _ui = UI.init; UI.init = function () { const r = _ui.apply(this, arguments); try { HUD2.setupCtl(); } catch (e) { console.warn('hud', e); } return r; }; }
+{ const _b = GAME.begin; GAME.begin = function () { const r = _b.apply(this, arguments); try { HUD2.setupCtl(); HUD2.side(); HUD2.place(); if (!this.p.demo) HUD2.helpTimer(); } catch (e) { } return r; }; }
+{ const st = document.createElement('style'); st.textContent = `#hud .card.ctl{padding:8px 10px}#hud .ctlBar{display:flex;gap:6px;justify-content:flex-end}#hud .ctlBar button{border:none;border-radius:12px;padding:6px 12px;font-weight:800;font-size:13px;background:#fff;color:#2f4440;cursor:pointer;box-shadow:0 1px 0 rgba(0,0,0,.06)}#hud .ctlBar button:hover{background:#eef5ee}#hud .ctlMore{display:none;flex-direction:column;gap:6px;margin-top:6px}#hud .card.ctl.open .ctlMore{display:flex}
+#hud .gside .foldBtn{display:block;margin:6px 0 0 auto;border:none;background:none;color:#4a6a62;font-size:12px;font-weight:800;cursor:pointer;padding:2px 4px}#hud .gside .sum{font-size:13px;font-weight:800;color:#3a4f4a;margin:6px 0 2px;line-height:1.5}
+#hud .gside.compact>*:not(.money):not(.vit):not(.sum):not(.btns):not(.foldBtn){display:none!important}#hud .gside.compact{width:236px}`; document.head.appendChild(st); }
 
 // ===================== MAIN =====================
 let renderer, scene, camera;

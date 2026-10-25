@@ -50,6 +50,10 @@ gfx.js
 perf.js
 see.js
 flora.js
+koyo.js
+seaside.js
+kitchen.js
 photo.js
 savesafe.js
+hud.js
 main.js

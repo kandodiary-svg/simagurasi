@@ -355,7 +355,7 @@ function shopFront(g, hs, o) {
   // striped awning with scalloped valance
   const aw = W + 0.2, ad = 1.7, am = pick2(A.awn, R), ay = B0 + 2.75; const a = new THREE.Mesh(new THREE.PlaneGeometry(aw, ad), am); a.rotation.x = -Math.PI / 2 + 0.38; a.position.set(0, ay - Math.sin(0.38) * ad / 2, fz + Math.cos(0.38) * ad / 2); a.castShadow = true; g.add(a);
   const vy = ay - Math.sin(0.38) * ad, vz = fz + Math.cos(0.38) * ad, nS = Math.round(aw / 0.4); const sm = A.awnSolid[A.awn.indexOf(am)];
-  for (let k = 0; k < nS; k++) { const sc = new THREE.Mesh(new THREE.CircleGeometry(aw / nS / 2, 10, Math.PI, Math.PI), k % 2 ? MAT.white : sm); sc.position.set(-aw / 2 + (k + 0.5) * aw / nS, vy, vz); g.add(sc); const back = sc.clone(); back.rotation.y = Math.PI; g.add(back); }
+  B(g, aw, 0.3, 0.03, sm, 0, vy - 0.14, vz); void nS; // a plain straight valance (日よけテント), like a Japanese corner shop
   for (const sx of [-1, 1]) ROD(g, 0.03, A.railM, [sx * (aw / 2 - 0.1), ay, fz], [sx * (aw / 2 - 0.1), vy, vz]);
   // vending machines, banners, bench, red post
   vendingMachine(g, -W / 2 + 0.55, z + 1.0, 0, 0); vendingMachine(g, -W / 2 + 1.6, z + 1.0, 0, 1);
