@@ -25,7 +25,28 @@ SEA.barProf = function (B, t) { const tc = Math.max(0, Math.min(1, t)), o = Math
 SEA.barTL = function (B, x, z) { const dx = B.bx - B.ax, dz = B.bz - B.az, L2 = dx * dx + dz * dz, L = Math.sqrt(L2), t = ((x - B.ax) * dx + (z - B.az) * dz) / L2, lat = ((x - B.ax) * dz - (z - B.az) * dx) / L; return [t, lat, L]; };
 SEA.barDist = function (B, x, z) { const [t, lat, L] = SEA.barTL(B, x, z), [o, w] = SEA.barProf(B, t), along = t < 0 ? -t * L : t > 1 ? (t - 1) * L : 0; return [Math.hypot(lat - o, along), w]; };
 SEA.makeBar = function () {
-  const L = SEA.barLine(); if (!L) return null; const { n, size } = WORLD, cell = size / (n - 1), h0 = -size / 2, H = G.H, H0 = G.H0, W = G.Wl; L.w = 3.4; L.curv = (hashStr(String(Math.round(L.ax))) % 2 ? 1 : -1) * Math.min(7, L.len * 0.12);
+  // choose the line on the island as generated (not on today's terrain, which already holds the bar from the last visit:
+  // ver.34/35 picked a new line each visit and an island could collect extra, half-built bars)
+  const base = typeof SAFE !== 'undefined' && SAFE.base && SAFE.base.H, keep = G.H; let L = null;
+  if (base && base.length === keep.length) { G.H = base; try { L = SEA.barLine(); } finally { G.H = keep; } } else L = SEA.barLine();
+  if (!L) return null; const { n, size } = WORLD, cell = size / (n - 1), h0 = -size / 2, H = G.H, H0 = G.H0, W = G.Wl; L.w = 3.4; L.curv = (hashStr(String(Math.round(L.ax))) % 2 ? 1 : -1) * Math.min(7, L.len * 0.12);
+  if (base && base.length === H.length) {
+    // only along the other crossings an older version could have picked (all computed on the island as generated),
+    // only cells still under water, not raised by a development (G.H0 above the generated height), and away from roads
+    const lines = []; G.H = base; try { const I = GAME.LM.islet;
+      for (let a = 0; a < 6.283; a += 0.04) { const dx = Math.cos(a), dz = Math.sin(a); let edge = null; for (let r = 8; r < 60; r += 1) { if (groundH(I.x + dx * r, I.z + dz * r) < -0.3) { edge = r; break; } } if (edge === null) continue;
+        for (let r = edge + 4; r < 190; r += 2) { const x = I.x + dx * r, z = I.z + dz * r; if (groundH(x, z) > 0.6) { if (r - edge > 12) lines.push([I.x + dx * (edge - 3), I.z + dz * (edge - 3), x + dx * 3, z + dz * 3]); break; } } }
+    } finally { G.H = keep; }
+    const segD = (x, z, s) => { const vx = s[2] - s[0], vz = s[3] - s[1], L2 = vx * vx + vz * vz, t = Math.max(0, Math.min(1, ((x - s[0]) * vx + (z - s[1]) * vz) / L2)); return Math.hypot(x - s[0] - vx * t, z - s[1] - vz * t); };
+    let a0 = 1e9, a1 = -1e9, b0 = 1e9, b1 = -1e9, sunk = 0;
+    for (const sg of lines) {
+      const i0 = Math.max(0, Math.floor((Math.min(sg[0], sg[2]) - 16 - h0) / cell)), i1 = Math.min(n - 1, Math.ceil((Math.max(sg[0], sg[2]) + 16 - h0) / cell)), j0 = Math.max(0, Math.floor((Math.min(sg[1], sg[3]) - 16 - h0) / cell)), j1 = Math.min(n - 1, Math.ceil((Math.max(sg[1], sg[3]) + 16 - h0) / cell));
+      for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) { const k = j * n + i; if (!isNaN(W[k]) || !(base[k] < -0.3) || !(H[k] > base[k] + 0.05) || H[k] > -0.04 || H0[k] > base[k] + 1e-4 || G.roadDist[k] < 8) continue;
+        const x = h0 + i * cell, z = h0 + j * cell; if (segD(x, z, sg) > 14) continue; const [d, w] = SEA.barDist(L, x, z); if (d <= w * 3.4 + 1.5) continue;
+        H[k] = base[k]; sunk++; a0 = Math.min(a0, i); a1 = Math.max(a1, i); b0 = Math.min(b0, j); b1 = Math.max(b1, j); }
+    }
+    if (sunk) { SEA.sunk = sunk; refreshRegion(a0 - 1, b0 - 1, a1 + 1, b1 + 1); }
+  }
   const pad = 16, x0 = Math.min(L.ax, L.bx) - pad, x1 = Math.max(L.ax, L.bx) + pad, z0 = Math.min(L.az, L.bz) - pad, z1 = Math.max(L.az, L.bz) + pad; let i0 = 1e9, i1 = -1e9, j0 = 1e9, j1 = -1e9;
   for (let j = Math.max(0, Math.floor((z0 - h0) / cell)); j <= Math.min(n - 1, Math.ceil((z1 - h0) / cell)); j++) for (let i = Math.max(0, Math.floor((x0 - h0) / cell)); i <= Math.min(n - 1, Math.ceil((x1 - h0) / cell)); i++) {
     const x = h0 + i * cell, z = h0 + j * cell, [d, w] = SEA.barDist(L, x, z); if (d > w * 3.4) continue; const k = j * n + i;

@@ -12,6 +12,10 @@ function txCanvas(w, h, fn, repeat = false) { const [c, x] = cvs(w, h); fn(x, w,
 function archTextures() {
   // lap siding: horizontal boards with a shadow under each lap (16px per board → ~0.18m)
   TEX.siding = toTex(pixelTex(256, (i, j) => { const b = j % 16, n = pfbm(i / 32, j / 4, 8, 301, 3), gr = (hash2(i >> 3, j >> 4, 7) - 0.5) * 6; let v = 238 + (n - 0.5) * 16 + gr; if (b >= 14) v -= 48 - (15 - b) * 18; else if (b < 2) v += 8; return [v, v, v]; })[0]);
+  // 窯業系サイディング (fibre-cement panels, the standard Japanese house wall): faint stone grain, a groove every 455 mm (6 per 2.73 m tile)
+  TEX.panelJ = toTex(pixelTex(256, (i, j) => { const u = i / 256 * 6, fr = u - Math.floor(u), n = pfbm(i / 16, j / 16, 16, 401, 3); let v = 230 + (n - 0.5) * 16; if (fr < 0.028 || fr > 0.988) v -= 64; else if (fr < 0.05) v -= 14; else if (fr > 0.97) v += 8; if (j < 2) v -= 26; return [v, v, v]; })[0]);
+  // タイル調サイディング: small staggered tiles with light joints
+  TEX.tileJ = toTex(pixelTex(256, (i, j) => { const row = Math.floor(j / 8), jj = j % 8, x = (i + (row % 2) * 10.667) % 256, col = Math.floor(x / 21.333), ii = x - col * 21.333; let v = 212 + (hash2(col % 12, row, 23) - 0.5) * 36 + (pfbm(i / 8, j / 8, 32, 409, 2) - 0.5) * 12; if (jj === 7 || ii < 1.3) v = 240; else if (jj === 0) v += 9; return [v, v * 0.985, v * 0.96]; })[0]);
   // vertical boards (yakisugi / board-and-batten)
   TEX.boardV = toTex(pixelTex(256, (i, j) => { const b = i % 21, n = pfbm(i / 6, j / 64, 42.67, 311, 3), plank = Math.floor(i / 21); let v = 200 + (n - 0.5) * 70 + (hash2(plank, 0, 9) - 0.5) * 30; if (b < 2) v *= 0.45; return [v, v * 0.97, v * 0.93]; })[0]);
   // scalloped shingles (roof UVs: u along eave, v up the slope; repeat every 1.35 m → 6 rows)
@@ -231,13 +235,24 @@ function mergeLocal(root) {
   return out;
 }
 
+// modern Japanese house walls: panels / tile-pattern / mortar, with corner pieces in the wall colour (no white corner boards)
+function archJWalls() {
+  if (AM.jw) return AM.jw; const L = [];
+  const mk = (tex, sc, c, r) => ({ m: worldMat(tex, sc, c, r), corner: stdM('#' + new THREE.Color(c).multiplyScalar(0.84).getHexString(), 0.6) });
+  for (const c of ['#f2efe8', '#e3ded3', '#d3cfc6', '#b8b2a7', '#8a8680', '#5d5c5b', '#cdbb9f', '#e9e3d8']) L.push(mk(TEX.panelJ, 0.366, c, 0.7));
+  for (const c of ['#dccfb9', '#c3a586', '#b6afa3', '#e2d9c8', '#9a8874']) L.push(mk(TEX.tileJ, 0.366, c, 0.8));
+  for (const c of ['#f4efe4', '#ece5d6', '#e2ddd2']) L.push(mk(TEX.plaster, 0.35, c, 0.92));
+  L.accent = [stdM('#5a4a3f', 0.6), stdM('#3d4045', 0.55), stdM('#f1eee7', 0.55)];
+  return (AM.jw = L);
+}
 // ===================== houses =====================
 function makeHouse(hs) {
   const A = archMats(), R = mulberry(hs.seed), g = new THREE.Group(), W = hs.w, D = hs.d, fh = 2.75, H = hs.floors * fh, B0 = 0.45;
   const kind = hs.kind, minka = kind === 'minka', shop = kind === 'shop', modern = !minka && !shop;
   const pick = a => a[Math.floor(R() * a.length)];
   const cur = Math.floor(R() * A.win.length), cur2 = Math.floor(R() * A.win.length);
-  const wallM = hs.wallM || (minka ? pick(AM.plaster) : shop ? A.siding[0] : pick(A.siding));
+  let wallM = hs.wallM, cornerM = null, bandM = null;
+  if (!wallM) { if (minka) wallM = pick(AM.plaster); else if (shop) wallM = A.siding[0]; else { R(); const RW = mulberry(hs.seed * 7 + 13), jw = archJWalls(), w = jw[Math.floor(RW() * jw.length)]; wallM = w.m; cornerM = w.corner; bandM = RW() < 0.55 ? w.corner : jw.accent[Math.floor(RW() * jw.accent.length)]; } }
   const trimM = minka ? MAT.darkwood : (A.trimJ || (A.trimJ = stdM('#8c877e', 0.55, 0.2)));
   // ----- foundation, base flashing, walls -----
   B(g, W + 0.14, B0, D + 0.14, A.found, 0, B0 / 2, 0);
@@ -249,9 +264,9 @@ function makeHouse(hs) {
     for (const sx of [-1, 1]) for (const sz of [-1, 1]) B(g, 0.17, H, 0.17, MAT.darkwood, sx * W / 2, B0 + H / 2, sz * D / 2);
     for (let f = 1; f <= hs.floors; f++) for (const s of [-1, 1]) { B(g, W + 0.08, 0.15, 0.07, MAT.darkwood, 0, B0 + f * fh - 0.1, s * (D / 2 + 0.03)); B(g, 0.07, 0.15, D + 0.08, MAT.darkwood, s * (W / 2 + 0.03), B0 + f * fh - 0.1, 0); }
   } else {
-    for (const sx of [-1, 1]) for (const sz of [-1, 1]) B(g, 0.17, H, 0.17, A.trim, sx * W / 2, B0 + H / 2, sz * D / 2);
-    if (hs.floors > 1) B(g, W + 0.08, 0.16, D + 0.08, A.trim, 0, B0 + fh, 0);
-    B(g, W + 0.06, 0.2, D + 0.06, A.trim, 0, B0 + H - 0.1, 0);
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) B(g, cornerM ? 0.1 : 0.17, H, cornerM ? 0.1 : 0.17, cornerM || A.trim, sx * W / 2, B0 + H / 2, sz * D / 2);
+    if (hs.floors > 1) B(g, W + 0.08, cornerM ? 0.2 : 0.16, D + 0.08, bandM || A.trim, 0, B0 + fh, 0);
+    B(g, W + 0.06, 0.2, D + 0.06, cornerM || A.trim, 0, B0 + H - 0.1, 0);
   }
   // ----- balcony (2-storey) -----
   let bal = null;

@@ -47,5 +47,9 @@ rare.js
 story2.js
 chara.js
 gfx.js
+perf.js
+see.js
+flora.js
+photo.js
 savesafe.js
 main.js
