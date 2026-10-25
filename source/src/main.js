@@ -12,12 +12,17 @@ async function init() {
   composer = new EffectComposer(renderer, rt); GAME_RP = new RenderPass(scene, camera); composer.addPass(GAME_RP);
   const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth / 2, innerHeight / 2), 0.32, 0.6, 0.86); composer.addPass(bloom);
   composer.addPass(new OutputPass());
-  gradePass = new ShaderPass({ uniforms: { tDiffuse: { value: null }, sat: { value: 1.14 }, warm: { value: 0.02 }, vig: { value: 0.22 } },
+  // display grade (after tone mapping, sRGB): near-neutral saturation with the lime greens tamed, gentle filmic contrast,
+  // warm highlights / cool shadows, soft vignette
+  gradePass = new ShaderPass({ uniforms: { tDiffuse: { value: null }, sat: { value: 1.05 }, gsat: { value: 0.8 }, warm: { value: 0.022 }, con: { value: 0.16 }, vig: { value: 0.2 } },
     vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
-    fragmentShader: `uniform sampler2D tDiffuse; uniform float sat, warm, vig; varying vec2 vUv;
-      void main(){ vec4 c = texture2D(tDiffuse, vUv); float l = dot(c.rgb, vec3(0.299,0.587,0.114)); c.rgb = mix(vec3(l), c.rgb, sat);
-        c.rgb += vec3(warm, warm*0.4, -warm); c.rgb = mix(c.rgb, c.rgb*c.rgb*(3.0-2.0*c.rgb), 0.18);
-        float d = distance(vUv, vec2(0.5)); c.rgb *= 1.0 - vig * smoothstep(0.35, 0.85, d); gl_FragColor = c; }` });
+    fragmentShader: `uniform sampler2D tDiffuse; uniform float sat, gsat, warm, con, vig; varying vec2 vUv;
+      void main(){ vec4 c = texture2D(tDiffuse, vUv); float l = dot(c.rgb, vec3(0.2126,0.7152,0.0722));
+        float gw = clamp((c.g - max(c.r, c.b)) * 5.0, 0.0, 1.0) * smoothstep(0.05, 0.25, c.g);
+        c.rgb = mix(vec3(l), c.rgb, sat * mix(1.0, gsat, gw)); c.r += 0.025 * gw * c.g;
+        c.rgb += vec3(warm, warm * 0.45, -warm * 0.8) * smoothstep(0.35, 0.95, l) + vec3(-0.008, 0.0, 0.012) * (1.0 - smoothstep(0.0, 0.3, l));
+        c.rgb = clamp(c.rgb, 0.0, 1.0); c.rgb = mix(c.rgb, c.rgb * c.rgb * (3.0 - 2.0 * c.rgb), con);
+        float d = distance(vUv, vec2(0.5)); c.rgb *= 1.0 - vig * smoothstep(0.38, 0.88, d); gl_FragColor = c; }` });
   composer.addPass(gradePass);
   const rs = () => { renderer.setSize(innerWidth, innerHeight, false); composer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); }; addEventListener('resize', rs); rs();
   const t0 = performance.now();
@@ -33,9 +38,9 @@ async function init() {
   requestAnimationFrame(loop);
 }
 function buildRain() {
-  const n = 1400, p = new Float32Array(n * 6); for (let k = 0; k < n; k++) { const x = (Math.random() - 0.5) * 60, y = Math.random() * 30, z = (Math.random() - 0.5) * 60; p.set([x, y, z, x - 0.04, y - 0.8, z], k * 6); }
+  const n = 1600, p = new Float32Array(n * 6), len = new Float32Array(n); for (let k = 0; k < n; k++) { const x = (Math.random() - 0.5) * 60, y = Math.random() * 30, z = (Math.random() - 0.5) * 60, L = 0.45 + Math.random() * 0.75; len[k] = L; p.set([x, y, z, x - 0.1 * L, y - L, z - 0.03 * L], k * 6); }
   const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(p, 3));
-  RAIN = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: '#c8d8e4', transparent: true, opacity: 0.5 })); RAIN.frustumCulled = false; RAIN.visible = false; scene.add(RAIN);
+  RAIN = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: '#c8d8e4', transparent: true, opacity: 0.42 })); RAIN.userData.len = len; RAIN.frustumCulled = false; RAIN.visible = false; scene.add(RAIN);
 }
 function initInput() {
   addEventListener('keydown', e => {
@@ -92,7 +97,7 @@ function loop(now) {
   const hf = currentHour(), focus = new THREE.Vector3(PL.x, PL.y, PL.z);
   const st = updateSky(hf, focus, camera, dt, TIME.weather); updateStructures(T, st.night); GAME.night = st.night;
   if (waterMat) waterMat.uniforms.time.value = T; VEG.uTime.value = T;
-  if (RAIN) { RAIN.visible = TIME.weather === 'rain'; if (RAIN.visible) { const p = RAIN.geometry.attributes.position; for (let k = 0; k < p.count; k += 2) { let y = p.getY(k) - 26 * dt; if (y < 0) y += 30; p.setY(k, y); p.setY(k + 1, y - 0.8); } p.needsUpdate = true; RAIN.position.set(camera.position.x, camera.position.y - 12, camera.position.z); } }
+  if (RAIN) { RAIN.visible = TIME.weather === 'rain'; if (RAIN.visible) { const p = RAIN.geometry.attributes.position; for (let k = 0; k < p.count; k += 2) { const L = RAIN.userData.len[k >> 1]; let y = p.getY(k) - (20 + L * 12) * dt; if (y < 0) y += 30; p.setY(k, y); p.setY(k + 1, y - L); } p.needsUpdate = true; RAIN.position.set(camera.position.x, camera.position.y - 12, camera.position.z); } }
   hudT -= dt; if (hudT < 0) { hudT = 0.5; UI.clock(hf); }
   const v = !PL.veh && nearVehicle(), nv = !PL.veh && !DIALOG.npc && nearVillager();
   const gp = GAME.inside ? GAME.roomPrompt() : GAME.prompt();

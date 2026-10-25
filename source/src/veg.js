@@ -1,5 +1,5 @@
 // ===================== VEGETATION =====================
-const VEG = { uTime: { value: 0 }, trees: [] };
+const VEG = { uTime: { value: 0 }, uDayK: { value: 1 }, trees: [] }; // uDayK: foliage translucency glow, off at night
 function windify(mat, amount, useHeight = true) {
   const prev = mat.onBeforeCompile;
   mat.onBeforeCompile = (sh, r) => {
@@ -104,8 +104,8 @@ function buildVegetation(scene) {
   const group = new THREE.Group();
   const barkMat = worldMat(TEX.rock, 0.6, '#7a6656', 0.95);
   const barkMatInst = new THREE.MeshStandardMaterial({ map: TEX.bark, color: '#c8bcae', roughness: 0.95 });
-  const fol = (c) => { const m = windify(new THREE.MeshStandardMaterial({ map: TEX.foliage, color: c, vertexColors: true, roughness: 1 }), 0.012); const pv = m.onBeforeCompile; m.onBeforeCompile = (sh, r) => { pv(sh, r); sh.fragmentShader = sh.fragmentShader.replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n totalEmissiveRadiance += diffuseColor.rgb * 0.32;'); }; return m; };
-  const card = (c) => { const m = windify(new THREE.MeshStandardMaterial({ map: TEX.leaves, color: new THREE.Color(c).multiply(new THREE.Color('#a6dc58')), alphaTest: 0.45, side: THREE.DoubleSide, roughness: 1 }), 0.03); const pv = m.onBeforeCompile; m.onBeforeCompile = (sh, r) => { pv(sh, r); sh.fragmentShader = sh.fragmentShader.replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n totalEmissiveRadiance += diffuseColor.rgb * 0.3;'); }; return m; };
+  const fol = (c) => { const m = windify(new THREE.MeshStandardMaterial({ map: TEX.foliage, color: c, vertexColors: true, roughness: 1 }), 0.012); const pv = m.onBeforeCompile; m.onBeforeCompile = (sh, r) => { pv(sh, r); sh.uniforms.uDayK = VEG.uDayK; sh.fragmentShader = 'uniform float uDayK;\n' + sh.fragmentShader; sh.fragmentShader = sh.fragmentShader.replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n totalEmissiveRadiance += diffuseColor.rgb * 0.32 * uDayK;'); }; return m; };
+  const card = (c) => { const m = windify(new THREE.MeshStandardMaterial({ map: TEX.leaves, color: new THREE.Color(c).multiply(new THREE.Color('#a6dc58')), alphaTest: 0.45, side: THREE.DoubleSide, roughness: 1 }), 0.03); const pv = m.onBeforeCompile; m.onBeforeCompile = (sh, r) => { pv(sh, r); sh.uniforms.uDayK = VEG.uDayK; sh.fragmentShader = 'uniform float uDayK;\n' + sh.fragmentShader; sh.fragmentShader = sh.fragmentShader.replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n totalEmissiveRadiance += diffuseColor.rgb * 0.3 * uDayK;'); }; return m; };
   const fruitMat = new THREE.MeshStandardMaterial({ color: '#f08a1c', roughness: 0.5 });
   const variants = {
     broad: [0, 1, 2, 3].map(s => makeTreeVariant('broad', 100 + s)), pine: [0, 1].map(s => makeTreeVariant('pine', 200 + s)),
@@ -176,7 +176,7 @@ function buildVegetation(scene) {
   }
   // ---- ground cover: grass tufts and wildflowers (chunked for culling) ----
   const tuftGeo = (() => { const gs = []; for (let k = 0; k < 2; k++) { const p = new THREE.PlaneGeometry(1, 0.75); p.translate(0, 0.375, 0); p.rotateY(k * Math.PI / 2); gs.push(p); } const g = mergeGeometries(gs); const n = g.attributes.normal; for (let i = 0; i < n.count; i++) n.setXYZ(i, 0, 1, 0); return g; })();
-  const tuftMat = (() => { const m = windify(new THREE.MeshStandardMaterial({ map: TEX.tuft, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 1, color: '#d8f0a8' }), 0.09); const pv = m.onBeforeCompile; m.onBeforeCompile = (sh, r) => { pv(sh, r); sh.fragmentShader = sh.fragmentShader.replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n totalEmissiveRadiance += diffuseColor.rgb * 0.35;'); }; return m; })();
+  const tuftMat = (() => { const m = windify(new THREE.MeshStandardMaterial({ map: TEX.tuft, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 1, color: '#d8f0a8' }), 0.09); const pv = m.onBeforeCompile; m.onBeforeCompile = (sh, r) => { pv(sh, r); sh.uniforms.uDayK = VEG.uDayK; sh.fragmentShader = 'uniform float uDayK;\n' + sh.fragmentShader; sh.fragmentShader = sh.fragmentShader.replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n totalEmissiveRadiance += diffuseColor.rgb * 0.35 * uDayK;'); }; return m; })();
   const fwMat = windify(new THREE.MeshStandardMaterial({ map: TEX.flowerW, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 1 }), 0.08);
   const fyMat = windify(new THREE.MeshStandardMaterial({ map: TEX.flowerY, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 1 }), 0.08);
   VEG.tuftMat = tuftMat; VEG.fwMat = fwMat; VEG.fyMat = fyMat;

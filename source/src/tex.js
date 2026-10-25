@@ -148,17 +148,38 @@ function makeTextures() {
     }
     TEX[name] = toTex(c, false);
   }
-  // ---- cloud sprite (cartoon: crisp edge, flat shaded bottom) ----
+  // ---- cloud sprites: soft cumulus — lit domed tops, grey-blue flat bases, wispy eroded edges (3 variants) ----
   {
-    const W = 512, H = 256; const [c, x] = cvs(W, H); const R6 = mulberry(5);
-    const puffs = []; for (let k = 0; k < 9; k++) { const t = k / 8; puffs.push([W * (0.14 + t * 0.72) + (R6() - 0.5) * 20, H * 0.66 - Math.sin(t * Math.PI) * H * (0.16 + R6() * 0.18), 34 + Math.sin(t * Math.PI) * 52 + R6() * 14]); }
-    x.fillStyle = '#ffffff'; for (const [px, py, r] of puffs) { x.beginPath(); x.arc(px, py, r, 0, 7); x.fill(); }
-    x.fillRect(W * 0.12, H * 0.62, W * 0.76, H * 0.12);
-    x.globalCompositeOperation = 'destination-out'; x.fillRect(0, H * 0.74, W, H); x.globalCompositeOperation = 'source-atop';
-    const sh = x.createLinearGradient(0, H * 0.35, 0, H * 0.74); sh.addColorStop(0, 'rgba(190,205,230,0)'); sh.addColorStop(0.55, 'rgba(190,205,230,0.35)'); sh.addColorStop(1, 'rgba(170,188,220,0.75)');
-    x.fillStyle = sh; x.fillRect(0, 0, W, H); x.globalCompositeOperation = 'source-over';
-    // soften the silhouette by 1px
-    TEX.cloud = toTex(c, false);
+    const W = 512, H = 256; TEX.clouds = [];
+    for (let v = 0; v < 3; v++) {
+      const R6 = mulberry(5 + v * 11), bl = [], flat = H * (0.72 + R6() * 0.05), tall = v === 2 ? 0.55 : v === 1 ? 0.8 : 1;
+      const nb = 38 + v * 10;
+      // 2–3 towers of different height, each a heap of puffs, plus small "cauliflower" puffs on the surface
+      const towers = []; const nt = 2 + (R6() < 0.6 ? 1 : 0); for (let q = 0; q < nt; q++) towers.push([0.22 + (q + R6() * 0.6) / nt * 0.6, (0.45 + R6() * 0.55) * tall, 0.12 + R6() * 0.1]);
+      for (let k = 0; k < nb; k++) { const T = towers[k % nt], t = T[0] + (R6() - 0.5) * T[2] * 2, hgt = T[1] * (0.3 + 0.7 * Math.pow(R6(), 0.6)), r = 14 + (1 - Math.abs(t - T[0]) / T[2]) * 30 * T[1] + R6() * 12; bl.push([W * t, flat - r * 0.45 - hgt * H * 0.5, r]); }
+      for (let k = 0; k < 18; k++) { const t = 0.08 + R6() * 0.84; bl.push([W * t, flat - 6 - R6() * 10, 10 + R6() * 12]); } // ragged skirt along the base
+      const nB = bl.length; for (let k = 0; k < nB * 2; k++) { const [bx, by, r] = bl[k % nB], a = -Math.PI * (0.1 + R6() * 0.8); bl.push([bx + Math.cos(a) * r * 0.8, by + Math.sin(a) * r * 0.8, r * (0.3 + R6() * 0.25)]); }
+      const den = new Float32Array(W * H), top = Math.max(4, Math.min(...bl.map(([, by, r]) => by - r * 0.9)));
+      for (const [bx, by, r] of bl) { const e = r * 2.2, x0 = Math.max(0, bx - e | 0), x1 = Math.min(W - 1, bx + e | 0), y0 = Math.max(0, by - e | 0), y1 = Math.min(H - 1, by + e | 0), ir = 1.4 / (r * r);
+        for (let j = y0; j <= y1; j++) for (let i = x0; i <= x1; i++) { const dx = i - bx, dy = j - by; den[j * W + i] += Math.exp(-(dx * dx + dy * dy) * ir); } }
+      const [c, x] = cvs(W, H), img = x.createImageData(W, H), D = img.data;
+      for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) {
+        const k = j * W + i, nz = pfbm(i / 30, j / 30, 64, 31 + v, 4), nz2 = pfbm(i / 9, j / 9, 64, 37 + v, 3);
+        let dn = den[k] * (0.55 + 0.75 * nz) * (0.85 + 0.3 * nz2);
+        dn *= 1 - sstep(flat - 10, flat + 8, j + (nz - 0.5) * 10); // flat base, slightly ragged
+        const a = sstep(0.3, 0.95, dn);
+        if (a <= 0) { D[k * 4 + 3] = 0; continue; }
+        // light from above: density stacked above this pixel shades it; the base is in shadow
+        let above = 0; for (let q = 4; q <= 28; q += 6) { const jj = j - q; if (jj >= 0) above += den[jj * W + i]; }
+        const hy = Math.max(0, Math.min(1, (flat - j) / (flat - top))); // 0 at the flat base, 1 at the highest tower
+        const sh = Math.max(0, Math.min(1, Math.pow(1 - hy, 1.6) * 0.62 + Math.min(1, above * 0.05) * 0.25 + (nz2 - 0.5) * 0.14 - 0.04));
+        const lit = [255, 254, 248], shade = [146, 158, 178];
+        for (let ch = 0; ch < 3; ch++) D[k * 4 + ch] = lit[ch] * (1 - sh) + shade[ch] * sh;
+        D[k * 4 + 3] = a * 255;
+      }
+      x.putImageData(img, 0, 0); TEX.clouds.push(toTex(c, false));
+    }
+    TEX.cloud = TEX.clouds[0];
   }
   // ---- water normal map ----
   {

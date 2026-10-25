@@ -17,13 +17,29 @@ const SKYKEYS = [
 function buildSky(scene) {
   SKY.mat = new THREE.ShaderMaterial({
     side: THREE.BackSide, depthWrite: false, fog: false,
-    uniforms: { top: { value: new THREE.Color() }, hor: { value: new THREE.Color() }, sunDir: { value: new THREE.Vector3() }, sunCol: { value: new THREE.Color() }, night: { value: 0 } },
+    uniforms: { top: { value: new THREE.Color() }, hor: { value: new THREE.Color() }, sunDir: { value: new THREE.Vector3() }, sunCol: { value: new THREE.Color() }, night: { value: 0 }, fogC: { value: new THREE.Color('#cfe8f7') }, lowK: { value: 0 }, time: { value: 0 }, cirrus: { value: 0.5 }, ovc: { value: 0 }, cloudC: { value: new THREE.Color(1, 1, 1) } },
     vertexShader: 'varying vec3 vD; void main(){ vD = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); gl_Position.z = gl_Position.w; }',
-    fragmentShader: `uniform vec3 top, hor, sunDir, sunCol; uniform float night; varying vec3 vD;
+    fragmentShader: `uniform vec3 top, hor, sunDir, sunCol, fogC, cloudC; uniform float night, lowK, time, cirrus, ovc; varying vec3 vD;
       float h(vec3 p){ return fract(sin(dot(p, vec3(12.9898,78.233,45.164))) * 43758.5453); }
+      float h2(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453); }
+      float vn(vec2 p){ vec2 i = floor(p), f = fract(p); f = f*f*(3.0-2.0*f); return mix(mix(h2(i), h2(i+vec2(1.0,0.0)), f.x), mix(h2(i+vec2(0.0,1.0)), h2(i+vec2(1.0,1.0)), f.x), f.y); }
+      float fbm(vec2 p){ float a = 0.5, s = 0.0; for (int k = 0; k < 5; k++){ s += a * vn(p); p = p * 2.03 + vec2(1.7, 9.2); a *= 0.5; } return s; }
+      float skyGlow(float s, float lowK){ return pow(s, 3.0) * 0.06 + pow(s, 14.0) * 0.18 + pow(s, 5.0) * 0.32 * lowK; }
       void main(){ vec3 d = normalize(vD); float y = d.y;
-        vec3 c = mix(hor, top, pow(clamp(y, 0.0, 1.0), 0.5)); if (y < 0.0) c = hor * 0.92;
-        float s = max(dot(d, normalize(sunDir)), 0.0); c += sunCol * (pow(s, 900.0) * 6.0 + pow(s, 14.0) * 0.18 + pow(s, 3.0) * 0.06);
+        vec3 c = mix(hor, top, pow(clamp(y, 0.0, 1.0), 0.5));
+        float s = max(dot(d, normalize(sunDir)), 0.0);
+        // high thin cloud (cirrus / altocumulus), streaky and drifting
+        if (y > 0.0 && cirrus > 0.0) { vec2 p = d.xz / (y + 0.12) * 0.9 + vec2(time * 0.006, time * 0.002);
+          float n = fbm(vec2(p.x * 0.7 + p.y * 0.35, p.y * 2.4)) * 0.75 + fbm(p * 3.1) * 0.25;
+          float cov = smoothstep(0.62 - cirrus * 0.16, 0.9, n) * smoothstep(0.0, 0.16, y) * 0.6 * min(cirrus, 1.0);
+          c = mix(c, cloudC * (1.0 + sunCol * pow(s, 6.0) * 0.6), cov); }
+        // overcast deck (cloudy / rain / snow): a textured grey layer with darker, heavier patches
+        if (ovc > 0.0) { vec2 p = d.xz / (max(y, 0.0) + 0.1) * 0.35 + vec2(time * 0.01, time * 0.004); float n = fbm(p) * 0.7 + fbm(p * 2.7) * 0.3;
+          c = mix(c, cloudC * (0.78 + 0.34 * n), ovc * smoothstep(-0.05, 0.06, y) * mix(0.75, 1.0, smoothstep(0.35, 0.7, n))); }
+        // horizon haze band = the fog colour, so fogged hills and sea melt into the sky
+        float hb = exp(-max(y, 0.0) * 9.0); c = mix(c, fogC, hb * 0.85);
+        if (y < 0.0) c = mix(hor * vec3(0.55, 0.75, 0.9), fogC, exp(y * 30.0)); // below the horizon (seen through the sea): deep water, hazing into the horizon
+        c += sunCol * (pow(s, 900.0) * 6.0 + skyGlow(s, lowK * exp(-max(y, 0.0) * 3.0)));
         vec3 q = floor(d * 420.0); float st = step(0.9975, h(q)) * night * smoothstep(0.05, 0.3, y); c += vec3(st);
         gl_FragColor = vec4(c, 1.0);
         #include <tonemapping_fragment>
@@ -34,14 +50,16 @@ function buildSky(scene) {
   // clouds
   const R = mulberry(3);
   for (let k = 0; k < 34; k++) {
-    const m = new THREE.SpriteMaterial({ map: TEX.cloud, transparent: true, depthWrite: false, fog: false, color: 0xffffff });
+    const m = new THREE.SpriteMaterial({ map: TEX.clouds ? TEX.clouds[k % TEX.clouds.length] : TEX.cloud, transparent: true, depthWrite: false, fog: false, color: 0xffffff });
     const s = new THREE.Sprite(m); const a = R() * Math.PI * 2, r = 800 + R() * 1700, sc = 260 + R() * 420;
     s.position.set(Math.cos(a) * r, 180 + R() * 380, Math.sin(a) * r); s.scale.set(sc, sc * 0.5, 1); s.userData.speed = 2 + R() * 3; s.renderOrder = -5;
     scene.add(s); SKY.clouds.push(s);
   }
   // distant islands around the horizon (Seto Inland Sea)
   const isl = new THREE.Group(); const im = new THREE.MeshLambertMaterial({ color: '#6c8a8f' });
-  const spots = [[0.3, 1700, 520, 90], [0.9, 2300, 800, 130], [1.7, 1500, 380, 60], [2.4, 2600, 900, 150], [2.9, 1900, 600, 110], [3.6, 2200, 700, 95], [4.3, 1600, 420, 70], [5.0, 2500, 1000, 160], [5.6, 1800, 500, 85]];
+  const spots = [[0.3, 1700, 520, 90], [0.9, 2300, 800, 130], [1.7, 1500, 380, 60], [2.4, 2600, 900, 150], [2.9, 1900, 600, 110], [3.6, 2200, 700, 95], [4.3, 1600, 420, 70], [5.0, 2500, 1000, 160], [5.6, 1800, 500, 85],
+    // nearer, lower islets in front of the far ones: the Seto Inland Sea is layers of islands fading into the haze
+    [0.62, 1050, 340, 48], [1.28, 1220, 520, 66], [2.05, 980, 260, 36], [3.25, 1300, 640, 80], [3.95, 1120, 400, 58], [4.72, 2950, 1300, 175], [5.32, 1260, 430, 72], [6.05, 2050, 760, 125], [1.05, 3100, 1400, 190], [2.65, 1420, 330, 52]];
   spots.forEach(([a, r, w, h], q) => {
     const g = new THREE.PlaneGeometry(w, w * 0.55, 48, 24); g.rotateX(-Math.PI / 2); const p = g.attributes.position;
     for (let i = 0; i < p.count; i++) { const x = p.getX(i) / (w / 2), z = p.getZ(i) / (w * 0.275); const d = Math.max(0, 1 - (x * x + z * z)); p.setY(i, d > 0 ? (Math.pow(d, 0.8) * h * (0.6 + fbm(x * 2 + q, z * 2, q, 4) * 0.8)) - 4 : -20); }
