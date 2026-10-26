@@ -8783,7 +8783,7 @@ FSH.updatePanel = function () {
 { const _ok2 = GAME.onKey; GAME.onKey = function (e) { if (!e.repeat && e.code === 'KeyT' && this.p && !this.modal && !EDIT.on && !PL.veh && !LIFE.fish && FSH.holdKg() > 0.05) { const S = DECO.ship, H = this.LM.harbor; if ((S && Math.hypot(PL.x - S.x, PL.z - S.z) < 12) || (H && Math.hypot(PL.x - H.x, PL.z - H.z) < 60)) { FSH.openLanding(true); return true; } } return _ok2.apply(this, arguments); }; }
 { const _p2 = GAME.prompt; GAME.prompt = function () { if (this.p && !PL.veh && !this.modal && this.nearShip && this.nearShip() && FSH.holdKg() > 0.05) return `Space：出荷所　T：網の魚を水揚げ（魚倉 ${FSH.holdKg().toFixed(0)}kg）`; return _p2.apply(this, arguments); }; }
 // version label so you can tell whether the page has updated
-const GAME_VER = '38（10/26）';
+const GAME_VER = '39（10/26）';
 { const v = document.createElement('div'); v.id = 'verTag'; v.textContent = 'ver.' + GAME_VER; v.style.cssText = 'position:fixed;left:6px;bottom:4px;z-index:5;font-size:10px;color:rgba(255,255,255,.75);text-shadow:0 1px 2px rgba(0,0,0,.6);pointer-events:none;font-family:sans-serif'; document.body.appendChild(v); }
 
 // ===================== 島の収益: 建物ごとに1時間あたりの売上が入りつづける（留守のあいだも最大24時間分） =====================
@@ -11276,7 +11276,9 @@ OHB.hit = function (x, z, ref) {
 OHB.ref = () => typeof BRG !== 'undefined' && BRG.ref !== null && BRG.ref !== undefined ? BRG.ref : PL.veh && PL.veh.kind === 'truck' ? PL.veh.y : PL.y;
 { const _dk = deckY; deckY = function (x, z) { const d = _dk(x, z); if (d !== null || !OHB.s) return d; const h = OHB.hit(x, z, OHB.ref()); return h ? h.y : null; }; }
 { const _sy = standY; standY = function (x, z) { const base = _sy(x, z); if (!OHB.s) return base; const h = OHB.hit(x, z, OHB.ref()); return h && h.y > base - 0.4 ? h.y : base; }; }
-OHB.blockedAhead = function (u) { if (u <= OHB.gate) return false; const now = performance.now(); if (now - OHB.warned > 6000) { OHB.warned = now; UI.toast('🚧 ここから先は本土。大橋の料金所で折り返そう'); } return true; };
+OHB.blockedAhead = function (u, v) { if (u <= OHB.gate) return false; const now = performance.now();
+  if (v && !v._bumpT) { v._bumpT = 1; setTimeout(() => v._bumpT = 0, 4000); }   // a car at the barrier: this message instead of 「ぶつかった！」
+  if (now - OHB.warned > 6000) { OHB.warned = now; UI.toast(v ? '🚧 ここから先は本土。料金所で折り返そう（S でバック）' : '🚧 ここから先は本土。大橋の料金所で折り返そう'); } return true; };
 { const _cw = canWalk; canWalk = function (x0, z0, x1, z1) {
   if (!OHB.s) return _cw(x0, z0, x1, z1);
   const ref = OHB.ref(), h0 = OHB.hit(x0, z0, ref), h1 = OHB.hit(x1, z1, ref);
@@ -11290,7 +11292,7 @@ OHB.blockedAhead = function (u) { if (u <= OHB.gate) return false; const now = p
   if (v.kind !== 'truck' || !OHB.s) return _vo(v, x, z, rot);
   const sp = VSPEC.truck, s = Math.sin(rot), c = Math.cos(rot), pts = [[sp.len, 0], [sp.len, sp.wid], [sp.len, -sp.wid], [-sp.len, sp.wid], [-sp.len, -sp.wid], [0, 0]].map(([a, b]) => [x + s * a + c * b, z + c * a - s * b]);
   const hits = pts.map(([px, pz]) => OHB.hit(px, pz, v.y)); const on = hits.find(Boolean); if (!on) { if (pts.some(([px, pz]) => { const q = OHB.local(px, pz); return q.u > 4 && q.u < OHB.end && Math.abs(q.v) < OHB.Wd / 2 && v.y > OHB.top(q.u) - 1.3; })) return false; return _vo(v, x, z, rot); }
-  for (let i = 0; i < pts.length; i++) { const h = hits[i]; if (h) { if (h.u > OHB.gate) { OHB.blockedAhead(h.u); return false; } if (Math.abs(h.v) > OHB.Wd / 2 - 0.9) return false; continue; }
+  for (let i = 0; i < pts.length; i++) { const h = hits[i]; if (h) { if (h.u > OHB.gate) { OHB.blockedAhead(h.u, v); return false; } if (Math.abs(h.v) > OHB.Wd / 2 - 0.9) return false; continue; }
     const q = OHB.local(...pts[i]); if (q.u > 3) return false; const [px, pz] = pts[i]; if (groundH(px, pz) < -0.3) return false; }
   return true; }; }
 { const _sf = surfaceY; surfaceY = function (x, z) { const y = _sf(x, z); if (!OHB.s) return y; const h = OHB.hit(x, z, 1e6); return h && h.y > y ? h.y : y; }; }
@@ -11306,8 +11308,15 @@ OHB.blockedAhead = function (u) { if (u <= OHB.gate) return false; const now = p
   let end = OHB.L; for (let u = 20; u <= OHB.L; u += 1) { const x = s.x + dx * u, z = s.z + dz * u; if (Math.abs(x) > 343 || Math.abs(z) > 343) { end = u - 1; break; } }
   OHB.end = end; OHB.gate = Math.max(60, end - 14);
   try { if (g) g.add(OHB.dress(OHB.s)); } catch (e) { console.warn('ohashi dress', e); }
+  try { OHB.clearVeg(); } catch (e) { console.warn('ohashi veg', e); }
   return g; }; }
-{ const _rd = GAME.refreshDev; GAME.refreshDev = function () { OHB.s = null; return _rd.apply(this, arguments); }; }
+// grass, flowers and trees don't grow through the paved approach and the foot of the bridge (only hidden, not saved as cut)
+OHB.inApron = (x, z) => { if (!OHB.s) return false; const { u, v } = OHB.local(x, z); return u > -17 && u < 4 && Math.abs(v) < OHB.Wd / 2 + 0.4; };
+{ const _vv = vegValid; vegValid = function (it) { if (it.type !== 'rock' && OHB.inApron(it.x, it.z)) return false; return _vv(it); }; }
+OHB.clearVeg = function () { if (!OHB.s || !VEG.sets || !VEG.sets.length || !VEG.removed) return; const S = OHB.s, xs = [], zs = [];
+  for (const u of [-17, 4]) for (const o of [-OHB.Wd / 2 - 0.4, OHB.Wd / 2 + 0.4]) { xs.push(S.x + S.dx * u + S.side[0] * o); zs.push(S.z + S.dz * u + S.side[1] * o); }
+  OHB.box = [Math.min(...xs) - 1, Math.min(...zs) - 1, Math.max(...xs) + 1, Math.max(...zs) + 1]; VEG.refresh(...OHB.box); };
+{ const _rd = GAME.refreshDev; GAME.refreshDev = function () { const had = OHB.box; OHB.s = null; OHB.box = null; const r = _rd.apply(this, arguments); if (had && !OHB.s) { try { VEG.refresh(...had); } catch (e) { } } return r; }; }
 OHB.dress = function (s) {
   const g = new THREE.Group(), P = (u, o = 0, y = 0) => new THREE.Vector3(s.x + s.dx * u + s.side[0] * o, y, s.z + s.dz * u + s.side[1] * o), Wd = OHB.Wd;
   const asph = worldMat(TEX.asphalt || TEX.concrete, 0.3, '#e6e6e2', 0.92), line = stdM('#f2f0e8', 0.6), yel = stdM('#e8b320', 0.55), curb = stdM('#cfcac0', 0.7);
