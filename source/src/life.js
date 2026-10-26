@@ -98,7 +98,7 @@ Object.assign(GAME, {
       const s = N[c.id]; if (!s) continue;
       if (s.house) { const H = s.house; markProt(H.x, H.z, 4.6, 5.6, H.rot);
         if (s.state === 'moved') { COLL.track = LIFE.track; const g = mergeLocal(makeHouse(this.houseObj(H))); COLL.track = null; LIFE.group.add(g); }
-        else LIFE.group.add(makeConstruction({ x: H.x, z: H.z })); }
+        else LIFE.group.add(makeConstruction({ x: H.x, z: H.z, rot: H.rot, house: true })); }
       if (s.state === 'visit') { const sp = this.visitSpot(); const n = spawnOneVillager(scene, c, sp.x, sp.z, `${c.name}（見学中）`); if (n) { n.newcomer = true; n.visitor = true; } }
       else if (s.state === 'house') { const sp = this.visitSpot(); const n = spawnOneVillager(scene, c, sp.x, sp.z, `${c.name}（引っこし前）`); if (n) { n.newcomer = true; n.visitor = true; } }
       else if (s.state === 'moved') { VILLAGER_DEF.push(c); const H = s.house, fx = H.x + Math.sin(H.rot) * 7.6, fz = H.z + Math.cos(H.rot) * 7.6; const n = spawnOneVillager(scene, c, fx, fz, c.name); if (n) n.newcomer = true; }

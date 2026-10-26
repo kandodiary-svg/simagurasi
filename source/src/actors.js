@@ -67,7 +67,11 @@ function updatePlayer(dt, locked) {
       if (Math.abs(iz) < 0.1) { mx = 0; mz = 0; PL.speed = 0; }
       if (iz < -0.1) PL.speed = Math.min(PL.speed, 1.6);
     } else {
-      const fx = -Math.sin(CAM.yaw), fz = -Math.cos(CAM.yaw), rx = Math.cos(CAM.yaw), rz = -Math.sin(CAM.yaw);
+      // the keys mean "away from / beside the camera as it was when you pressed them": while you hold the same keys the walk
+      // keeps its direction even as the camera swings round behind you (that is what used to send you round in circles)
+      const kk = (ix > 0.1 ? 'R' : ix < -0.1 ? 'L' : '') + (iz > 0.1 ? 'F' : iz < -0.1 ? 'B' : ''), nowS = performance.now() / 1000;
+      if (kk !== CAM.inKey || CAM.inYaw === undefined || nowS - CAM.lastDrag < 0.1 || CAM.drag) { CAM.inKey = kk; CAM.inYaw = CAM.yaw; }
+      const yw = CAM.inYaw, fx = -Math.sin(yw), fz = -Math.cos(yw), rx = Math.cos(yw), rz = -Math.sin(yw);
       mx = fx * iz + rx * ix; mz = fz * iz + rz * ix; const ml = Math.hypot(mx, mz); mx /= ml; mz /= ml;
       PL.rot = angLerp(PL.rot, Math.atan2(mx, mz), Math.min(1, dt * 10));
     }
@@ -199,11 +203,14 @@ function updateCamera(dt) {
   const focus = PL.veh ? new THREE.Vector3(PL.veh.x, PL.veh.mesh.position.y + (PL.veh.kind === 'boat' ? 2.4 : 1.6), PL.veh.z) : new THREE.Vector3(PL.x, PL.y + 1.05, PL.z);
   const free = now - CAM.lastDrag > 1.5 && !CAM.drag && !(typeof EDIT !== 'undefined' && EDIT.on);
   if (PL.veh && free) CAM.yaw = angLerp(CAM.yaw, PL.veh.rot + Math.PI, Math.min(1, dt * 2.2));
-  else if (!PL.veh && free && PL.speed > 0.3) {
-    // on foot the camera does not swing around by itself: the controls are relative to the camera, so turning it behind a
-    // sideways walk turned the walk again and you went round in circles (that was the "ぐわんぐわん"). Only the tilt settles back.
+  else if (!PL.veh && free && PL.speed > 0.6) {
+    // on foot the camera comes round behind the way you are walking, gently (it eases in over ~0.8 s and never flips round
+    // when you walk towards it). The walk itself keeps its direction (see updatePlayer), so this no longer makes circles.
+    CAM.followT = Math.min(1, (CAM.followT || 0) + dt / 0.8);
+    const d = angDiff(PL.rot + Math.PI, CAM.yaw);
+    if (Math.abs(d) < 2.1) CAM.yaw += d * Math.min(1, dt * 1.15 * CAM.followT * Math.min(1, PL.speed / 2.2));
     CAM.pitch = lerp(CAM.pitch, 0.34, Math.min(1, dt * 0.5));
-  }
+  } else if (!PL.veh) CAM.followT = Math.max(0, (CAM.followT || 0) - dt * 2);
   if (KEYS.KeyQ) { CAM.yaw += dt * 1.8; CAM.lastDrag = now; } if (KEYS.KeyE && !PL.veh) { CAM.yaw -= dt * 1.8; CAM.lastDrag = now; }
   CAM.dist = lerp(CAM.dist, CAM.distT, Math.min(1, dt * 4));
   // follow: close behind sideways, softly up and down (steps and rough ground no longer bob the whole view)

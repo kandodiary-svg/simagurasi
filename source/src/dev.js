@@ -171,7 +171,7 @@ Object.assign(GAME, {
     if (!this.p) { for (const k of ['bus', 'ferry']) if (MODELS[k]) scene.remove(MODELS[k]); return; }
     const D = this.devState(); COLL.track = DV.track;
     for (const d of DEV) { const s = D[d.id]; if (!s || s.state === 'site') continue; try {
-      if (s.state === 'build') { if (DEV_BUILD[d.id] && s.x !== undefined) DV.group.add(makeConstruction({ x: s.x, z: s.z }, true)); }
+      if (s.state === 'build') { if (DEV_BUILD[d.id] && s.x !== undefined) DV.group.add(makeConstruction({ x: s.x, z: s.z, rot: s.rot, w: d.w, d: d.d, name: d.name }, true)); }
       else if (DEV_BUILD[d.id]) { const g = DEV_BUILD[d.id](s); if (g) DV.group.add(g); }
     } catch (e) { console.warn('dev', d.id, e); } }
     COLL.track = null;

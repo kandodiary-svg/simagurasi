@@ -60,4 +60,6 @@ photo.js
 savesafe.js
 hud.js
 warm.js
+fix41.js
+koji.js bus2.js
 main.js

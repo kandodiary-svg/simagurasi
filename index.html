@@ -2052,7 +2052,11 @@ function updatePlayer(dt, locked) {
       if (Math.abs(iz) < 0.1) { mx = 0; mz = 0; PL.speed = 0; }
       if (iz < -0.1) PL.speed = Math.min(PL.speed, 1.6);
     } else {
-      const fx = -Math.sin(CAM.yaw), fz = -Math.cos(CAM.yaw), rx = Math.cos(CAM.yaw), rz = -Math.sin(CAM.yaw);
+      // the keys mean "away from / beside the camera as it was when you pressed them": while you hold the same keys the walk
+      // keeps its direction even as the camera swings round behind you (that is what used to send you round in circles)
+      const kk = (ix > 0.1 ? 'R' : ix < -0.1 ? 'L' : '') + (iz > 0.1 ? 'F' : iz < -0.1 ? 'B' : ''), nowS = performance.now() / 1000;
+      if (kk !== CAM.inKey || CAM.inYaw === undefined || nowS - CAM.lastDrag < 0.1 || CAM.drag) { CAM.inKey = kk; CAM.inYaw = CAM.yaw; }
+      const yw = CAM.inYaw, fx = -Math.sin(yw), fz = -Math.cos(yw), rx = Math.cos(yw), rz = -Math.sin(yw);
       mx = fx * iz + rx * ix; mz = fz * iz + rz * ix; const ml = Math.hypot(mx, mz); mx /= ml; mz /= ml;
       PL.rot = angLerp(PL.rot, Math.atan2(mx, mz), Math.min(1, dt * 10));
     }
@@ -2184,11 +2188,14 @@ function updateCamera(dt) {
   const focus = PL.veh ? new THREE.Vector3(PL.veh.x, PL.veh.mesh.position.y + (PL.veh.kind === 'boat' ? 2.4 : 1.6), PL.veh.z) : new THREE.Vector3(PL.x, PL.y + 1.05, PL.z);
   const free = now - CAM.lastDrag > 1.5 && !CAM.drag && !(typeof EDIT !== 'undefined' && EDIT.on);
   if (PL.veh && free) CAM.yaw = angLerp(CAM.yaw, PL.veh.rot + Math.PI, Math.min(1, dt * 2.2));
-  else if (!PL.veh && free && PL.speed > 0.3) {
-    // on foot the camera does not swing around by itself: the controls are relative to the camera, so turning it behind a
-    // sideways walk turned the walk again and you went round in circles (that was the "ぐわんぐわん"). Only the tilt settles back.
+  else if (!PL.veh && free && PL.speed > 0.6) {
+    // on foot the camera comes round behind the way you are walking, gently (it eases in over ~0.8 s and never flips round
+    // when you walk towards it). The walk itself keeps its direction (see updatePlayer), so this no longer makes circles.
+    CAM.followT = Math.min(1, (CAM.followT || 0) + dt / 0.8);
+    const d = angDiff(PL.rot + Math.PI, CAM.yaw);
+    if (Math.abs(d) < 2.1) CAM.yaw += d * Math.min(1, dt * 1.15 * CAM.followT * Math.min(1, PL.speed / 2.2));
     CAM.pitch = lerp(CAM.pitch, 0.34, Math.min(1, dt * 0.5));
-  }
+  } else if (!PL.veh) CAM.followT = Math.max(0, (CAM.followT || 0) - dt * 2);
   if (KEYS.KeyQ) { CAM.yaw += dt * 1.8; CAM.lastDrag = now; } if (KEYS.KeyE && !PL.veh) { CAM.yaw -= dt * 1.8; CAM.lastDrag = now; }
   CAM.dist = lerp(CAM.dist, CAM.distT, Math.min(1, dt * 4));
   // follow: close behind sideways, softly up and down (steps and rough ground no longer bob the whole view)
@@ -3809,7 +3816,7 @@ Object.assign(GAME, {
       const s = N[c.id]; if (!s) continue;
       if (s.house) { const H = s.house; markProt(H.x, H.z, 4.6, 5.6, H.rot);
         if (s.state === 'moved') { COLL.track = LIFE.track; const g = mergeLocal(makeHouse(this.houseObj(H))); COLL.track = null; LIFE.group.add(g); }
-        else LIFE.group.add(makeConstruction({ x: H.x, z: H.z })); }
+        else LIFE.group.add(makeConstruction({ x: H.x, z: H.z, rot: H.rot, house: true })); }
       if (s.state === 'visit') { const sp = this.visitSpot(); const n = spawnOneVillager(scene, c, sp.x, sp.z, `${c.name}（見学中）`); if (n) { n.newcomer = true; n.visitor = true; } }
       else if (s.state === 'house') { const sp = this.visitSpot(); const n = spawnOneVillager(scene, c, sp.x, sp.z, `${c.name}（引っこし前）`); if (n) { n.newcomer = true; n.visitor = true; } }
       else if (s.state === 'moved') { VILLAGER_DEF.push(c); const H = s.house, fx = H.x + Math.sin(H.rot) * 7.6, fz = H.z + Math.cos(H.rot) * 7.6; const n = spawnOneVillager(scene, c, fx, fz, c.name); if (n) n.newcomer = true; }
@@ -4412,7 +4419,7 @@ Object.assign(GAME, {
     if (!this.p) { for (const k of ['bus', 'ferry']) if (MODELS[k]) scene.remove(MODELS[k]); return; }
     const D = this.devState(); COLL.track = DV.track;
     for (const d of DEV) { const s = D[d.id]; if (!s || s.state === 'site') continue; try {
-      if (s.state === 'build') { if (DEV_BUILD[d.id] && s.x !== undefined) DV.group.add(makeConstruction({ x: s.x, z: s.z }, true)); }
+      if (s.state === 'build') { if (DEV_BUILD[d.id] && s.x !== undefined) DV.group.add(makeConstruction({ x: s.x, z: s.z, rot: s.rot, w: d.w, d: d.d, name: d.name }, true)); }
       else if (DEV_BUILD[d.id]) { const g = DEV_BUILD[d.id](s); if (g) DV.group.add(g); }
     } catch (e) { console.warn('dev', d.id, e); } }
     COLL.track = null;
@@ -8813,7 +8820,7 @@ FSH.updatePanel = function () {
 { const _ok2 = GAME.onKey; GAME.onKey = function (e) { if (!e.repeat && e.code === 'KeyT' && this.p && !this.modal && !EDIT.on && !PL.veh && !LIFE.fish && FSH.holdKg() > 0.05) { const S = DECO.ship, H = this.LM.harbor; if ((S && Math.hypot(PL.x - S.x, PL.z - S.z) < 12) || (H && Math.hypot(PL.x - H.x, PL.z - H.z) < 60)) { FSH.openLanding(true); return true; } } return _ok2.apply(this, arguments); }; }
 { const _p2 = GAME.prompt; GAME.prompt = function () { if (this.p && !PL.veh && !this.modal && this.nearShip && this.nearShip() && FSH.holdKg() > 0.05) return `Space：出荷所　T：網の魚を水揚げ（魚倉 ${FSH.holdKg().toFixed(0)}kg）`; return _p2.apply(this, arguments); }; }
 // version label so you can tell whether the page has updated
-const GAME_VER = '40（10/26）';
+const GAME_VER = '41（10/26）';
 { const v = document.createElement('div'); v.id = 'verTag'; v.textContent = 'ver.' + GAME_VER; v.style.cssText = 'position:fixed;left:6px;bottom:4px;z-index:5;font-size:10px;color:rgba(255,255,255,.75);text-shadow:0 1px 2px rgba(0,0,0,.6);pointer-events:none;font-family:sans-serif'; document.body.appendChild(v); }
 
 // ===================== 島の収益: 建物ごとに1時間あたりの売上が入りつづける（留守のあいだも最大24時間分） =====================
@@ -12189,6 +12196,346 @@ WARM.later = function (ms = 400) { clearTimeout(WARM.t); WARM.t = setTimeout(() 
 { const _ur = GAME.updateRoom; GAME.updateRoom = function () { CAM.fov(55); return _ur.apply(this, arguments); }; }
 { const _co = GAME.camOverride; GAME.camOverride = function () { const r = _co.apply(this, arguments); if (r) CAM.fov(55); return r; }; }
 { const _tc = GAME.titleCam; GAME.titleCam = function () { CAM.fov(55); return _tc.apply(this, arguments); }; }
+
+// ===================== ver.41: 勝手にできる畑をやめる =====================
+// The island used to lay out fields by itself: four rice paddies around the village (countryside.js) and a set of terraced
+// paddies with a vegetable plot (nature.js). Out of season they were bare brown boxes that read as "mystery fields", and the
+// four paddies moved whenever the ground was reshaped. They are gone; your own garden by the house stays.
+CTRY.buildPaddies = function () { CTRY.paddies = []; };
+NATURE.makeFarm = function () { NATURE.paddies = []; NATURE.farmAt = null; };
+// grass and trees that the old paddies had cleared come back (once per island; only inside where those paddies stood)
+const FIX41 = {};
+FIX41.restore = function () {
+  const p = GAME.p; if (!p || p.fix41veg || !VEG.items || !VEG.removed) return; p.fix41veg = 1; GAME.dirty = true;
+  let rects = []; try { rects = FIX41.oldPaddies(); } catch (e) { return; }
+  let n = 0, x0 = 1e9, z0 = 1e9, x1 = -1e9, z1 = -1e9;
+  for (const q of rects) { const c = Math.cos(q.rot), s = Math.sin(q.rot);
+    for (const it of VEG.items) { if (!VEG.removed[it.id]) continue; const dx = it.x - q.x, dz = it.z - q.z, lx = dx * c - dz * s, lz = dx * s + dz * c; if (Math.abs(lx) < q.W / 2 + 1.9 && Math.abs(lz) < q.L / 2 + 1.9) { VEG.removed[it.id] = 0; n++; x0 = Math.min(x0, it.x); z0 = Math.min(z0, it.z); x1 = Math.max(x1, it.x); z1 = Math.max(z1, it.z); } } }
+  if (n) { VEG.refresh(x0 - 2, z0 - 2, x1 + 2, z1 + 2); try { scheduleSave(); } catch (e) { } } FIX41.restored = n;
+};
+// where the four paddies would have been (the same search the old code ran)
+FIX41.oldPaddies = function () { return CTRY.findPaddies ? CTRY.findPaddies() : []; };
+{ const _b = GAME.begin; GAME.begin = function () { const r = _b.apply(this, arguments); try { FIX41.restore(); } catch (e) { console.warn('fix41', e); } return r; }; }
+// Hana used to water the paddies in the afternoon: now she tends her own garden
+{ const _pl = LIVE.place; LIVE.place = function (n, key) { if (key === 'farm' && !NATURE.farmAt) return _pl.call(this, n, 'garden'); return _pl.apply(this, arguments); }; }
+// the photo spot of the paddies becomes "your field"
+{ const i = PHOTO.SPOTS.findIndex(s => s.id === 'paddy'); if (i >= 0) PHOTO.SPOTS[i] = { id: 'myfield', name: '自分の畑', hint: '家のよこの自分の畑を写す', ok: () => { const g = GAME.p && GAME.p.garden; return !!(g && g.x !== undefined && PHOTO.inView(g.x, groundH(g.x, g.z) + 0.3, g.z, 40)); } }; }
+
+// ===================== 工事現場: 日本の工事現場らしく（仮囲い・足場と養生シート・鉄骨・重機・看板） =====================
+// The old site was four cones, a striped bar and a sign; big works added a yellow lattice tower and four flat white boards
+// floating round it. Now:
+//   大きな工事（開発）: white steel hoarding (万能鋼板) all round with a green foot line and a gate facing the road, the steel
+//     frame of the building going up, scaffolding with grey mesh sheets, a mobile crane, a small excavator, a site office and
+//     toilet, stacked materials, 安全第一 / 建築計画のお知らせ / お辞儀看板, rotating lights at the gate
+//   家の工事（新しい住民）: concrete footing, the timber frame going up, scaffolding with mesh sheet, a mesh fence, a toilet
+//   小さな工事（村のおねがい）: A-frame barricades, cones with cone bars, the bowing-worker sign
+const KOJI = { M: null };
+KOJI.mats = function () {
+  if (KOJI.M) return KOJI.M; const M = KOJI.M = {};
+  const tex = (w, h, f, rep = true) => { const t = txCanvas(w, h, f, rep); t.anisotropy = 4; return t; };
+  // the hoarding panel: ribbed white steel, a green line at the foot (1 m wide repeat)
+  M.panel = new THREE.MeshStandardMaterial({ roughness: 0.55, metalness: 0.15, map: tex(128, 256, (x, w, h) => { x.fillStyle = '#f2f3f1'; x.fillRect(0, 0, w, h);
+    for (let i = 0; i < w; i += 16) { const g = x.createLinearGradient(i, 0, i + 16, 0); g.addColorStop(0, '#dfe1de'); g.addColorStop(0.35, '#fbfbfa'); g.addColorStop(0.7, '#e9ebe8'); g.addColorStop(1, '#d6d8d5'); x.fillStyle = g; x.fillRect(i, 0, 16, h); }
+    x.fillStyle = '#c9ccc8'; x.fillRect(0, 0, 2, h); x.fillStyle = '#2f8a4a'; x.fillRect(0, h - 20, w, 14); x.fillStyle = '#9aa09a'; x.fillRect(0, h - 6, w, 6); x.fillStyle = '#b8bbb7'; x.fillRect(0, 0, w, 3); }) });
+  M.pipe = new THREE.MeshStandardMaterial({ color: '#9aa3a8', roughness: 0.35, metalness: 0.7 });
+  M.plank = new THREE.MeshStandardMaterial({ color: '#b9a27a', roughness: 0.8 });
+  M.sheet = new THREE.MeshStandardMaterial({ side: THREE.DoubleSide, transparent: true, depthWrite: false, roughness: 0.9, map: tex(64, 64, (x, w, h) => { x.clearRect(0, 0, w, h); x.fillStyle = 'rgba(96,110,104,0.78)'; x.fillRect(0, 0, w, h); x.fillStyle = 'rgba(60,70,66,0.85)'; for (let i = 0; i < w; i += 4) { x.fillRect(i, 0, 1, h); x.fillRect(0, i, w, 1); } }) });
+  M.steel = new THREE.MeshStandardMaterial({ color: '#8a4a3a', roughness: 0.6, metalness: 0.4 });       // primer red-brown
+  M.conc = worldMat(TEX.concrete, 0.3, '#cfcbc2', 0.95);
+  M.wood = new THREE.MeshStandardMaterial({ color: '#d9bf8f', roughness: 0.75 });
+  M.yellow = new THREE.MeshStandardMaterial({ color: '#f2b51e', roughness: 0.5, metalness: 0.1 });
+  M.dark = new THREE.MeshStandardMaterial({ color: '#2a2c2e', roughness: 0.6 });
+  M.glass = new THREE.MeshStandardMaterial({ color: '#36505e', roughness: 0.15, metalness: 0.3 });
+  M.white = new THREE.MeshStandardMaterial({ color: '#f0eee8', roughness: 0.6 });
+  M.office = new THREE.MeshStandardMaterial({ color: '#e8e2d2', roughness: 0.7 });
+  M.blue = new THREE.MeshStandardMaterial({ color: '#2f6fb8', roughness: 0.5 });
+  M.cone = new THREE.MeshStandardMaterial({ color: '#e8402a', roughness: 0.6 }); M.coneW = new THREE.MeshStandardMaterial({ color: '#f4f4f0', roughness: 0.6 });
+  M.stripe = new THREE.MeshStandardMaterial({ roughness: 0.6, map: tex(128, 16, (x, w, h) => { for (let i = -2; i < 10; i++) { x.fillStyle = i % 2 ? '#1c1c1c' : '#f2c21a'; x.beginPath(); x.moveTo(i * 16, h); x.lineTo(i * 16 + 16, 0); x.lineTo(i * 16 + 32, 0); x.lineTo(i * 16 + 16, h); x.fill(); } }) });
+  M.lamp = new THREE.MeshStandardMaterial({ color: '#ffb020', emissive: new THREE.Color('#ff8a00'), emissiveIntensity: 1.6, roughness: 0.4 });
+  M.bag = new THREE.MeshStandardMaterial({ color: '#c8c0a4', roughness: 0.95 });
+  M.rebar = new THREE.MeshStandardMaterial({ color: '#6a4a3a', roughness: 0.7, metalness: 0.4 });
+  M.mesh = new THREE.MeshStandardMaterial({ side: THREE.DoubleSide, transparent: true, alphaTest: 0.4, roughness: 0.6, map: tex(64, 64, (x, w, h) => { x.clearRect(0, 0, w, h); x.strokeStyle = '#3a3e40'; x.lineWidth = 2; for (let i = 0; i <= w; i += 8) { x.beginPath(); x.moveTo(i, 0); x.lineTo(i, h); x.stroke(); x.beginPath(); x.moveTo(0, i); x.lineTo(w, i); x.stroke(); } }) });
+  return M;
+};
+// a box whose texture repeats once per metre along its length (u) and once per its height (v)
+KOJI.panelBox = function (len, h, t) { const g = new THREE.BoxGeometry(len, h, t), uv = g.attributes.uv, n = g.attributes.normal; for (let i = 0; i < uv.count; i++) if (Math.abs(n.getZ(i)) > 0.5) uv.setX(i, uv.getX(i) * len); uv.needsUpdate = true; return g; };
+KOJI.tc = {};
+KOJI.sign = function (w, h, draw, key) { let mat = key && KOJI.tc[key]; if (!mat) { const t = txCanvas(Math.round(256 * w / h), 256, draw, false); t.anisotropy = 4; mat = new THREE.MeshStandardMaterial({ map: t, roughness: 0.6 }); if (key) KOJI.tc[key] = mat; } return new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat); };
+KOJI.font = '"Mochiy Pop One","M PLUS Rounded 1c",sans-serif';
+KOJI.bowSign = function () { // お辞儀看板: a worker bowing, "ご迷惑をおかけしております"
+  return KOJI.sign(1.0, 1.5, (x, w, h) => { x.fillStyle = '#ffffff'; x.fillRect(0, 0, w, h); x.strokeStyle = '#1f5fa8'; x.lineWidth = 10; x.strokeRect(5, 5, w - 10, h - 10);
+    x.fillStyle = '#1f5fa8'; x.font = `700 ${w * 0.13}px ${KOJI.font}`; x.textAlign = 'center'; x.fillText('ご迷惑を', w / 2, h * 0.66); x.fillText('おかけして', w / 2, h * 0.76); x.fillText('おります', w / 2, h * 0.86);
+    // the bowing figure: yellow helmet, blue uniform
+    const cx = w * 0.5, cy = h * 0.36; x.fillStyle = '#2f5fa8'; x.save(); x.translate(cx, cy); x.rotate(0.55); x.fillRect(-w * 0.09, -h * 0.02, w * 0.18, h * 0.2); x.restore(); x.fillRect(cx - w * 0.07, cy + h * 0.1, w * 0.06, h * 0.13); x.fillRect(cx + w * 0.01, cy + h * 0.1, w * 0.06, h * 0.13);
+    x.fillStyle = '#f2d2b0'; x.beginPath(); x.arc(cx + w * 0.12, cy - h * 0.035, w * 0.06, 0, 6.3); x.fill(); x.fillStyle = '#f2c21a'; x.beginPath(); x.arc(cx + w * 0.125, cy - h * 0.055, w * 0.068, Math.PI * 0.9, Math.PI * 2.05); x.fill(); }, 'bow');
+};
+KOJI.noticeSign = function (title) { // 建築計画のお知らせ
+  return KOJI.sign(1.8, 1.2, (x, w, h) => { x.fillStyle = '#ffffff'; x.fillRect(0, 0, w, h); x.fillStyle = '#1d3a6a'; x.fillRect(0, 0, w, h * 0.2); x.fillStyle = '#fff'; x.font = `700 ${h * 0.12}px ${KOJI.font}`; x.textAlign = 'center'; x.fillText('建築計画のお知らせ', w / 2, h * 0.14);
+    x.fillStyle = '#222'; x.textAlign = 'left'; x.font = `${h * 0.075}px "M PLUS Rounded 1c",sans-serif`; const L = [['名称', title || 'ほしなみ島 開発工事'], ['建築主', 'ほしなみ島 役場'], ['施工者', 'しまなみ建設'], ['工期', 'まもなく完成']];
+    L.forEach(([a, b], i) => { const y = h * (0.34 + i * 0.16); x.fillStyle = '#666'; x.fillText(a, w * 0.06, y); x.fillStyle = '#111'; x.fillText(b, w * 0.3, y); x.fillStyle = '#ccc'; x.fillRect(w * 0.05, y + h * 0.04, w * 0.9, 2); }); }, 'notice:' + (title || ''));
+};
+KOJI.safety = function () { // 安全第一 banner with the green cross
+  return KOJI.sign(2.4, 0.8, (x, w, h) => { x.fillStyle = '#ffffff'; x.fillRect(0, 0, w, h); x.fillStyle = '#2f8a4a'; const s = h * 0.62, cx = h * 0.55, cy = h / 2; x.fillRect(cx - s * 0.16, cy - s / 2, s * 0.32, s); x.fillRect(cx - s / 2, cy - s * 0.16, s, s * 0.32);
+    x.fillStyle = '#1a1a1a'; x.font = `700 ${h * 0.5}px ${KOJI.font}`; x.textAlign = 'left'; x.textBaseline = 'middle'; x.fillText('安全第一', h * 1.05, cy + 2); }, 'safety');
+};
+KOJI.cone = function (g, x, y, z) { const M = KOJI.mats(); const c = new THREE.Mesh(new THREE.ConeGeometry(0.17, 0.7, 12), M.cone); c.position.set(x, y + 0.37, z); g.add(c); const b = new THREE.Mesh(new THREE.CylinderGeometry(0.135, 0.11, 0.12, 12), M.coneW); b.position.set(x, y + 0.43, z); g.add(b); B(g, 0.4, 0.04, 0.4, M.cone, x, y + 0.02, z); };
+KOJI.coneRow = function (g, pts) { const M = KOJI.mats(); for (const [x, z] of pts) KOJI.cone(g, x, groundH(x, z), z); for (let i = 1; i < pts.length; i++) { const [ax, az] = pts[i - 1], [bx, bz] = pts[i], L = Math.hypot(bx - ax, bz - az), y = (groundH(ax, az) + groundH(bx, bz)) / 2; const bar = new THREE.Mesh(KOJI.panelBox(L, 0.08, 0.05), M.stripe); bar.position.set((ax + bx) / 2, y + 0.6, (az + bz) / 2); bar.rotation.y = Math.atan2(bz - az, -(bx - ax)) + Math.PI; g.add(bar); } };
+KOJI.barricade = function (g, x, z, ry) { const M = KOJI.mats(), s = sub(g, x, groundH(x, z), z, ry); for (const sx of [-0.55, 0.55]) for (const sz of [-0.22, 0.22]) ROD(s, 0.025, M.yellow, [sx, 0, sz], [sx, 1.0, 0]); const bar = new THREE.Mesh(KOJI.panelBox(1.3, 0.2, 0.04), M.stripe); bar.position.set(0, 0.85, 0.02); s.add(bar); const bar2 = bar.clone(); bar2.position.y = 0.45; s.add(bar2); };
+// scaffolding: posts, ledgers, planks every 1.8 m, mesh sheet on the outside
+KOJI.scaffold = function (g, ax, az, bx, bz, h, outX, outZ, sheet = true) {
+  const M = KOJI.mats(), L = Math.hypot(bx - ax, bz - az), n = Math.max(1, Math.round(L / 1.8)), ux = (bx - ax) / L, uz = (bz - az) / L, y0 = Math.min(groundH(ax, az), groundH(bx, bz)), lv = Math.max(1, Math.floor(h / 1.8)), ry = Math.atan2(uz, -ux) + Math.PI;
+  for (let k = 0; k <= n; k++) for (const o of [0, 0.9]) { const x = ax + ux * L * k / n + outX * o, z = az + uz * L * k / n + outZ * o; CY(g, 0.024, h + 0.6, M.pipe, x, y0 + (h + 0.6) / 2, z, 5); }
+  for (let j = 1; j <= lv; j++) { const y = y0 + j * 1.8; for (const o of [0, 0.9]) { const p = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, L, 5), M.pipe); p.rotation.z = Math.PI / 2; p.rotation.y = ry; p.position.set((ax + bx) / 2 + outX * o, y + 0.9, (az + bz) / 2 + outZ * o); g.add(p); }
+    const pl = new THREE.Mesh(new THREE.BoxGeometry(L, 0.05, 0.8), M.plank); pl.position.set((ax + bx) / 2 + outX * 0.45, y, (az + bz) / 2 + outZ * 0.45); pl.rotation.y = ry; g.add(pl);
+    // diagonal braces on the outer face
+    if (j % 2) for (let k = 0; k < n; k += 2) { const x0 = ax + ux * L * k / n + outX * 0.9, z0 = az + uz * L * k / n + outZ * 0.9, x1 = ax + ux * L * Math.min(n, k + 1) / n + outX * 0.9, z1 = az + uz * L * Math.min(n, k + 1) / n + outZ * 0.9; ROD(g, 0.018, M.pipe, [x0, y - 1.8 + 0.1, z0], [x1, y, z1], 4); } }
+  if (sheet) { const s = new THREE.Mesh(KOJI.panelBox(L, h + 0.4, 0.02), M.sheet); s.position.set((ax + bx) / 2 + outX * 0.98, y0 + (h + 0.4) / 2 + 0.2, (az + bz) / 2 + outZ * 0.98); s.rotation.y = ry; s.renderOrder = 2; g.add(s); }
+};
+KOJI.crane = function (g, x, y, z, ry) { // rough-terrain crane, boom up at ~58°
+  const M = KOJI.mats(), s = sub(g, x, y, z, ry);
+  B(s, 2.5, 0.9, 7.2, M.white, 0, 1.15, 0); B(s, 2.6, 0.22, 7.3, M.yellow, 0, 1.55, 0); for (const zz of [-2.3, 2.3]) for (const sx of [-1, 1]) { CY(s, 0.55, 0.45, M.dark, sx * 1.15, 0.55, zz, 14, 0, Math.PI / 2); }
+  for (const zz of [-3, 3]) for (const sx of [-1, 1]) { B(s, 1.4, 0.18, 0.3, M.yellow, sx * 1.9, 0.6, zz); B(s, 0.4, 0.5, 0.4, M.dark, sx * 2.55, 0.3, zz); }
+  B(s, 1.0, 1.0, 1.2, M.white, 0.7, 2.2, 2.6); B(s, 0.9, 0.6, 0.02, M.glass, 0.7, 2.35, 3.21);
+  const turret = sub(s, 0, 1.7, -0.6, 0.4); B(turret, 2.0, 0.8, 2.6, M.yellow, 0, 0.4, 0);
+  const boom = sub(turret, 0, 1.0, -0.4, 0); boom.rotation.x = -1.0; const len = 15; B(boom, 0.7, 0.7, len, M.yellow, 0, 0, len / 2); B(boom, 0.5, 0.5, len * 0.6, M.white, 0, 0, len * 0.95);
+  const tip = new THREE.Vector3(0, 0, len * 1.25); boom.updateMatrixWorld(true); s.updateMatrixWorld(true);
+  const tw = tip.clone().applyMatrix4(boom.matrix).applyMatrix4(turret.matrix); CY(s, 0.02, tw.y - 4, M.dark, tw.x, (tw.y + 4) / 2, tw.z, 4); B(s, 0.5, 0.6, 0.4, M.dark, tw.x, 3.7, tw.z);
+};
+KOJI.excavator = function (g, x, y, z, ry) { // small backhoe (ユンボ)
+  const M = KOJI.mats(), s = sub(g, x, y, z, ry);
+  for (const sx of [-0.75, 0.75]) B(s, 0.45, 0.5, 2.3, M.dark, sx, 0.25, 0);
+  const up = sub(s, 0, 0.55, 0, 0.3); B(up, 1.8, 0.7, 2.0, M.yellow, 0, 0.35, -0.2); B(up, 0.9, 1.1, 0.9, M.yellow, -0.45, 1.25, 0.25); B(up, 0.8, 0.7, 0.02, M.glass, -0.45, 1.35, 0.71); B(up, 1.6, 0.5, 0.5, M.dark, 0, 0.45, -1.2);
+  const arm = sub(up, 0.45, 0.8, 0.6, 0); arm.rotation.x = -0.5; B(arm, 0.3, 0.3, 2.2, M.yellow, 0, 0, 1.1); const a2 = sub(arm, 0, 0, 2.2, 0); a2.rotation.x = 1.5; B(a2, 0.24, 0.24, 1.6, M.yellow, 0, 0, 0.8); B(a2, 0.6, 0.4, 0.4, M.dark, 0, -0.1, 1.65);
+};
+KOJI.office = function (g, x, y, z, ry) { // prefab site office + toilet
+  const M = KOJI.mats(), s = sub(g, x, y, z, ry); B(s, 5.4, 2.5, 2.4, M.office, 0, 1.35, 0); B(s, 5.6, 0.12, 2.6, M.blue, 0, 2.66, 0); B(s, 5.4, 0.2, 2.4, M.dark, 0, 0.12, 0);
+  for (const xx of [-1.6, 0.2]) B(s, 1.2, 0.8, 0.03, M.glass, xx, 1.6, 1.21); B(s, 0.8, 1.9, 0.03, M.white, 1.8, 1.15, 1.21); B(s, 0.9, 0.3, 0.6, M.dark, 1.8, 0.15, 1.6);
+  const t = sub(s, 3.6, 0, 0.2, 0); B(t, 1.0, 2.3, 1.0, M.blue, 0, 1.15, 0); B(t, 1.05, 0.12, 1.05, M.white, 0, 2.36, 0); B(t, 0.7, 1.8, 0.02, M.white, 0, 1.05, 0.51);
+};
+KOJI.stack = function (g, x, y, z, ry) { const M = KOJI.mats(), s = sub(g, x, y, z, ry); for (let k = 0; k < 6; k++) B(s, 0.2, 0.2, 3.2, M.steel, -0.6 + (k % 3) * 0.35, 0.12 + Math.floor(k / 3) * 0.22, 0); for (let k = 0; k < 5; k++) B(s, 1.0, 0.02, 2.0, M.wood, 1.2, 0.05 + k * 0.03, 0); for (let k = 0; k < 6; k++) { const b = new THREE.Mesh(new THREE.SphereGeometry(0.28, 8, 6), M.bag); b.scale.set(1.3, 0.55, 0.9); b.position.set(-0.5 + (k % 3) * 0.6, 0.15 + Math.floor(k / 3) * 0.28, 1.9); s.add(b); } };
+// the main entry point (the same signature as before, plus an optional footprint: rot, w, d, house)
+makeConstruction = function (at, big) {
+  const g = new THREE.Group(); if (!at) return g; const M = KOJI.mats(), x0 = at.x, z0 = at.z, y0 = groundH(x0, z0);
+  let rot = at.rot; if (rot === undefined) { const nr = typeof nearestOnRoads === 'function' && nearestOnRoads(x0, z0, 60, false); rot = nr ? Math.atan2(nr.x - x0, nr.z - z0) : 0; }
+  const o = { x: x0, z: z0, rot }, W = (lx, lz) => toWorld(o, lx, lz), GY = (lx, lz) => { const [x, z] = W(lx, lz); return groundH(x, z); };
+  if (big) {
+    const SW = clamp((at.w || 16) + 3, 12, 30), SD = clamp((at.d || 14) + 3, 10, 28), hw = SW / 2, hd = SD / 2, H = 2.4, gate = Math.min(6, SW * 0.4);
+    // hoarding: four sides (front split by the gate), skipping water; posts and stays inside
+    const side = (ax, az, bx, bz) => { const L = Math.hypot(bx - ax, bz - az), n = Math.max(1, Math.ceil(L / 3.6)); for (let k = 0; k < n; k++) { const t0 = k / n, t1 = (k + 1) / n, la = ax + (bx - ax) * t0, lza = az + (bz - az) * t0, lb = ax + (bx - ax) * t1, lzb = az + (bz - az) * t1, [pa, qa] = W(la, lza), [pb, qb] = W(lb, lzb), y = Math.min(groundH(pa, qa), groundH(pb, qb)); if (y < 0.15) continue;
+        const seg = Math.hypot(pb - pa, qb - qa), p = new THREE.Mesh(KOJI.panelBox(seg, H, 0.05), M.panel); p.position.set((pa + pb) / 2, y + H / 2 - 0.05, (qa + qb) / 2); p.rotation.y = Math.atan2(qb - qa, -(pb - pa)) + Math.PI; g.add(p);
+        const ix = -(lzb - lza) / (seg || 1), iz = (lb - la) / (seg || 1); for (const [lx, lz] of [[la, lza], [lb, lzb]]) { const [px, pz] = W(lx, lz), [sx, sz] = W(lx + ix * 0.9 * Math.sign(-lx * ix - lz * iz || 1), lz + iz * 0.9 * Math.sign(-lx * ix - lz * iz || 1)); CY(g, 0.024, H + 0.1, M.pipe, px, y + H / 2, pz, 5); ROD(g, 0.022, M.pipe, [px, y + H * 0.8, pz], [sx, y, sz], 5); }
+        if (COLL.track) addCollider({ x: (pa + pb) / 2, z: (qa + qb) / 2, hw: seg / 2, hd: 0.08, rot: Math.atan2(pb - pa, qb - qa) - Math.PI / 2, kind: 'bld' }); } };
+    side(-hw, hd, -gate / 2, hd); side(gate / 2, hd, hw, hd); side(hw, hd, hw, -hd); side(hw, -hd, -hw, -hd); side(-hw, -hd, -hw, hd);
+    // the gate: open mesh gate leaves folded back, warning lights, signs
+    for (const sx of [-1, 1]) { const [px, pz] = W(sx * gate / 2, hd), y = groundH(px, pz); CY(g, 0.06, 2.7, M.pipe, px, y + 1.35, pz, 8); const L = new THREE.Mesh(new THREE.PlaneGeometry(gate / 2, 2.0), M.mesh); const [qx, qz] = W(sx * (gate / 2 + 0.1), hd - gate / 4); L.position.set(qx, y + 1.05, qz); L.rotation.y = rot + Math.PI / 2; g.add(L);
+      const lp = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.11, 0.2, 10), M.lamp); lp.position.set(px, y + 2.8, pz); g.add(lp); }
+    const front = (s, lx, hgt) => { const [px, pz] = W(lx, hd + 0.06); s.position.set(px, GY(lx, hd + 0.06) + hgt, pz); s.rotation.y = rot; g.add(s); };
+    front(KOJI.safety(), -hw * 0.55, 1.5); front(KOJI.noticeSign(at.name), hw * 0.55, 1.3); front(KOJI.bowSign(), gate / 2 + 0.75, 0.95);
+    // the building going up: a steel frame (2–3 storeys), floors, the lower floors clad in mesh sheet on scaffolding
+    const fw = SW - 6, fd = SD - 6.5, floors = SW > 20 ? 3 : 2, fh = 3.4, fy = Math.max(GY(0, -0.5), y0);
+    { const s = sub(g, ...W(0, -0.8).slice(0, 1), fy, W(0, -0.8)[1], rot); s.position.x = W(0, -0.8)[0];
+      B(s, fw + 0.6, 0.35, fd + 0.6, M.conc, 0, 0.12, 0); const nx = Math.max(2, Math.round(fw / 4)), nz = Math.max(2, Math.round(fd / 4));
+      for (let i = 0; i <= nx; i++) for (let j = 0; j <= nz; j++) { const px = -fw / 2 + fw * i / nx, pz = -fd / 2 + fd * j / nz; B(s, 0.3, floors * fh, 0.3, M.steel, px, floors * fh / 2 + 0.3, pz); }
+      for (let f = 1; f <= floors; f++) { const yy = f * fh + 0.3; for (let i = 0; i <= nx; i++) B(s, 0.25, 0.45, fd, M.steel, -fw / 2 + fw * i / nx, yy, 0); for (let j = 0; j <= nz; j++) B(s, fw, 0.45, 0.25, M.steel, 0, yy, -fd / 2 + fd * j / nz); if (f < floors) B(s, fw, 0.15, fd, M.conc, 0, yy + 0.3, 0); }
+      for (let k = 0; k < 4; k++) B(s, 0.04, 1.2, 0.04, M.rebar, -fw / 2 + 0.4 + k * 0.3, floors * fh + 0.9, fd / 2 - 0.4); }
+    { const L0 = W(-fw / 2 - 0.7, fd / 2 - 0.8 + 0.7), L1 = W(fw / 2 + 0.7, fd / 2 - 0.8 + 0.7), out = [Math.sin(rot), Math.cos(rot)]; KOJI.scaffold(g, L0[0], L0[1], L1[0], L1[1], fh * (floors - 0.4), out[0], out[1]);
+      const S0 = W(fw / 2 + 0.7, fd / 2 - 0.1), S1 = W(fw / 2 + 0.7, -fd / 2 - 1.5), so = [Math.cos(rot), -Math.sin(rot)]; KOJI.scaffold(g, S0[0], S0[1], S1[0], S1[1], fh * (floors - 1), so[0], so[1]); }
+    // machines and the yard
+    { const [cx, cz] = W(-hw + 3.2, hd - 5.5); KOJI.crane(g, cx, groundH(cx, cz), cz, rot + 0.15); }
+    { const [ex, ez] = W(hw - 3, hd - 3.2); KOJI.excavator(g, ex, groundH(ex, ez), ez, rot - 2.4); }
+    { const [ox, oz] = W(hw - 3.4, -hd + 1.8); KOJI.office(g, ox, groundH(ox, oz), oz, rot + Math.PI); }
+    { const [mx, mz] = W(-hw + 2.4, -hd + 2.4); KOJI.stack(g, mx, groundH(mx, mz), mz, rot); }
+    { const pts = [-1.4, 0, 1.4].map(k => W(k * gate / 3, hd + 1.2)); KOJI.coneRow(g, pts); }
+  } else if (at.house) {
+    const s = sub(g, x0, y0, z0, rot); B(s, 7.4, 0.4, 6.4, M.conc, 0, 0.1, 0); B(s, 7.0, 0.12, 6.0, M.wood, 0, 0.36, 0);
+    for (const [px, pz] of [[-3.4, -2.9], [3.4, -2.9], [-3.4, 2.9], [3.4, 2.9], [0, -2.9], [0, 2.9], [-3.4, 0], [3.4, 0]]) B(s, 0.12, 2.8, 0.12, M.wood, px, 1.8, pz);
+    for (const pz of [-2.9, 2.9]) B(s, 7.0, 0.18, 0.12, M.wood, 0, 3.2, pz); for (const px of [-3.4, 3.4, 0]) B(s, 0.12, 0.18, 6.0, M.wood, px, 3.2, 0); for (let k = -2; k <= 2; k++) B(s, 0.08, 0.1, 6.0, M.wood, k * 1.6, 3.32, 0);
+    const out = [Math.sin(rot), Math.cos(rot)], [ax, az] = W(-4.3, 3.9), [bx, bz] = W(4.3, 3.9); KOJI.scaffold(g, ax, az, bx, bz, 3.4, out[0], out[1]);
+    const sd = [Math.cos(rot), -Math.sin(rot)], [cx, cz] = W(4.4, 3.4), [dx, dz] = W(4.4, -3.4); KOJI.scaffold(g, cx, cz, dx, dz, 3.4, sd[0], sd[1], false);
+    // a mesh fence along the road side, toilet, sign
+    for (let k = -2; k <= 2; k++) { if (k === 0) continue; const [fx, fz] = W(k * 1.9, 6.0), y = groundH(fx, fz); const f = new THREE.Mesh(new THREE.PlaneGeometry(1.85, 1.6), M.mesh); f.position.set(fx, y + 0.85, fz); f.rotation.y = rot; g.add(f); CY(g, 0.03, 1.8, M.pipe, fx + Math.cos(rot) * 0.95, y + 0.9, fz - Math.sin(rot) * 0.95, 5); B(g, 0.5, 0.12, 0.25, M.conc, fx, y + 0.06, fz, rot); }
+    { const t = sub(g, ...W(-4.6, -3.6).slice(0, 1), GY(-4.6, -3.6), W(-4.6, -3.6)[1], rot); t.position.x = W(-4.6, -3.6)[0]; B(t, 1.0, 2.3, 1.0, M.blue, 0, 1.15, 0); B(t, 1.05, 0.12, 1.05, M.white, 0, 2.36, 0); }
+    { const b = KOJI.bowSign(), [bx2, bz2] = W(0, 6.3); b.position.set(bx2, groundH(bx2, bz2) + 0.95, bz2); b.rotation.y = rot; g.add(b); KOJI.barricade(g, ...W(0, 6.8), rot); }
+  } else {
+    // small works: barricades, cones with bars, the bowing-worker sign
+    KOJI.barricade(g, ...W(0, 1.6), rot); KOJI.barricade(g, ...W(-1.9, 0.4), rot + 1.2);
+    KOJI.coneRow(g, [W(1.4, 1.4), W(2.3, 0.2), W(2.0, -1.2)]);
+    const b = KOJI.bowSign(), [bx, bz] = W(-0.2, 2.2); b.position.set(bx, groundH(bx, bz) + 0.95, bz); b.rotation.y = rot; g.add(b); CY(g, 0.03, 0.9, M.pipe, bx, groundH(bx, bz) + 0.45, bz, 5);
+    KOJI.stack(g, ...W(-2.2, -1.6).slice(0, 1), y0, W(-2.2, -1.6)[1], rot);
+  }
+  g.traverse(m => { if (m.isMesh) { m.castShadow = m.material !== M.sheet && m.material !== M.mesh; m.receiveShadow = true; } });
+  const out = mergeLocal(g); out.userData.cons = { x: x0, z: z0 }; return out;
+};
+
+// ===================== 路線バス: 乗り降りの動き・車内・運転席からの見え方 (ver.41) =====================
+// - the body now has real openings: side windows, doors, windscreen and rear window are cut out, so the glass is see-through
+//   from both sides (before, a solid white shell sat behind dark glass and you could not see in or out)
+// - the inside: ceiling with light strips, moquette seats with grab handles, poles, hand straps, stop buttons, the fare box,
+//   the fare display over the windscreen, the numbered-ticket machine, a dashboard with meters, and a driver in uniform
+// - doors open at a stop (front: swing-out, middle: sliding) and shut before the bus pulls away
+// - you walk to the middle door, step up, take a ticket and sit by a window; you get off by the front door, paying on the way
+// - V while riding: 外から → 運転席の目線 → 座席の目線 → 外から
+const BUS2 = { view: 'driver', doorK: 0, anim: null, SEAT: [0.83, -1.46] };
+BUS2.texSeat = function () { return txCanvas(64, 64, (x, w, h) => { x.fillStyle = '#2d4f86'; x.fillRect(0, 0, w, h); for (let i = 0; i < 46; i++) { x.fillStyle = ['#e2b23a', '#c8462e', '#3fa0a8'][i % 3]; x.fillRect((i * 37) % w, (i * 23 + (i >> 2) * 7) % h, 3, 3); } x.fillStyle = 'rgba(0,0,0,0.12)'; for (let y = 0; y < h; y += 4) x.fillRect(0, y, w, 1); }, true); };
+BUS2.fareTex = function () { return txCanvas(512, 96, (x, w, h) => { x.fillStyle = '#0a0a0a'; x.fillRect(0, 0, w, h); x.textAlign = 'center'; for (let k = 0; k < 8; k++) { const cx = 32 + k * 64; x.font = '700 28px "M PLUS Rounded 1c",sans-serif'; x.fillStyle = '#d8d8d8'; x.fillText(String(k + 1), cx, 34); x.font = '700 30px "M PLUS Rounded 1c",sans-serif'; x.fillStyle = '#ffa020'; x.fillText(String(160 + k * 20), cx, 80); x.fillStyle = '#333'; x.fillRect(cx + 31, 6, 2, 84); } }, false); };
+BUS2.rect = function (a, b, y0, y1) { const p = new THREE.Path(); p.moveTo(a, y0); p.lineTo(b, y0); p.lineTo(b, y1); p.lineTo(a, y1); p.lineTo(a, y0); return p; };
+BUSX.model = function () {
+  const g = new THREE.Group(), white = stdM('#f4f4f0', 0.35, 0.1), green = stdM('#1f7a52', 0.45), orange = stdM('#e88a1a', 0.45), dark = stdM('#22262a', 0.5, 0.2), grey = stdM('#8a9096', 0.45, 0.4), black = stdM('#111417', 0.4);
+  // lighter tint than before, and nothing solid behind it: you see the seats and people inside, and the road from inside
+  const glass = new THREE.MeshStandardMaterial({ color: '#2c4250', roughness: 0.06, metalness: 0.15, transparent: true, opacity: 0.4, depthWrite: false });
+  // ----- outside fittings (the ones at the very front/back sit on the body surface) -----
+  for (const sx of [-1, 1]) { const segs = sx > 0 ? [[-4.25, -0.3], [0.9, 2.95]] : [[-4.25, 4.45]]; for (const [z0, z1] of segs) B(g, 0.04, 1.2, z1 - z0, glass, sx * 1.165, 1.95, (z0 + z1) / 2);
+    for (let z = -4.25; z <= 2.96; z += 1.2) { if (sx > 0 && z > -0.31 && z < 0.9) continue; B(g, 0.06, 1.22, 0.1, white, sx * 1.17, 1.95, z); } if (sx > 0) for (const z of [-0.25, 0.85, 3.2]) B(g, 0.06, 1.22, 0.1, white, 1.17, 1.95, z); else B(g, 0.06, 1.22, 0.08, black, -1.17, 1.95, 4.46); }
+  for (const sx of [-1, 1]) B(g, 0.05, 1.8, 0.18, black, sx * 1.055, 1.84, 4.53);   // the corner pillars are black from inside (they read as frames, not walls)
+  B(g, 2.1, 1.78, 0.04, glass, 0, 1.84, 4.575); B(g, 2.14, 0.08, 0.06, black, 0, 0.94, 4.58); B(g, 2.14, 0.06, 0.06, black, 0, 2.74, 4.58);
+  B(g, 1.9, 0.95, 0.04, glass, 0, 2.15, -4.575); B(g, 1.94, 0.05, 0.06, black, 0, 1.66, -4.58); B(g, 1.94, 0.05, 0.06, black, 0, 2.64, -4.58);
+  for (const sx of [-1, 1]) { B(g, 0.03, 0.22, 8.9, green, sx * 1.172, 0.82, 0); B(g, 0.03, 0.07, 8.9, orange, sx * 1.172, 1.0, 0); }
+  B(g, 2.2, 0.22, 0.03, green, 0, 0.82, 4.585); B(g, 2.2, 0.07, 0.03, orange, 0, 1.0, 4.585); B(g, 2.2, 0.22, 0.03, green, 0, 0.82, -4.585);
+  const tex = BUSX.signTex('島めぐり'), sm = new THREE.MeshBasicMaterial({ map: tex }); const fs = new THREE.Mesh(new THREE.PlaneGeometry(1.7, 0.3), sm); fs.position.set(0, 2.86, 4.6); g.add(fs);
+  const ss = new THREE.Mesh(new THREE.PlaneGeometry(1.1, 0.2), sm); ss.position.set(1.19, 2.72, 2.4); ss.rotation.y = Math.PI / 2; g.add(ss); const rs = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.18), sm); rs.position.set(0, 2.82, -4.6); rs.rotation.y = Math.PI; g.add(rs);
+  for (const m of [fs, ss, rs]) m.userData.keep = true;
+  for (const sx of [-1, 1]) { B(g, 0.32, 0.16, 0.05, stdM('#fffbe8', 0.2, 0, { emissive: new THREE.Color('#fff2c0'), emissiveIntensity: 0.8 }), sx * 0.82, 0.72, 4.58); B(g, 0.12, 0.1, 0.05, stdM('#ffaa30', 0.3, 0, { emissive: new THREE.Color('#ff8a00'), emissiveIntensity: 0.4 }), sx * 1.04, 0.72, 4.58); B(g, 0.14, 0.42, 0.05, stdM('#d02a2a', 0.3, 0, { emissive: new THREE.Color('#a01010'), emissiveIntensity: 0.6 }), sx * 1.0, 0.85, -4.58); }
+  B(g, 2.34, 0.26, 0.16, dark, 0, 0.44, 4.6); B(g, 2.34, 0.26, 0.16, dark, 0, 0.44, -4.6); B(g, 0.5, 0.18, 0.02, stdM('#e8f0e0', 0.4), 0, 0.5, 4.69); B(g, 1.2, 0.5, 0.03, black, 0, 1.15, -4.585);
+  for (const sx of [-1, 1]) { ROD(g, 0.025, black, [sx * 1.05, 2.7, 4.45], [sx * 1.22, 2.55, 4.95]); ROD(g, 0.025, black, [sx * 1.22, 2.55, 4.95], [sx * 1.22, 2.1, 4.98]); B(g, 0.06, 0.38, 0.24, black, sx * 1.22, 2.0, 4.98); }
+  for (const z of [2.95, -2.0]) for (const sx of [-1, 1]) { CY(g, 0.47, 0.28, black, sx * 1.04, 0.47, z, 18, 0, Math.PI / 2); CY(g, 0.26, 0.04, grey, sx * 1.19, 0.47, z, 14, 0, Math.PI / 2); const arch = new THREE.Mesh(new THREE.CircleGeometry(0.58, 18, 0, Math.PI), stdM('#0c0e10', 0.9)); arch.position.set(sx * 1.161, 0.47, z); arch.rotation.y = sx * Math.PI / 2; g.add(arch); }
+  g.children.forEach(o => { if (o.position.z > 4.5) o.position.z += 0.04; else if (o.position.z < -4.5) o.position.z -= 0.04; });
+  // ----- body: side walls with the windows and doors cut out, front / rear faces with the windscreens cut out, roof, floor pan -----
+  const prof = [[-4.56, 0.32], [4.52, 0.32], [4.61, 0.62], [4.62, 2.78], [4.5, 3.02], [-4.48, 3.04], [-4.59, 2.88], [-4.61, 0.4]], R = BUS2.rect;
+  for (const sx of [-1, 1]) { const sh = new THREE.Shape(prof.map(p => new THREE.Vector2(p[0], p[1])));
+    if (sx > 0) sh.holes.push(R(-4.25, -0.3, 1.35, 2.55), R(-0.2, 0.8, 0.42, 2.58), R(0.9, 2.95, 1.35, 2.55), R(3.25, 4.15, 0.42, 2.58)); else sh.holes.push(R(-4.25, 4.45, 1.35, 2.55));   // the driver's side window runs right up to a thin corner pillar
+    const geo = new THREE.ExtrudeGeometry(sh, { depth: 0.06, bevelEnabled: false, curveSegments: 2 }); geo.rotateY(-Math.PI / 2); const w = new THREE.Mesh(geo, white); w.position.x = sx > 0 ? 1.14 : -1.08; g.add(w); }
+  for (const [zf, hole] of [[4.56, R(-1.05, 1.05, 0.95, 2.73)], [-4.62, R(-0.95, 0.95, 1.675, 2.625)]]) { const sh = new THREE.Shape([new THREE.Vector2(-1.08, 0.32), new THREE.Vector2(1.08, 0.32), new THREE.Vector2(1.08, 2.98), new THREE.Vector2(-1.08, 2.98)]); sh.holes.push(hole); const geo = new THREE.ExtrudeGeometry(sh, { depth: 0.06, bevelEnabled: false }); const f = new THREE.Mesh(geo, white); f.position.z = zf; g.add(f); }
+  B(g, 2.28, 0.08, 9.0, white, 0, 3.0, 0); for (const sx of [-1, 1]) CY(g, 0.05, 9.0, white, sx * 1.1, 2.98, 0, 8, Math.PI / 2);
+  B(g, 2.16, 0.06, 9.1, dark, 0, 0.35, 0);
+  B(g, 1.5, 0.26, 2.4, stdM('#e2e4e2', 0.5), 0, 3.17, 0.6); B(g, 0.6, 0.12, 0.6, stdM('#d0d2d0', 0.5), 0, 3.1, -3.2);
+  // ----- doors: frames stay with the body; the glass leaves are separate so they can open -----
+  const doors = [];
+  for (const [zc, w, kind] of [[3.7, 0.9, 'swing'], [0.3, 1.0, 'slide']]) { B(g, 0.07, 0.08, w + 0.1, dark, 1.17, 2.6, zc); B(g, 0.07, 0.06, w + 0.1, dark, 1.17, 0.42, zc); for (const k of [-1, 1]) B(g, 0.07, 2.2, 0.05, dark, 1.17, 1.5, zc + k * (w / 2 + 0.03));
+    for (const k of [-1, 1]) { const hz = zc + k * w / 2, leaf = new THREE.Group(); leaf.position.set(1.18, 1.5, kind === 'swing' ? hz : zc + k * w / 4); const c = kind === 'swing' ? -k * w / 4 : 0;
+      B(leaf, 0.04, 2.08, w / 2 - 0.03, glass, 0, 0, c); B(leaf, 0.06, 2.1, 0.04, dark, 0, 0, c - (w / 4 - 0.02)); B(leaf, 0.06, 2.1, 0.04, dark, 0, 0, c + (w / 4 - 0.02)); B(leaf, 0.06, 0.05, w / 2 - 0.04, dark, 0, 1.03, c); B(leaf, 0.06, 0.05, w / 2 - 0.04, dark, 0, -1.03, c); B(leaf, 0.07, 0.04, w / 2 - 0.08, stdM('#c8ccd0', 0.3, 0.6), 0.01, 0.0, c);
+      leaf.userData.keep = true; const lm = mergeLocal(leaf); g.add(lm); doors.push({ leaf: lm, k, zc, w, kind, x0: 1.18 }); } }
+  // ----- inside: floor (lowered at the doors with a step), ceiling with light strips -----
+  const ceil = stdM('#f2f0ea', 0.6, 0, { emissive: new THREE.Color('#6a665e'), emissiveIntensity: 0.6 }), floor = stdM('#5e6466', 0.9), yel = stdM('#f2c230', 0.6), rail = stdM('#f2c230', 0.35, 0.3), wallIn = stdM('#e6e2d6', 0.7), lightM = stdM('#ffffff', 0.4, 0, { emissive: new THREE.Color('#fff6e0'), emissiveIntensity: 0.9 });
+  B(g, 1.92, 0.06, 8.95, floor, -0.12, 0.62, 0); for (const [z0, z1] of [[-4.45, -0.2], [0.8, 3.25], [4.15, 4.45]]) B(g, 0.24, 0.06, z1 - z0, floor, 0.96, 0.62, (z0 + z1) / 2);
+  for (const [zc, w] of [[3.7, 0.9], [0.3, 1.0]]) { B(g, 0.3, 0.1, w, floor, 0.96, 0.37, zc); B(g, 0.03, 0.2, w, dark, 0.835, 0.52, zc); B(g, 0.06, 0.012, w, yel, 0.81, 0.656, zc); B(g, 0.05, 0.012, w, yel, 1.08, 0.426, zc); }
+  B(g, 2.16, 0.03, 8.95, ceil, 0, 2.93, 0); for (const sx of [-1, 1]) B(g, 0.3, 0.03, 8.0, lightM, sx * 0.5, 2.905, -0.1);
+  B(g, 0.66, 0.36, 1.0, wallIn, -0.75, 0.83, 2.75); B(g, 0.26, 0.36, 0.3, wallIn, 0.95, 0.83, 3.05);   // wheel houses at the front
+  // seats: moquette cushions and backs with a grab handle on top; the front ones on the driver side are priority seats
+  const moq = new THREE.MeshStandardMaterial({ map: BUS2.texSeat(), roughness: 0.95 }), prio = stdM('#c8506a', 0.9), frame = stdM('#9aa0a4', 0.4, 0.5);
+  for (let z = -3.9; z < 2.6; z += 0.82) for (const sx of [-1, 1]) { if (sx > 0 && z > -0.4 && z < 1.0) continue; const m = z > 1.0 && sx < 0 ? prio : moq;
+    B(g, 0.84, 0.12, 0.44, m, sx * 0.62, 1.06, z); B(g, 0.84, 0.58, 0.1, m, sx * 0.62, 1.37, z - 0.22, 0, -0.08); B(g, 0.05, 0.4, 0.36, frame, sx * 0.21, 0.82, z);
+    CY(g, 0.018, 0.78, rail, sx * 0.62, 1.71, z - 0.25, 6, 0, Math.PI / 2); }
+  // poles, ceiling rails with hand straps (つり革), stop buttons on the walls
+  for (const z of [-2.5, -0.9, 1.4]) for (const sx of [-1, 1]) CY(g, 0.022, 2.3, rail, sx * 0.22, 1.77, z, 6); CY(g, 0.022, 2.3, rail, -0.22, 1.77, 2.9, 6);
+  const strap = stdM('#f4f4f0', 0.6), btn = stdM('#7a3fb0', 0.4), btnTop = stdM('#ffd84a', 0.4, 0, { emissive: new THREE.Color('#ffb020'), emissiveIntensity: 0.25 });
+  for (const sx of [-1, 1]) { CY(g, 0.018, 8.0, rail, sx * 0.4, 2.62, -0.3, 6, Math.PI / 2); for (let z = -3.9; z < 3.0; z += 0.42) { B(g, 0.025, 0.2, 0.02, strap, sx * 0.4, 2.5, z); const r = new THREE.Mesh(new THREE.TorusGeometry(0.05, 0.011, 5, 12), strap); r.position.set(sx * 0.4, 2.35, z); r.rotation.y = Math.PI / 2; g.add(r); } }
+  for (let z = -3.7; z < 2.4; z += 0.82) for (const sx of [-1, 1]) { if (sx > 0 && z > -0.4 && z < 1.0) continue; B(g, 0.04, 0.1, 0.08, btn, sx * 1.06, 1.5, z); B(g, 0.02, 0.05, 0.05, btnTop, sx * 1.045, 1.51, z); }
+  // the front: dashboard with meters, fare box next to the driver, fare display over the windscreen; ticket machine by the middle door
+  const dash = stdM('#2a2d30', 0.6), meter = stdM('#d8f0e0', 0.3, 0, { emissive: new THREE.Color('#9ae0b0'), emissiveIntensity: 0.5 });
+  B(g, 1.4, 0.44, 0.44, dash, -0.36, 1.16, 4.3); B(g, 1.36, 0.02, 0.4, stdM('#3c4044', 0.55), -0.36, 1.39, 4.3); for (let i = 0; i < 6; i++) B(g, 0.03, 0.012, 0.025, stdM(['#a84a40', '#4a8a5a', '#b09a50'][i % 3], 0.5), -0.16 + i * 0.05, 1.402, 4.2); B(g, 0.7, 0.3, 0.32, dash, 0.7, 0.8, 4.34); B(g, 0.62, 0.22, 0.05, black, -0.62, 1.44, 4.1, 0, -0.35);
+  for (const xx of [-0.78, -0.47]) { const mt = new THREE.Mesh(new THREE.CircleGeometry(0.075, 18), meter); mt.position.set(xx, 1.45, 4.07); mt.rotation.set(0.35, Math.PI, 0); mt.userData.keep = true; g.add(mt); }
+  B(g, 0.32, 0.9, 0.3, stdM('#3a3f44', 0.5, 0.4), -0.18, 1.1, 3.25); B(g, 0.24, 0.08, 0.02, meter, -0.18, 1.48, 3.095); B(g, 0.2, 0.03, 0.12, stdM('#c0c4c8', 0.3, 0.6), -0.18, 1.56, 3.25);
+  { const fm = new THREE.Mesh(new THREE.PlaneGeometry(1.7, 0.3), new THREE.MeshBasicMaterial({ map: BUS2.fareTex() })); fm.position.set(0, 2.6, 4.44); fm.rotation.y = Math.PI; fm.userData.keep = true; g.add(fm); B(g, 1.8, 0.38, 0.05, black, 0, 2.6, 4.48); }
+  B(g, 0.18, 0.36, 0.2, grey, 0.98, 1.5, -0.42); B(g, 0.1, 0.03, 0.08, stdM('#f4f4f0', 0.6), 0.88, 1.42, -0.42);
+  // driver seat and steering wheel; the driver in uniform and cap
+  B(g, 0.52, 0.12, 0.5, black, -0.62, 1.05, 3.7); B(g, 0.52, 0.7, 0.1, black, -0.62, 1.42, 3.43, 0, -0.12);
+  const sw = new THREE.Mesh(new THREE.TorusGeometry(0.21, 0.022, 6, 20), black); sw.position.set(-0.62, 1.5, 4.0); sw.rotation.x = -0.95; g.add(sw); CY(g, 0.03, 0.42, black, -0.62, 1.35, 4.12, 6, -0.95);
+  const driver = new THREE.Group(); driver.position.set(-0.62, 1.19, 3.66);
+  { const uni = stdM('#26365c', 0.7), skin = stdM('#f0c8a4', 0.6), cap = stdM('#1c2844', 0.6), gold = stdM('#d8b040', 0.4, 0.5), shirt = stdM('#eef2f6', 0.6), glove = stdM('#ffffff', 0.6);
+    B(driver, 0.38, 0.52, 0.24, uni, 0, 0.32, -0.05); B(driver, 0.1, 0.3, 0.02, shirt, 0, 0.42, 0.075);
+    for (const sx of [-1, 1]) { B(driver, 0.14, 0.14, 0.46, uni, sx * 0.1, 0.0, 0.18); B(driver, 0.13, 0.44, 0.14, uni, sx * 0.1, -0.24, 0.4); ROD(driver, 0.05, uni, [sx * 0.2, 0.52, 0], [sx * 0.17, 0.36, 0.22]); ROD(driver, 0.045, uni, [sx * 0.17, 0.36, 0.22], [sx * 0.15, 0.42, 0.36]); const gl = new THREE.Mesh(new THREE.SphereGeometry(0.048, 8, 6), glove); gl.position.set(sx * 0.15, 0.43, 0.38); driver.add(gl); }
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.12, 14, 10), skin); head.position.set(0, 0.72, 0); driver.add(head); CY(driver, 0.13, 0.08, cap, 0, 0.83, 0, 14); B(driver, 0.2, 0.02, 0.12, black, 0, 0.79, 0.12); B(driver, 0.06, 0.03, 0.01, gold, 0, 0.85, 0.13); }
+  driver.traverse(o => { if (o.isMesh) o.castShadow = true; }); driver.userData.keep = true; const dm = mergeLocal(driver); g.add(dm);
+  g.traverse(o => { if (o.isMesh && o.material !== glass) o.castShadow = true; });
+  const m = mergeLocal(g); m.userData.signMat = sm; m.userData.doors = doors; m.userData.driver = dm; m.userData.glass = glass;
+  // the line-of-sight cut-out (see.js) must never punch a hole in the bus you are looking at or riding
+  m.traverse(o => { if (o.material) for (const mm of [].concat(o.material)) SEE.skip.add(mm); });
+  return m;
+};
+// ---------- doors: open while the bus stands at a stop, shut a moment before it leaves ----------
+BUS2.doors = function (B, dt) { const D = B.mesh && B.mesh.userData.doors; if (!D) return; const want = B.wait > 1.3 || (BUS2.anim && BUS2.anim.B === B) ? 1 : 0;
+  const was = BUS2.doorK; BUS2.doorK = clamp(BUS2.doorK + clamp(want - BUS2.doorK, -dt * 1.5, dt * 1.5), 0, 1); if (was === BUS2.doorK && BUS2._doorsSet) return; BUS2._doorsSet = 1;
+  const k = BUS2.doorK * BUS2.doorK * (3 - 2 * BUS2.doorK);
+  for (const d of D) { if (d.kind === 'swing') { d.leaf.position.x = d.x0 + 0.03 * Math.min(1, k * 4); d.leaf.rotation.y = -d.k * 1.45 * k; }
+    else { const out = Math.min(1, k * 3); d.leaf.position.set(d.x0 + 0.08 * out, 1.5, d.zc + d.k * (d.w / 4 + (d.w / 2 - 0.04) * Math.max(0, (k - 0.25) / 0.75))); } } };
+// ---------- the bus's own frame (x: curb side, z: forward) to the world ----------
+BUS2.W = function (B, lx, lz) { const c = Math.cos(B.rot), s = Math.sin(B.rot); return [B.x + c * lx + s * lz, B.z - s * lx + c * lz]; };
+BUS2.L = function (B, x, z) { const c = Math.cos(B.rot), s = Math.sin(B.rot), dx = x - B.x, dz = z - B.z; return [c * dx - s * dz, s * dx + c * dz]; };
+BUS2.FLOOR = 0.65; BUS2.SITK = 0.62; BUS2.dy = 0.28;   // the hero is small: sitting on the cushion (0.47 m above the floor) the feet dangle a little
+// ---------- you, sitting by the window while riding ----------
+BUS2.sit = function (B) {
+  const [x, z] = BUS2.W(B, BUS2.SEAT[0], BUS2.SEAT[1]); PL.mesh.position.set(x, B.mesh.position.y + BUS2.FLOOR + (BUS2.dy || 0), z); PL.mesh.rotation.y = B.rot;
+  const P = PL.parts, R0 = PL.rest; if (!P || !P.thighL) return;
+  P.thighL.rotation.set(-1.45, 0, 0.04); P.thighR.rotation.set(-1.45, 0, -0.04); P.shinL.rotation.set(1.45, 0, 0); P.shinR.rotation.set(1.45, 0, 0);
+  P.upperArmL.rotation.set(-0.42, 0, -0.12); P.upperArmR.rotation.set(-0.42, 0, 0.12); P.foreArmL.rotation.set(-0.75, 0, 0); P.foreArmR.rotation.set(-0.75, 0, 0); P.spine.rotation.set(0, 0, 0);
+  if (R0 && R0.pelvis) P.pelvis.position.y = R0.pelvis.y * BUS2.SITK; const t = performance.now() / 1000; P.head.rotation.set(0, 0.55 + Math.sin(t / 2.6) * 0.3, 0);   // looking out of the window
+};
+// ---------- the view from inside: 運転席 / 座席 ----------
+BUS2.fp = function (B) {
+  const c = Math.cos(B.rot), s = Math.sin(B.rot); let x, y, z, yaw = B.rot + (CAM.fpLook || 0), pitch = CAM.fpPitch || 0;
+  const e = BUS2.eye(); x = B.x + c * e[0] + s * e[2]; y = B.mesh.position.y + e[1]; z = B.z - s * e[0] + c * e[2];
+  if (BUS2.view === 'driver') pitch -= 0.17;   // the top of the wheel and the dashboard show at the bottom
+  else { yaw += 0.32; pitch -= 0.06; }          // a passenger's eye height, turned a little to the window
+  camera.position.set(x, y, z); const cp = Math.cos(pitch); camera.lookAt(x + Math.sin(yaw) * cp, y + Math.sin(pitch), z + Math.cos(yaw) * cp);
+};
+BUS2.eye = function () { return BUS2.view === 'driver' ? [-0.62, 1.92, 3.52] : [BUS2.SEAT[0] - 0.19, 1.86, BUS2.SEAT[1] + 0.08]; };
+{ const _sv = setViewMode; setViewMode = function (m) { const v = PL.veh;
+  if (v && v.kind === 'bus') {
+    if (CAM.mode === 'third' && m === 'first') BUS2.view = 'driver';
+    else if (CAM.mode === 'first' && m === 'third' && BUS2.view === 'driver') { BUS2.view = 'seat'; CAM.fpLook = 0; CARSPEC.bus.eye = BUS2.eye(); UI.toast('🪑 座席の目線（V で外から）'); return; }
+    CARSPEC.bus.eye = BUS2.eye(); const r = _sv.apply(this, arguments); if (CAM.mode === 'first') UI.toast('🚌 運転席の目線（V で座席の目線）'); return r; }
+  return _sv.apply(this, arguments); }; }
+// ---------- getting on and off: walk to the door, step up, sit / walk to the front, pay, step down ----------
+BUS2.start = function (type, B) {
+  const pts = [], add = (lx, lz, up) => { const [x, z] = BUS2.W(B, lx, lz); pts.push({ x, z, up }); }, S = BUS2.SEAT, F = BUS2.FLOOR;
+  if (type === 'board') {
+    pts.push({ x: PL.x, z: PL.z, up: 0 }); const [lx, lz] = BUS2.L(B, PL.x, PL.z);
+    if (lx < 1.4) { const cz = lz > 0.3 ? 5.6 : -5.6; if (lx < -1.3) add(Math.min(lx, -1.9), cz, 0); add(2.3, cz, 0); }   // on the road side: round the front or the back
+    add(2.1, 0.3, 0); add(1.0, 0.3, 0.42); add(0.55, 0.3, F); add(0.0, -0.1, F); add(0.0, S[1] + 0.05, F); add(S[0], S[1], F);
+  } else {
+    add(S[0], S[1], F); add(0.0, S[1] + 0.2, F); add(0.05, 2.55, F); add(0.5, 3.45, F); add(1.0, 3.7, 0.42); add(2.1, 3.75, 0);
+    const st = B.stop || {}, last = pts[pts.length - 1]; if (st.x !== undefined && Math.hypot(st.x - last.x, st.z - last.z) < 7) { const [sl, sz] = BUS2.L(B, st.x, st.z); add(Math.max(2.6, sl + 0.9), sz - 1.0, 0); } else add(2.9, 2.6, 0);   // next to the bus-stop sign, not on its pole
+  }
+  B.wait = Math.max(B.wait, 3.4); BUS2.anim = { type, B, pts, i: 1, t: 0 };
+  PL.veh = null; PL.mesh.visible = true; if (CAM.mode === 'first') setViewMode('third'); CAM.distT = 5.2; PL.speed = 0;
+  if (type === 'off') { PL.x = pts[0].x; PL.z = pts[0].z; PL.y = B.mesh.position.y + F; PL.rot = B.rot; }
+  UI.toast(type === 'board' ? '🎫 整理券をとって、バスに乗った' : '💴 運賃をはらって「ありがとうございました」');
+};
+BUS2.step = function (dt) {
+  const A = BUS2.anim; if (!A) return; const B = A.B; A.t += dt; B.wait = Math.max(B.wait, 1.6); const p = A.pts[A.i]; if (!p || A.t > 14) return BUS2.finish();
+  const dx = p.x - PL.x, dz = p.z - PL.z, d = Math.hypot(dx, dz), sp = (p.up > 0 || A.pts[A.i - 1].up > 0 ? 1.5 : 2.2) * dt;
+  if (d <= sp) { PL.x = p.x; PL.z = p.z; A.i++; } else { PL.x += dx / d * sp; PL.z += dz / d * sp; }
+  if (d > 0.05) PL.rot = angLerp(PL.rot, Math.atan2(dx, dz), Math.min(1, dt * 10));
+  const floorY = B.mesh.position.y + (p.up || 0); PL.y = p.up ? lerp(PL.y, floorY, Math.min(1, dt * 9)) : lerp(PL.y, standY(PL.x, PL.z), Math.min(1, dt * 9));
+  PL.mesh.position.set(PL.x, PL.y, PL.z); PL.mesh.rotation.y = PL.rot; PL.speed = 1.8; animateHero(dt, 1.8, 0);
+  // the camera watches from the curb side, a little ahead of the doors
+  CAM.lastDrag = performance.now() / 1000 - 0.6; CAM.yaw = angLerp(CAM.yaw, B.rot + Math.PI / 2 - 0.45, Math.min(1, dt * 2.5)); CAM.pitch = lerp(CAM.pitch, 0.3, Math.min(1, dt * 2));
+  if (A.i >= A.pts.length) BUS2.finish();
+};
+BUS2.finish = function () {
+  const A = BUS2.anim; BUS2.anim = null; if (!A) return; const B = A.B; PL.speed = 0;
+  if (A.type === 'board' && B !== DV.bus) { PL.y = standY(PL.x, PL.z); return; }   // the route was changed meanwhile: that bus is gone
+  if (A.type === 'board') { PL.veh = B; CAM.distT = CARSPEC.bus.cam; if (GAME.p) { GAME.p.stats.busN = (GAME.p.stats.busN || 0) + 1; GAME.dirty = true; try { GAME.check(); } catch (e) { } } B.wait = Math.max(B.wait, 2.2); UI.toast(`🚌 ${BUSX.dest()}。着いたら Space でおりる（V で運転席の目線）`); }
+  else { PL.y = standY(PL.x, PL.z); B.wait = Math.max(B.wait, 1.8); }
+};
+{ const _up = updatePlayer; updatePlayer = function (dt, locked) { if (BUS2.anim) { try { BUS2.step(dt); } catch (e) { console.warn('bus2', e); BUS2.anim = null; } return; } return _up.apply(this, arguments); }; }
+{ const _tv = toggleVehicle; toggleVehicle = function () { if (BUS2.anim) return true; return _tv.apply(this, arguments); }; }
+{ const _rk = GAME.rideKey; GAME.rideKey = function () {
+  if (BUS2.anim) return true; const v = PL.veh;
+  if (v && v.kind === 'bus') { if (v.wait > 0.6 && v.mesh && v.mesh.userData.doors) { BUS2.start('off', v); return true; } return _rk.apply(this, arguments); }
+  const t = !v && this.rideTarget && this.rideTarget(); if (t && t.kind === 'bus' && t.mesh && t.mesh.userData.doors) { BUS2.start('board', t); return true; }
+  return _rk.apply(this, arguments); }; }
+{ const _p = GAME.prompt; GAME.prompt = function () { if (BUS2.anim) return ''; return _p.apply(this, arguments); }; }
+// every frame (after the bus has moved): doors, glass, you in your seat, the driver, and the view from inside
+{ const _ub = GAME.updateBus; GAME.updateBus = function (dt) { const r = _ub.apply(this, arguments); const B = DV.bus; if (!B || !B.mesh || !B.mesh.userData.doors) return r;
+  try { BUS2.doors(B, dt || 0.016); const riding = PL.veh === B, fp = riding && CAM.mode === 'first';
+    if (riding) { BUS2.sit(B); PL.mesh.visible = !(fp && BUS2.view === 'seat'); }
+    const dr = B.mesh.userData.driver; if (dr) dr.visible = !(fp && BUS2.view === 'driver');
+    const gm = B.mesh.userData.glass; if (gm) gm.opacity = fp ? 0.1 : 0.4;
+    if (fp && !window.__freecam && !(GAME.camOverride && GAME.camOverride()) && GAME.modal !== 'title') BUS2.fp(B);
+  } catch (e) { console.warn('bus2', e); }
+  return r; }; }
+CARSPEC.bus.cam = 11.5; CARSPEC.bus.eye = BUS2.eye();
 
 // ===================== MAIN =====================
 let renderer, scene, camera;
