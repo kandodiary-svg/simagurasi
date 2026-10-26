@@ -15,7 +15,7 @@ html,body{height:100%} body{margin:0;background:#9fcde8;overflow:hidden;font-fam
 :root{--ink:#22323a;--paper:#f6f8f3;--leaf:#3f8f5a;--sun:#f2a541;--gl:max(16px,env(safe-area-inset-left,0px));--gr:max(16px,env(safe-area-inset-right,0px))}
 #hud{position:fixed;inset:0;pointer-events:none}
 #hud .card{pointer-events:auto;background:rgba(246,248,243,.88);border-radius:16px;box-shadow:0 6px 18px rgba(10,30,40,.18);padding:10px 14px}
-#hud .clock{position:absolute;top:calc(14px + env(safe-area-inset-top,0px));left:var(--gl)}
+#hud .clock{position:absolute;top:calc(14px + env(safe-area-inset-top,0px));left:var(--gl);min-width:236px;box-sizing:border-box}
 #hud .clock .t{font-family:"Mochiy Pop One","M PLUS Rounded 1c",sans-serif;font-size:30px;line-height:1;font-variant-numeric:tabular-nums}
 #hud .clock .d{font-size:12px;font-weight:800;margin-top:4px;color:#4f6560}
 #hud .sndp{position:absolute;top:calc(170px + env(safe-area-inset-top,0px));right:var(--gr);z-index:30;pointer-events:auto;display:flex;flex-direction:column;gap:8px;min-width:220px;font-size:13px}#hud .sndp label{display:flex;align-items:center;gap:8px;justify-content:space-between}#hud .sndp input{width:120px;accent-color:#3f8f5a}#hud .sndp button{border:0;border-radius:99px;padding:6px 12px;background:#22323a;color:#fff;font-weight:800;cursor:pointer}
@@ -1198,6 +1198,12 @@ function updateEnv(s, sunDir, night, weather) {
   ENV.sun.position.copy(sunDir).multiplyScalar(8); ENV.sun.material.color.copy(s.sunCol).convertSRGBToLinear().multiplyScalar(sunDir.y > 0 ? 6 : 0);
   if (ENV.rt) ENV.rt.dispose(); ENV.rt = ENV.pmrem.fromScene(ENV.scene, 0.02); scene.environment = ENV.rt.texture;
 }
+// (wrapped) the reflection map of the sky is rebuilt only for a visible change of colour, at most every 4 s (each rebuild is a
+// burst of GPU work and a new render target: in real-time mode it used to happen every few seconds and gave a hitch)
+{ const _ue = updateEnv; updateEnv = function (s, sunDir, night, weather) { const now = performance.now(), L = ENV.last;
+  if (L && L.weather === weather && ENV.rt) { const d = Math.max(Math.abs(s.top.r - L.top.r), Math.abs(s.top.g - L.top.g), Math.abs(s.top.b - L.top.b), Math.abs(s.hor.r - L.hor.r), Math.abs(s.hor.g - L.hor.g), Math.abs(s.hor.b - L.hor.b));
+    if (d < 0.004 || now - L.t < 4000 || (d < 0.035 && now - L.t < 60000)) return; }
+  ENV.last = { top: s.top.clone(), hor: s.hor.clone(), weather, t: now }; ENV.key = ''; return _ue(s, sunDir, night, weather); }; }
 function skyAt(hf) {
   let a = SKYKEYS[0], b = SKYKEYS[1];
   for (let i = 0; i < SKYKEYS.length - 1; i++) if (hf >= SKYKEYS[i][0] && hf < SKYKEYS[i + 1][0]) { a = SKYKEYS[i]; b = SKYKEYS[i + 1]; }
@@ -1761,7 +1767,7 @@ function limbGeom(points, r0, r1, radial = 7, segs = 6) {
 }
 const CANOPY = { top: new THREE.Color('#b6e05a'), mid: new THREE.Color('#6fb23c'), low: new THREE.Color('#2f6a2a') };
 function clumpGeom(c, r, seed, flat = 0.78, tint = [1, 1, 1], yRange = null) {
-  const g = new THREE.IcosahedronGeometry(r, 2); const p = g.attributes.position, col = [];
+  const g = new THREE.IcosahedronGeometry(r, VEG.clumpDetail === undefined ? 2 : VEG.clumpDetail); const p = g.attributes.position, col = [];
   const [y0, y1] = yRange || [c.y - r, c.y + r]; const tc = new THREE.Color();
   for (let i = 0; i < p.count; i++) {
     const v = new THREE.Vector3(p.getX(i), p.getY(i), p.getZ(i)), n = v.clone().normalize();
@@ -1795,7 +1801,7 @@ function makeTreeVariant(kind, seed) {
   const R = mulberry(seed), bark = [], clumps = [], cards = [], fruit = [];
   if (kind === 'broad') {
     const H = 5.2 + R() * 2.6, lean = new THREE.Vector3((R() - 0.5) * 1.0, 0, (R() - 0.5) * 1.0);
-    const top = new THREE.Vector3(lean.x, H * 0.48, lean.z);
+    const top = new THREE.Vector3(lean.x, H * 0.6, lean.z);   // a taller clear trunk: the crowns no longer form a low ceiling you walk into
     bark.push(limbGeom([new THREE.Vector3(0, -0.4, 0), new THREE.Vector3(lean.x * 0.2, H * 0.22, lean.z * 0.2), new THREE.Vector3(lean.x * 0.6, H * 0.4, lean.z * 0.6), top], 0.36, 0.17, 8, 5));
     const nb = 4 + Math.floor(R() * 3), ends = [];
     for (let b = 0; b < nb; b++) {
@@ -1998,7 +2004,9 @@ function loadModels() {
   return Promise.all(Object.entries(MODEL_DATA).map(([k, s]) => (/\.glb$/.test(s) ? fetch(s).then(r => { if (!r.ok) throw new Error('model ' + s + ' ' + r.status); return r.arrayBuffer(); }) : Promise.resolve(b64(s))).then(buf => new Promise((res, rej) => loader.parse(buf, '', g => { g.scene.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; if (VEHICLE_MODELS.includes(k)) { o.material.side = THREE.FrontSide; if (o.material.name === 'glass') { o.material.transparent = true; o.material.opacity = 0.35; o.material.depthWrite = false; } } } }); MODELS[k] = g.scene; res(); }, rej)))));
 }
 const PL = { x: 0, z: 0, y: 0, rot: 0, speed: 0, mesh: null, parts: {}, ph: 0, veh: null, onPier: false };
-const CAM = { mode: 'third', fpPitch: 0, fpLook: 0, lastDrag: -9, yaw: 0, pitch: 0.24, dist: 5.2, distT: 5.2, target: new THREE.Vector3(), drag: false };
+const CAM = { mode: 'third', fpPitch: 0, fpLook: 0, lastDrag: -9, yaw: 0, pitch: 0.34, dist: 5.2, distT: 5.2, target: new THREE.Vector3(), drag: false,
+  FOV: 42, FOV1: 62, K: 1.35 };   // a longer lens from further back (diorama-like, less distortion); K keeps every old distance's framing
+CAM.fov = function (f) { if (Math.abs(camera.fov - f) > 0.01) { camera.fov = f; camera.updateProjectionMatrix(); } };
 function wheelsOf(m) { const w = partsOf(m, ['wheelFL', 'wheelFR', 'wheelRL', 'wheelRR']); for (const k in w) if (w[k]) { w[k].rotation.order = 'YXZ'; w[k].userData.r = Math.max(0.2, w[k].position.y); } return w; }
 function partsOf(root, names) { const p = {}; names.forEach(n => p[n] = root.getObjectByName(n)); return p; }
 function spawnPlayer(scene) {
@@ -2136,7 +2144,7 @@ function updateVehicles(dt, locked) {
     else { PL.mesh.visible = true; PL.mesh.position.set(v.x + s * 0.4 + c * 0.0, v.mesh.position.y + 0.85, v.z + c * 0.4); PL.mesh.scale.setScalar(1); PL.mesh.rotation.y = v.rot; animateHero(dt, 0); PL.parts.upperArmL.rotation.x = PL.parts.upperArmR.rotation.x = -0.9; }
   }
 }
-function setViewMode(m) { CAM.mode = m; CAM.snap = true; CAM.fpPitch = 0; CAM.fpLook = 0; if (m === 'third') { CAM.yaw = (PL.veh ? PL.veh.rot : PL.rot) + Math.PI; CAM.pitch = 0.24; CAM.target.set(PL.x, PL.y + 1.05, PL.z); } UI.viewMode(m); }
+function setViewMode(m) { CAM.mode = m; CAM.snap = true; CAM.fpPitch = 0; CAM.fpLook = 0; if (m === 'third') { CAM.yaw = (PL.veh ? PL.veh.rot : PL.rot) + Math.PI; CAM.pitch = 0.34; CAM.target.set(PL.x, PL.y + 1.05, PL.z); } UI.viewMode(m); }
 function hitsAnyBld(x, z) { return collidersNear(x, z).some(c => !c.off && c.kind === 'bld' && hitsCollider(c, x, z, 0.3)); }
 function nearVehicle() { let best = null, bd = 4.2; for (const v of VEH) { const d = Math.hypot(v.x - PL.x, v.z - PL.z) - (v.kind === 'boat' ? 2.5 : 0); if (d < bd) { bd = d; best = v; } } return best; }
 function toggleVehicle() {
@@ -2159,7 +2167,7 @@ function toggleVehicle() {
   PL.veh = v; v.v = 0; CAM.distT = VSPEC[v.kind].cam; return true;
 }
 function updateCamera(dt) {
-  const now = performance.now() / 1000;
+  const now = performance.now() / 1000; CAM.fov(CAM.mode === 'first' ? CAM.FOV1 : CAM.FOV);
   if (CAM.mode === 'first') {
     let eye, yaw;
     if (PL.veh) {
@@ -2177,22 +2185,44 @@ function updateCamera(dt) {
   const free = now - CAM.lastDrag > 1.5 && !CAM.drag && !(typeof EDIT !== 'undefined' && EDIT.on);
   if (PL.veh && free) CAM.yaw = angLerp(CAM.yaw, PL.veh.rot + Math.PI, Math.min(1, dt * 2.2));
   else if (!PL.veh && free && PL.speed > 0.3) {
-    // swing gently behind the walking direction (not when walking toward the camera)
-    const d = angDiff(PL.rot + Math.PI, CAM.yaw);
-    if (Math.abs(d) < 2.5) CAM.yaw += d * Math.min(1, dt * 1.6 * Math.min(1, PL.speed / 2.2));
-    CAM.pitch = lerp(CAM.pitch, 0.24, Math.min(1, dt * 0.8));
+    // on foot the camera does not swing around by itself: the controls are relative to the camera, so turning it behind a
+    // sideways walk turned the walk again and you went round in circles (that was the "ぐわんぐわん"). Only the tilt settles back.
+    CAM.pitch = lerp(CAM.pitch, 0.34, Math.min(1, dt * 0.5));
   }
   if (KEYS.KeyQ) { CAM.yaw += dt * 1.8; CAM.lastDrag = now; } if (KEYS.KeyE && !PL.veh) { CAM.yaw -= dt * 1.8; CAM.lastDrag = now; }
   CAM.dist = lerp(CAM.dist, CAM.distT, Math.min(1, dt * 4));
-  CAM.target.lerp(focus, Math.min(1, dt * 10));
-  const cp = Math.cos(CAM.pitch), pos = new THREE.Vector3(CAM.target.x + Math.sin(CAM.yaw) * cp * CAM.dist, CAM.target.y + Math.sin(CAM.pitch) * CAM.dist, CAM.target.z + Math.cos(CAM.yaw) * cp * CAM.dist);
-  // keep the camera out of buildings and the ground
-  const dir = pos.clone().sub(CAM.target), full = dir.length(); dir.normalize(); let L = full;
-  for (let t = 0.8; t < full; t += 0.4) { const p = CAM.target.clone().addScaledVector(dir, t); let hit = false;
-    for (const c of collidersNear(p.x, p.z)) { if (c.r !== undefined || p.y - groundH(p.x, p.z) > 9) continue; const [qx, qz] = pushOut(p.x, p.z, 0.05); if (Math.hypot(qx - p.x, qz - p.z) > 0.001) { hit = true; break; } }
-    if (hit) { L = Math.max(1.2, t - 0.4); break; } }
-  CAM.len = lerp(CAM.len || L, L, L < (CAM.len || L) ? 1 : Math.min(1, dt * 3)); pos.copy(CAM.target).addScaledVector(dir, CAM.len);
-  const gy = Math.max(groundH(pos.x, pos.z), 0) + 0.6; if (pos.y < gy) pos.y = gy;
+  // follow: close behind sideways, softly up and down (steps and rough ground no longer bob the whole view)
+  if (CAM.snap || CAM.target.distanceToSquared(focus) > 400) { CAM.target.copy(focus); CAM.lift = 0; CAM.len = 0; CAM.snap = false; }
+  else { const kx = Math.min(1, dt * 12), dy = focus.y - CAM.target.y, ky = Math.min(1, dt * (Math.abs(dy) > 1.5 ? 9 : PL.veh ? 6 : 3.5));
+    CAM.target.x += (focus.x - CAM.target.x) * kx; CAM.target.z += (focus.z - CAM.target.z) * kx; CAM.target.y += dy * ky; }
+  const T = CAM.target, full = CAM.dist * CAM.K, minL = Math.min(full, 2.6);
+  // walls of buildings: tilt up a little to look over them (smoothly, let go after a moment) and pull in, but never closer than
+  // 2.6 m: what is still in the way (a wall, an eave, leaves) is cut out around you in the shader instead (see.js).
+  // Low walls and fences only count near the ground; trees and posts don't count.
+  const crowns = typeof SEE !== 'undefined' && SEE.crownsAt && SEE.grid && !PL.veh;
+  const freeLen = (pitch, trees) => { const cp = Math.cos(pitch), dx = Math.sin(CAM.yaw) * cp, dy = Math.sin(pitch), dz = Math.cos(CAM.yaw) * cp;
+    for (let t = 0.8; t < full; t += 0.4) { const px = T.x + dx * t, py = T.y + dy * t, pz = T.z + dz * t, hy = py - groundH(px, pz); if (hy > 9) continue;
+      for (const c of collidersNear(px, pz)) { if (c.off || c.r !== undefined) continue; if (hy > 1.4 && Math.min(c.hw || 0, c.hd || 0) < 0.25) continue;
+        const cs = Math.cos(c.rot || 0), sn = Math.sin(c.rot || 0), lx = (px - c.x) * cs - (pz - c.z) * sn, lz = (px - c.x) * sn + (pz - c.z) * cs; if (Math.abs(lx) < c.hw + 0.05 && Math.abs(lz) < c.hd + 0.05) return Math.max(minL, t - 0.4); }
+      // in a wood: stop short of the leaf crowns overhead (the crown you are still in is cut out in the shader)
+      if (trees && t > 2.2 && SEE.crownsAt(px, py, pz, 0.95).length) return Math.max(minL, t - 0.4); }
+    return full; };
+  CAM.pb = CAM.pb || 0; CAM.pbHold = Math.max(0, (CAM.pbHold || 0) - dt); let pbT = 0;
+  if (!PL.veh && full > 2.5 && freeLen(CAM.pitch) < full * 0.9) { pbT = 0.35; for (const b of [0.15, 0.25]) if (freeLen(Math.min(0.85, CAM.pitch + b)) >= full * 0.85) { pbT = b; break; } pbT = Math.min(pbT, Math.max(0, 0.85 - CAM.pitch)); CAM.pbHold = 0.8; }
+  else if (CAM.pbHold > 0) pbT = CAM.pb;
+  CAM.pb = lerp(CAM.pb, pbT, Math.min(1, dt * (pbT > CAM.pb ? 3.5 : 1.2)));
+  const pitch = CAM.pitch + CAM.pb, cp = Math.cos(pitch), dir = new THREE.Vector3(Math.sin(CAM.yaw) * cp, Math.sin(pitch), Math.cos(CAM.yaw) * cp);
+  let L = freeLen(pitch, crowns);
+  // come back out only once it has stayed clear for a moment (walking under trees made the distance breathe)
+  if (CAM.len && L > CAM.len + 0.3) { CAM.outT = (CAM.outT || 0) + dt; if (CAM.outT < 0.9) L = CAM.len; } else CAM.outT = 0;
+  CAM.len = !CAM.len ? L : lerp(CAM.len, L, Math.min(1, dt * (L < CAM.len ? 6 : 1.6)));
+  const pos = T.clone().addScaledVector(dir, CAM.len);
+  // ground behind you (a slope, a bank): lift the camera smoothly instead of jumping to the ground every frame
+  const sea = typeof SEA !== 'undefined' && SEA.h !== undefined ? SEA.h : 0; let need = 0;
+  for (const f of [0.5, 0.75, 1, 1.2]) { const t = CAM.len * f, px = T.x + dir.x * t, pz = T.z + dir.z * t; need = Math.max(need, Math.max(groundH(px, pz), sea) + 0.75 - (T.y + dir.y * t)); }
+  CAM.lift = CAM.lift || 0; CAM.lift = lerp(CAM.lift, need, Math.min(1, dt * (need > CAM.lift ? 5 : 1.4)));
+  pos.y += Math.max(0, CAM.lift);
+  const gy = Math.max(groundH(pos.x, pos.z), sea) + 0.35; if (pos.y < gy) pos.y = gy;
   camera.position.copy(pos); camera.lookAt(CAM.target);
 }
 // ---------- effects ----------
@@ -8783,7 +8813,7 @@ FSH.updatePanel = function () {
 { const _ok2 = GAME.onKey; GAME.onKey = function (e) { if (!e.repeat && e.code === 'KeyT' && this.p && !this.modal && !EDIT.on && !PL.veh && !LIFE.fish && FSH.holdKg() > 0.05) { const S = DECO.ship, H = this.LM.harbor; if ((S && Math.hypot(PL.x - S.x, PL.z - S.z) < 12) || (H && Math.hypot(PL.x - H.x, PL.z - H.z) < 60)) { FSH.openLanding(true); return true; } } return _ok2.apply(this, arguments); }; }
 { const _p2 = GAME.prompt; GAME.prompt = function () { if (this.p && !PL.veh && !this.modal && this.nearShip && this.nearShip() && FSH.holdKg() > 0.05) return `Space：出荷所　T：網の魚を水揚げ（魚倉 ${FSH.holdKg().toFixed(0)}kg）`; return _p2.apply(this, arguments); }; }
 // version label so you can tell whether the page has updated
-const GAME_VER = '39（10/26）';
+const GAME_VER = '40（10/26）';
 { const v = document.createElement('div'); v.id = 'verTag'; v.textContent = 'ver.' + GAME_VER; v.style.cssText = 'position:fixed;left:6px;bottom:4px;z-index:5;font-size:10px;color:rgba(255,255,255,.75);text-shadow:0 1px 2px rgba(0,0,0,.6);pointer-events:none;font-family:sans-serif'; document.body.appendChild(v); }
 
 // ===================== 島の収益: 建物ごとに1時間あたりの売上が入りつづける（留守のあいだも最大24時間分） =====================
@@ -9498,7 +9528,7 @@ CTRY.findPaddies = function () {
   return out;
 };
 CTRY.paddyMats = function () { if (CTRY.M) return CTRY.M; const M = CTRY.M = {};
-  M.mud = stdM('#6a5338', 0.95); M.mudDry = stdM('#8a7050', 0.95); M.ridge = worldMat(TEX.dirt, 0.5, '#8a7a5a', 1);
+  M.mud = stdM('#6a5338', 0.95); M.mudDry = stdM('#8a7050', 0.95); M.ridge = worldMat(TEX.grass || TEX.dirt, 0.45, '#a3a37a', 1);   // 畦: grassy banks (they read as dark mud walls before)
   M.water = new THREE.MeshStandardMaterial({ color: '#7aa8b8', roughness: 0.05, metalness: 0.35, transparent: true, opacity: 0.82 });
   M.rice = { water: stdM('#7ab84a', 0.8, 0, { side: THREE.DoubleSide }), green: stdM('#5f9a32', 0.8, 0, { side: THREE.DoubleSide }), gold: stdM('#d8b040', 0.75, 0, { side: THREE.DoubleSide }), hazakake: stdM('#a8905a', 0.9, 0, { side: THREE.DoubleSide }), fallow: stdM('#8a7a58', 0.9, 0, { side: THREE.DoubleSide }) };
   M.wood = stdM('#7a6248', 0.9); M.straw = stdM('#c8a860', 0.85); return M; };
@@ -9513,7 +9543,7 @@ CTRY.buildPaddies = function (g) {
     // the soil / water surface, and the grassy ridges (あぜ) all round
     const top = p.y; B(s, p.W, Math.max(0.2, top - p.base + 0.15), p.L, st === 'water' ? M.mud : M.mudDry, 0, (top + p.base - 0.15) / 2 - 0.02, 0);
     if (st === 'water') { const w = new THREE.Mesh(new THREE.PlaneGeometry(p.W - 0.5, p.L - 0.5), M.water); w.rotation.x = -Math.PI / 2; w.position.set(0, top + 0.03, 0); w.receiveShadow = true; s.add(w); }
-    { const rh = top - p.base + 0.28, rc = (top + 0.18 + p.base - 0.1) / 2; for (const sx of [-1, 1]) { B(s, 0.55, rh, p.L + 0.55, M.ridge, sx * (p.W / 2), rc, 0); B(s, p.W + 0.55, rh, 0.55, M.ridge, 0, rc, sx * (p.L / 2)); } }
+    { const rh = top - p.base + 0.2, rc = (top + 0.1 + p.base - 0.1) / 2; for (const sx of [-1, 1]) { B(s, 0.55, rh, p.L + 0.55, M.ridge, sx * (p.W / 2), rc, 0); B(s, p.W + 0.55, rh, 0.55, M.ridge, 0, rc, sx * (p.L / 2)); } }
     // rice in rows
     const c = Math.cos(p.rot), sn = Math.sin(p.rot);
     for (let a = -p.W / 2 + 0.6; a <= p.W / 2 - 0.6 && n < MAXI; a += step) for (let b = -p.L / 2 + 0.6; b <= p.L / 2 - 0.6 && n < MAXI; b += step) { const x = p.x + a * c + b * sn, z = p.z - a * sn + b * c; D.position.set(x + (Math.random() - 0.5) * 0.04, top, z + (Math.random() - 0.5) * 0.04); D.rotation.set(0, Math.random() * 6.28, 0); const k = 0.85 + Math.random() * 0.3; D.scale.set(k, k * (st === 'gold' ? 0.9 + Math.random() * 0.2 : 1), k); D.updateMatrix(); im.setMatrixAt(n++, D.matrix); }
@@ -10117,7 +10147,7 @@ SHORE_ITEMS.push({ id: 'hoshizuna', name: '星の砂', st: 3, p: 700, kind: 'gla
 { const _u = GAME.update; GAME.update = function (dt) { const r = _u.apply(this, arguments); try { SEA.update(dt || 0.016); } catch (e) { if (!SEA._err) { SEA._err = 1; console.warn('tide', e); } } return r; }; }
 // the clock card shows the next tide turn
 { const _ck = UI.clock; UI.clock = function (hf) { _ck.apply(this, arguments); let el = document.getElementById('hTide'); if (!el) { const d = document.getElementById('hD'); if (!d) return; el = document.createElement('div'); el.id = 'hTide'; el.className = 'd'; d.after(el); }
-    if (!GAME.p) { el.textContent = ''; return; } const ev = SEA.events(SEA.nowMs() + 1800000, 14)[0]; el.textContent = `🌊 ${SEA.state()}${ev ? `　${ev.type} ${SEA.fmt(ev.ms)}` : ''}`; }; }
+    if (!GAME.p) { el.textContent = ''; return; } const mk = Math.floor(SEA.nowMs() / 60000); if (SEA._evK !== mk) { SEA._evK = mk; SEA._ev = SEA.events(SEA.nowMs() + 1800000, 14)[0]; } const ev = SEA._ev; el.textContent = `🌊 ${SEA.state()}${ev ? `　${ev.type} ${SEA.fmt(ev.ms)}` : ''}`; }; }
 
 // ===================== RARE: めずらしい出来事（記録される） =====================
 // 流れ星に願いごと（次の日、浜に「星のかけら」）・スナメリ・夜光虫の青い波・虹・朝霧の海（雲海）・渡り鳥の群れ・満月の「月の道」・台風一過
@@ -10774,26 +10804,31 @@ PERF.cull = function (now) {
 // 2) when a building or a parked car is in the way it rises over it instead of collapsing onto the back of your head
 // 3) whatever still crosses the line of sight (a trunk, a crown edge) is cut out in a narrow tube around that line:
 //    clear in the middle, a thin dithered rim. Shadows are untouched (they use their own depth material).
-const SEE = { p: { value: new THREE.Vector3() }, on: { value: 0 }, mats: new Set(), adj: new THREE.Vector3(), grid: null, sig: '' };
-SEE.patch = function (m) {
+const SEE = { p: { value: new THREE.Vector3() }, on: { value: 0 }, crC: { value: [new THREE.Vector4(0, -999, 0, 0), new THREE.Vector4(0, -999, 0, 0)] }, crV: { value: [1, 1] }, mats: new Set(), adj: new THREE.Vector3(), grid: null, sig: '' };
+SEE.patch = function (m, near = 2.6, crown = false) {
   if (!m || SEE.mats.has(m) || !m.isMeshStandardMaterial) return; SEE.mats.add(m);
-  const prev = m.onBeforeCompile;
+  const prev = m.onBeforeCompile, base = THREE.Material.prototype.customProgramCacheKey, own = m.customProgramCacheKey !== base ? m.customProgramCacheKey.bind(m) : null, prevSrc = prev ? prev.toString() : '';
+  // the program cache key must still tell materials with different shader tweaks apart (three.js keys custom shaders by the
+  // source of onBeforeCompile, and this wrapper's source is the same for every material it wraps)
+  m.customProgramCacheKey = () => 'see|' + (crown ? 'cr|' : '') + prevSrc + '|' + (own ? own() : '');
   m.onBeforeCompile = (sh, r) => {
     if (prev) prev(sh, r);
-    sh.uniforms.uSeeP = SEE.p; sh.uniforms.uSeeOn = SEE.on;
+    sh.uniforms.uSeeP = SEE.p; sh.uniforms.uSeeOn = SEE.on; sh.uniforms.uSeeNear = { value: near }; if (crown) { sh.uniforms.uCrC = SEE.crC; sh.uniforms.uCrV = SEE.crV; }
     sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vSeeW;').replace('#include <project_vertex>', `#include <project_vertex>
       #ifdef USE_INSTANCING
         vSeeW = (modelMatrix * instanceMatrix * vec4(transformed, 1.0)).xyz;
       #else
         vSeeW = (modelMatrix * vec4(transformed, 1.0)).xyz;
       #endif`);
-    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vSeeW; uniform vec3 uSeeP; uniform float uSeeOn;').replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>
+    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vSeeW; uniform vec3 uSeeP; uniform float uSeeOn; uniform float uSeeNear;' + (crown ? ' uniform vec4 uCrC[2]; uniform float uCrV[2];' : '')).replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>
       if (uSeeOn > 0.5) {
         vec3 ab = uSeeP - cameraPosition; float L2 = max(dot(ab, ab), 1e-4);
         float t = clamp(dot(vSeeW - cameraPosition, ab) / L2, 0.0, 1.0);
         float pd = length(vSeeW - (cameraPosition + ab * t)), rr = mix(0.55, 1.25, t);
         float k = smoothstep(rr, rr * 0.72, pd) * smoothstep(0.97, 0.86, t);
-        k = max(k, smoothstep(0.9, 0.45, length(vSeeW - cameraPosition)));
+        k = max(k, smoothstep(uSeeNear, uSeeNear * 0.46, length(vSeeW - cameraPosition)));   // things right around the camera fade out (trees: 2.6 m, the camera no longer dodges crowns; buildings: 1 m)
+        ${crown ? `// the crown the camera is in disappears (instead of the camera dodging it)
+        for (int i = 0; i < 2; i++) { vec4 c = uCrC[i]; if (c.w > 0.0) { vec3 d = vSeeW - c.xyz; float q = (d.x * d.x + d.z * d.z) / (c.w * c.w) + d.y * d.y / (uCrV[i] * uCrV[i]); k = max(k, smoothstep(1.0, 0.82, q)); } }` : ''}
         float ign = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
         if (ign < k) discard;
       }`);
@@ -10801,12 +10836,12 @@ SEE.patch = function (m) {
   m.needsUpdate = true;
 };
 SEE.patchTrees = function () {
-  for (const st of VEG.sets || []) if (st.kind === 'tree') SEE.patch(st.mesh.material);
-  for (const k in VEG.userSets || {}) for (const st of VEG.userSets[k] || []) st && st.mesh && SEE.patch(st.mesh.material);
+  for (const st of VEG.sets || []) if (st.kind === 'tree') SEE.patch(st.mesh.material, 2.6, true);
+  for (const k in VEG.userSets || {}) for (const st of VEG.userSets[k] || []) st && st.mesh && SEE.patch(st.mesh.material, 2.6, true);
 };
 { const _b = buildVegetation; buildVegetation = function () { const r = _b.apply(this, arguments); try { SEE.patchTrees(); } catch (e) { console.warn('see', e); } return r; }; }
 // ---------- tree crowns (rough ellipsoids per kind, scaled like the instances) ----------
-SEE.CROWN = { broad: [5.7, 3.9, 3.0], pine: [6.2, 2.7, 2.6], sakura: [4.6, 3.6, 2.4], palm: [6.6, 2.8, 1.5], bamboo: [5.2, 1.6, 4.0], mikan: [1.9, 1.5, 1.3] };
+SEE.CROWN = { momiji: [4.4, 3.2, 2.3], broad: [6.5, 3.9, 3.0], pine: [6.2, 2.7, 2.6], sakura: [4.6, 3.6, 2.4], palm: [6.6, 2.8, 1.5], bamboo: [5.2, 1.6, 4.0], mikan: [1.9, 1.5, 1.3] };
 SEE.scaleOf = (it) => it.kind === 'mikan' ? 0.9 + it.r * 0.2 : it.kind === 'sakura' ? 1.15 + it.r * 0.35 : it.kind === 'bamboo' || it.kind === 'palm' ? 0.9 + it.r * 0.25 : 0.8 + it.r * 0.45;
 SEE.buildGrid = function () {
   const g = new Map(), add = (it) => { if (!SEE.CROWN[it.kind]) return; const k = Math.floor(it.x / 8) + ',' + Math.floor(it.z / 8); (g.get(k) || g.set(k, []).get(k)).push(it); };
@@ -10844,25 +10879,46 @@ SEE.fix = function (dt) {
       const L = SEE.freeLen(T, dir, full); if (!best || L > best.L + 0.3) best = { L, dir }; if (L >= full * 0.82) break; }
     if (best && best.L > d0 + 0.4) want.copy(T).addScaledVector(best.dir, Math.min(best.L, full));
   }
-  // b. out of tree crowns: under the crown if there is room, otherwise closer
-  const hit = SEE.inCrown(want.x, want.y, want.z, 1.05);
-  if (hit) {
-    const low = hit.bottom - 0.35, gy = Math.max(groundH(want.x, want.z), 0) + 0.6;
-    if (low > Math.max(gy, T.y - 0.25)) want.y = low;
-    else { const dir = want.clone().sub(T), L = dir.length(); dir.normalize(); let lo = 1.3, hi = L; for (let k = 0; k < 7; k++) { const m = (lo + hi) / 2, p = T.clone().addScaledVector(dir, m); if (SEE.inCrown(p.x, p.y, p.z, 1.05)) hi = m; else lo = m; } want.copy(T).addScaledVector(dir, lo); }
-  }
-  const delta = want.sub(cam), k = Math.min(1, dt * 7);
-  SEE.adj.lerp(delta, delta.lengthSq() > SEE.adj.lengthSq() ? Math.min(1, dt * 12) : k);
+  // (tree crowns: the camera used to drop under them or jump closer, which shook the view in every wood; now the leaves
+  //  around the camera simply fade out in the shader, so the camera stays where it is)
+  const delta = want.sub(cam), k = Math.min(1, dt * 3);
+  SEE.adj.lerp(delta, delta.lengthSq() > SEE.adj.lengthSq() ? Math.min(1, dt * 6) : k);
   if (SEE.adj.lengthSq() > 1e-6) { camera.position.add(SEE.adj); camera.lookAt(T); }
+};
+// rising over buildings now happens in updateCamera itself (tilt up first, smoothly); SEE.fix stays for debugging only
+SEE.noFix = true;
+SEE.crownsAt = function (x, y, z, pad = 1.12) {
+  const out = []; if (!SEE.grid) return out; const cx = Math.floor(x / 8), cz = Math.floor(z / 8);
+  for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) for (const it of SEE.grid.get((cx + a) + ',' + (cz + b)) || []) {
+    const C = SEE.CROWN[it.kind], s = SEE.scaleOf(it), g = groundH(it.x, it.z), rh = C[1] * s * pad, rv = C[2] * s * pad, cy = g + C[0] * s;
+    const q = ((x - it.x) ** 2 + (z - it.z) ** 2) / (rh * rh) + ((y - cy) ** 2) / (rv * rv); if (q < 1) out.push({ x: it.x, y: cy, z: it.z, rh: rh * 1.08, rv: rv * 1.08, q }); }
+  return out.sort((a, b) => a.q - b.q);
+};
+SEE.crownUpdate = function () {
+  const now = performance.now();
+  if (!SEE.grid || now - (SEE.sigT || 0) > 1500) { SEE.sigT = now; const sig = ((VEG.items || []).length) + ':' + (VEG.removed ? VEG.removed.reduce((a, b) => a + b, 0) : 0) + ':' + (VEG.userTrees || []).length; if (sig !== SEE.sig) { SEE.sig = sig; SEE.buildGrid(); } }
+  const cp = camera.position, L = SEE.crownsAt(cp.x, cp.y, cp.z);
+  for (let i = 0; i < 2; i++) { const c = L[i], v = SEE.crC.value[i]; if (c) { v.set(c.x, c.y, c.z, c.rh); SEE.crV.value[i] = c.rv; } else v.w = 0; }
 };
 { const _u = updateCamera; updateCamera = function (dt) { const r = _u.apply(this, arguments);
   const on = !SEE.disabled && CAM.mode === 'third' && !GAME.inside && !window.__freecam && GAME.modal !== 'title' && !(GAME.camOverride && GAME.camOverride());
   if (on) {
-    const now = performance.now();
-    if (!SEE.grid || now - (SEE.sigT || 0) > 1500) { SEE.sigT = now; const sig = ((VEG.items || []).length) + ':' + (VEG.removed ? VEG.removed.reduce((a, b) => a + b, 0) : 0) + ':' + (VEG.userTrees || []).length; if (sig !== SEE.sig) { SEE.sig = sig; SEE.buildGrid(); } }
     if (!SEE.noFix) try { SEE.fix(dt || 0.016); } catch (e) { }
+    try { SEE.crownUpdate(); } catch (e) { }
   } else SEE.adj.set(0, 0, 0);
   SEE.on.value = on ? 1 : 0; if (on) SEE.p.value.copy(CAM.target); return r; }; }
+
+// ---------- walls, eaves, fences, cars… between the camera and you are cut out the same way (the camera no longer hugs walls) ----------
+SEE.skip = new Set();
+SEE.patchWorld = function () {
+  const skip = new Set(); if (typeof TERR !== 'undefined') { if (TERR.mat) skip.add(TERR.mat); } if (typeof waterMat !== 'undefined' && waterMat) skip.add(waterMat);
+  const noRoot = []; if (typeof TERR !== 'undefined' && TERR.roadGroup) noRoot.push(TERR.roadGroup); if (PL.mesh) noRoot.push(PL.mesh); if (typeof FLORA !== 'undefined' && FLORA.group) noRoot.push(FLORA.group);
+  // not the ground, roads, small plants, and no people (their materials are shared with you: you must never fade)
+  const isUnder = o => { for (let p = o; p; p = p.parent) if (noRoot.includes(p) || (p.userData && p.userData.chr)) return true; return false; };
+  let n = 0; scene.traverse(o => { if (!o.isMesh || !o.material) return; const ms = Array.isArray(o.material) ? o.material : [o.material];
+    for (const m of ms) { if (!m.isMeshStandardMaterial || SEE.mats.has(m) || skip.has(m) || SEE.skip.has(m)) continue; if (isUnder(o)) { SEE.skip.add(m); continue; } SEE.patch(m, 1.0); n++; } });
+  SEE.worldN = (SEE.worldN || 0) + n; return n;
+};
 
 // ===================== 秋の道ばた: ススキ・コスモス・彼岸花（季節で出たり消えたり） =====================
 // 彼岸花: 田んぼのあぜと道ばたに、お彼岸のころ（9/12〜10/5）だけ真っ赤に。
@@ -10966,7 +11022,10 @@ FLORA.build = function () {
   FLORA.mats.plume.emissive = new THREE.Color('#2a2418');
   FLORA.items = FLORA.place();
   const by = { susuki: [[], []], cosmos: [[], []], higan: [[], []] }; for (const it of FLORA.items) by[it.type][it.v].push(it);
-  const mk = (geo, m, list) => { const im = new THREE.InstancedMesh(geo, m, Math.max(1, list.length)); im.receiveShadow = true; im.castShadow = false; im.frustumCulled = false; im.userData.list = list; g.add(im); return im; };
+  // one mesh per 96 m block (they used to be one mesh each for the whole island, drawn every frame wherever you looked)
+  FLORA.chunks = [];
+  const mk = (geo, m, list) => { const cells = new Map(); for (const it of list) { const k = Math.floor(it.x / 96) + ',' + Math.floor(it.z / 96); if (!cells.has(k)) cells.set(k, []); cells.get(k).push(it); }
+    return [...cells.values()].map(cl => { const im = new THREE.InstancedMesh(geo, m, Math.max(1, cl.length)); im.receiveShadow = true; im.castShadow = false; im.frustumCulled = true; im.userData.list = cl; g.add(im); FLORA.chunks.push(im); return im; }); };
   for (const v of [0, 1]) { const S = FLORA.geoSusuki(101 + v); FLORA.sets['susuki' + v] = [mk(S.leaf, FLORA.mats.leaf, by.susuki[v]), mk(S.plume, FLORA.mats.plume, by.susuki[v])];
     FLORA.sets['cosmos' + v] = [mk(FLORA.geoCosmos(201 + v), FLORA.mats.cosmos, by.cosmos[v])]; FLORA.sets['higan' + v] = [mk(FLORA.geoHigan(301 + v), FLORA.mats.higan, by.higan[v])]; }
   FLORA.refresh(true);
@@ -10976,21 +11035,24 @@ FLORA.refresh = function () {
   FLORA.key = W.key; let shown = 0;
   // the season's colours: green leaves in summer, golden in late autumn
   const dry = W.dry; FLORA.mats.leaf.color.set(dry ? '#c9b27a' : '#ffffff'); FLORA.mats.plume.color.set(dry ? '#c7bba0' : '#ffffff');
-  for (const k in FLORA.sets) for (const [idx, im] of FLORA.sets[k].entries()) {
+  for (const k in FLORA.sets) for (const [idx, ims] of FLORA.sets[k].entries()) for (const im of ims) {
     const list = im.userData.list, type = k.replace(/\d$/, ''), on = type === 'susuki' ? (idx === 0 ? W.susuki : W.plume) : W[type];
     let n = 0;
     for (const it of list) {
       const ok = on && roadDistAt(it.x, it.z) >= 2.2 && waterDepthAt(it.x, it.z) <= 0.05 && Math.abs(groundH(it.x, it.z) - it.y) < 0.35;
       if (!ok) continue; e.set(0, it.r, 0); q.setFromEuler(e); v.set(it.x, groundH(it.x, it.z) - 0.03, it.z); sc.setScalar(it.s * (type === 'susuki' ? 1.15 : 1)); m4.compose(v, q, sc); im.setMatrixAt(n++, m4);
     }
-    im.count = n; im.instanceMatrix.needsUpdate = true; im.visible = n > 0; shown += n;
+    im.count = n; im.instanceMatrix.needsUpdate = true; im.userData.has = n > 0; im.visible = n > 0; shown += n; if (n) { im.computeBoundingSphere(); im.boundingSphere.radius += 2; }
   }
   FLORA.shown = shown;
 };
 { const _b = GAME.begin; GAME.begin = function () { const r = _b.apply(this, arguments); try { FLORA.build(); FLORA.refresh(); } catch (e) { console.warn('flora', e); } return r; }; }
 { const _s = scheduleSave; scheduleSave = function () { FLORA.dirty = true; FLORA.chkT = 1.5; return _s.apply(this, arguments); }; }
 { const _u = updateStructures; updateStructures = function (t, night) { const r = _u.apply(this, arguments);
-  const now = performance.now(); if (FLORA.built && now - (FLORA._t || 0) > 2000) { FLORA._t = now; if (FLORA.dirty && !EDIT.on) { FLORA.dirty = false; FLORA.refresh(); } else if (FLORA.when().key !== FLORA.key) FLORA.refresh(); }
+  const now = performance.now();
+  // small plants far away are a few pixels in the haze: skip the blocks beyond ~140 m
+  if (FLORA.built && FLORA.chunks && now - (FLORA._ct || 0) > 400) { FLORA._ct = now; const cp = camera.position; for (const im of FLORA.chunks) { const b = im.boundingSphere; im.visible = !!im.userData.has && !!b && Math.hypot(b.center.x - cp.x, b.center.z - cp.z) - b.radius < 140; } }
+  if (FLORA.built && now - (FLORA._t || 0) > 2000) { FLORA._t = now; if (FLORA.dirty && !EDIT.on) { FLORA.dirty = false; FLORA.refresh(); } else if (FLORA.when().key !== FLORA.key) FLORA.refresh(); }
   return r; }; }
 
 // ===================== 紅葉: 木ごとに色がちがう（常緑樹は緑のまま、落葉樹が少しずつ色づく） =====================
@@ -11005,7 +11067,7 @@ KOYO.col = function (it, doy, out) {
   out.setRGB(0.9 + a * 0.16, 0.9 + b * 0.14, 0.86 + c * 0.16);
   if (it.kind === 'momiji') { if (doy >= 288 && doy <= 350) out.g *= 0.72 + b * 0.42; return out; } // maples: some redder, some more orange than their neighbours
   if (it.kind !== 'broad' || a > 0.4) return out;
-  const start = 293 + Math.floor(b * 26), peak = start + 16 + Math.floor(c * 8), brown = peak + 18; // day-of-year: from ~10/20
+  const start = 285 + Math.floor(b * 28), peak = start + 16 + Math.floor(c * 8), brown = peak + 20; // day-of-year: from ~10/12 (a game's autumn shows a little early)
   const d = doy < 90 ? doy + 365 : doy;
   let k = d < start ? 0 : d < peak ? (d - start) / (peak - start) : 1; k = k * k * (3 - 2 * k);
   const T = c < 0.4 ? [1.55, 1.08, 0.32] : c < 0.75 ? [1.6, 0.78, 0.3] : [1.62, 0.45, 0.3];
@@ -11023,6 +11085,85 @@ KOYO.apply = function (doy) {
 };
 // planted trees get their colours too
 { const _r = VEG.rebuildUser; if (_r) VEG.rebuildUser = function () { const r = _r.apply(this, arguments); try { if (KOYO.doy >= 0) { KOYO.sig = ''; KOYO.apply(KOYO.doy); } } catch (e) { } return r; }; }
+
+// ===================== 軽さ: 木のLOD（近くの木だけ細かく・影も近くだけ） =====================
+// Every tree used to be drawn at full detail (a broadleaf is ~3,000–5,000 triangles of leaf puffs) and every tree in a 144 m block
+// went into the shadow map too, even far outside the shadow area. On a wooded hill that was ~2 million triangles a frame.
+// Now three steps, decided by the distance from you:
+//   near  (< ~26 m)  full detail, casts shadows
+//   mid   (< ~55 m)  leaf puffs with a quarter of the triangles, casts shadows (the shadow map covers ~45 m around you)
+//   far              the same light puffs, a simple trunk without branches, no shadow
+const LOD = { on: true, T0: 24, T1: 28, R0: 52, R1: 58, ready: false, near: {}, mid: {}, items: [], cx: 1e9, cz: 1e9, t: 0, zero: new THREE.Matrix4().makeScale(0, 0, 0), sig: 's0', CAP: 420 };
+LOD.SEEDS = { broad: [100, 101, 102, 103], pine: [200, 201], mikan: [300], bush: [400, 401] };
+LOD.prep = gs => mergeGeometries(gs.map(g => { const c = g.index ? g.toNonIndexed() : g; if (c.attributes.color && !c.userData.keepColor) { } if (!c.attributes.uv) c.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(c.attributes.position.count * 2), 2)); return c; }));
+LOD.lowParts = function (kind, vi, detail = 1) {
+  const prev = VEG.clumpDetail; VEG.clumpDetail = detail;
+  try { const NAT = { sakura: typeof makeSakura === 'function' && makeSakura, momiji: typeof makeMomiji === 'function' && makeMomiji, bamboo: typeof makeBamboo === 'function' && makeBamboo, palm: typeof makePalm === 'function' && makePalm };
+    const V = LOD.SEEDS[kind] ? makeTreeVariant(kind, LOD.SEEDS[kind][vi]) : NAT[kind] ? NAT[kind](1000 + vi * 17 + kind.length * 101) : null; if (!V) return {};
+    const out = {}; if (V.clumps && V.clumps.length) out.clumps = LOD.prep(V.clumps);
+    // far trunk: only the main stem (branches are hidden under the leaves at a distance); bamboo and palms keep all their stems
+    if (V.bark && V.bark.length > 1 && kind !== 'bamboo' && kind !== 'palm') { const t = V.bark[0].index ? V.bark[0].toNonIndexed() : V.bark[0]; if (t.attributes.color) t.deleteAttribute('color'); if (!t.attributes.uv) t.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(t.attributes.position.count * 2), 2)); out.bark = mergeGeometries([t]); }
+    return out; }
+  finally { VEG.clumpDetail = prev; }
+};
+LOD.init = function () {
+  LOD.ready = false; if (!VEG.sets || !VEG.partGeos || !VEG.fmats) return;
+  const geoInfo = new Map();
+  for (const key in VEG.partGeos) VEG.partGeos[key].forEach(([geo, mat, shadow], j) => geoInfo.set(geo, { key, j, mat, shadow, fol: VEG.fmats[key] && mat === VEG.fmats[key].fol }));
+  const low = {};
+  for (const key in VEG.partGeos) { const kind = key.replace(/\d+$/, ''), vi = +key.slice(kind.length); if (LOD.SEEDS[kind] && LOD.SEEDS[kind][vi] === undefined) continue; try { low[key] = LOD.lowParts(kind, vi); const l0 = LOD.lowParts(kind, vi, 0); low[key].clumps0 = l0.clumps; } catch (e) { console.warn('lod low', key, e); } }
+  const lowFor = (key, j, fol) => { const L = low[key] || {}; return fol ? L.clumps : (j === 0 ? L.bark : null); };
+  // far blocks: light puffs and trunk, no shadows; remember where each tree sits in them
+  const items = new Set();
+  for (const st of VEG.sets) { if (st.kind !== 'tree') continue; const inf = geoInfo.get(st.mesh.geometry) || st.lodInfo; if (!inf) continue; st.lodInfo = inf;
+    const lg = lowFor(inf.key, inf.j, inf.fol); if (lg) st.mesh.geometry = lg; st.geo1 = st.mesh.geometry; st.geo0 = inf.fol && low[inf.key] && low[inf.key].clumps0 || null;
+    st.mesh.castShadow = false;
+    st.items.forEach((it, i) => { if (!it._far || it._farSig !== LOD.sig) { it._far = []; it._farSig = LOD.sig; } it._far.push([st, i]); it._key = inf.key; it._lod = 0; items.add(it); }); }
+  LOD.items = [...items]; LOD.farSets = VEG.sets.filter(st => st.kind === 'tree' && st.geo0);
+  for (const T of [LOD.near, LOD.mid]) for (const k in T) for (const m of T[k]) { m.parent && m.parent.remove(m); m.dispose && m.dispose(); }
+  LOD.near = {}; LOD.mid = {};
+  const mk = (geo, mat, shadow, key) => { const m = new THREE.InstancedMesh(geo, mat, LOD.CAP); m.count = 0; m.castShadow = shadow; m.receiveShadow = true; m.frustumCulled = false; m.userData.paint = VEG.fmats[key] && (mat === VEG.fmats[key].fol || mat === VEG.fmats[key].card); (VEG.group || scene).add(m); return m; };
+  for (const key in VEG.partGeos) {
+    LOD.near[key] = VEG.partGeos[key].map(([geo, mat, shadow]) => mk(geo, mat, shadow, key));
+    LOD.mid[key] = VEG.partGeos[key].map(([geo, mat, shadow], j) => { const fol = VEG.fmats[key] && mat === VEG.fmats[key].fol; return mk(fol && low[key] && low[key].clumps ? low[key].clumps : geo, mat, shadow, key); });
+  }
+  // give every leaf mesh its per-tree colour buffer from the start (adding it later changes the shader and costs a pause)
+  for (const st of VEG.sets) if (st.kind === 'tree' && !st.mesh.instanceColor && VEG.fmats[st.lodInfo && st.lodInfo.key] && (st.mesh.material === VEG.fmats[st.lodInfo.key].fol || st.mesh.material === VEG.fmats[st.lodInfo.key].card)) { const w = new THREE.Color('#ffffff'); for (let i = 0; i < st.mesh.instanceMatrix.count; i++) st.mesh.setColorAt(i, w); st.mesh.instanceColor.needsUpdate = true; }
+  for (const T of [LOD.near, LOD.mid]) for (const k in T) for (const m of T[k]) if (m.userData.paint && !m.instanceColor) { const w = new THREE.Color('#ffffff'); for (let i = 0; i < LOD.CAP; i++) m.setColorAt(i, w); }
+  LOD.cx = LOD.cz = 1e9; LOD.ready = true; LOD.update(true);
+};
+// a tree drawn by the near/mid meshes is hidden in its far block (VEG.refresh rewrites the far blocks: keep it hidden there)
+{ const _vm = vegMatrix; LOD.vm = _vm; vegMatrix = function (it, vis) { if (it && it._lod && LOD.ready) return LOD.zero; return _vm(it, vis); }; }
+LOD.update = function (force) {
+  if (!LOD.ready || !LOD.on) return; const px = PL.x, pz = PL.z, ksig = typeof KOYO !== 'undefined' ? KOYO.sig : '';
+  if (!force && Math.hypot(px - LOD.cx, pz - LOD.cz) < 2 && LOD.colSig === ksig) return;
+  LOD.cx = px; LOD.cz = pz; const q = v => v * v, A0 = q(LOD.T0), A1 = q(LOD.T1), B0 = q(LOD.R0), B1 = q(LOD.R1), lists = [{}, {}, {}], dirty = new Set(); let changed = !!force;
+  for (const it of LOD.items) {
+    const d = (it.x - px) ** 2 + (it.z - pz) ** 2, ok = !VEG.removed[it.id] && vegValid(it);
+    let want = !ok ? 0 : d < (it._lod === 2 ? A1 : A0) ? 2 : d < (it._lod >= 1 ? B1 : B0) ? 1 : 0;
+    while (want && lists[want][it._key] && lists[want][it._key].length >= LOD.CAP) want--;
+    if (want !== it._lod) { const wasFar = !it._lod; it._lod = want; changed = true; if (wasFar !== !want) { for (const [st, i] of it._far) { st.mesh.setMatrixAt(i, want ? LOD.zero : LOD.vm(it, ok)); dirty.add(st); } } }
+    if (want) (lists[want][it._key] = lists[want][it._key] || []).push(it);
+  }
+  for (const st of dirty) st.mesh.instanceMatrix.needsUpdate = true;
+  // far blocks wholly beyond ~100 m: the lightest puffs (a block is 144 m wide, so this is decided per block)
+  for (const st of LOD.farSets || []) { const dx = Math.max(st.x0 - 8 - px, 0, px - st.x1 - 8), dz = Math.max(st.z0 - 8 - pz, 0, pz - st.z1 - 8), g = Math.hypot(dx, dz) > 100 ? st.geo0 : st.geo1; if (g && st.mesh.geometry !== g) st.mesh.geometry = g; }
+  if (!changed && ksig === LOD.colSig) return; LOD.colSig = ksig;
+  const c = new THREE.Color(), paintOK = typeof KOYO !== 'undefined' && KOYO.doy >= 0 && typeof KOYO.col === 'function';
+  for (const [T, L] of [[LOD.near, lists[2]], [LOD.mid, lists[1]]]) for (const key in T) { const list = L[key] || [];
+    for (const m of T[key]) { const n = Math.min(list.length, LOD.CAP);
+      for (let i = 0; i < n; i++) { m.setMatrixAt(i, LOD.vm(list[i], true)); if (m.userData.paint) m.setColorAt(i, paintOK ? KOYO.col(list[i], KOYO.doy, c) : c.set('#ffffff')); }
+      m.count = n; m.instanceMatrix.needsUpdate = true; if (m.instanceColor) m.instanceColor.needsUpdate = true; } }
+  LOD.nearN = Object.values(lists[2]).reduce((a, l) => a + l.length, 0); LOD.midN = Object.values(lists[1]).reduce((a, l) => a + l.length, 0);
+};
+{ const _b = buildVegetation; buildVegetation = function () { const r = _b.apply(this, arguments); try { LOD.sig = 's' + Math.random(); LOD.init(); } catch (e) { console.warn('lod', e); } return r; }; }
+{ const _u = updateStructures; updateStructures = function (t, night) { const r = _u.apply(this, arguments); try { const now = performance.now(); if (now - LOD.t > 250) { LOD.t = now; LOD.update(); } } catch (e) { if (!LOD._err) { LOD._err = 1; console.warn('lod', e); } } return r; }; }
+// cutting / planting refreshes blocks: re-check the near trees there
+{ const _r = VEG.refresh; VEG.refresh = function () { const r = _r.apply(this, arguments); try { LOD.update(true); } catch (e) { } return r; }; }
+// ---------- 田んぼ・道ばたの小物: ~800 meshes → one mesh per material per 128 m block (they were all separate draw calls) ----------
+{ const _cb = CTRY.build; CTRY.build = function () { const r = _cb.apply(this, arguments);
+  try { const g = CTRY.group; if (g && g.parent) { g.updateMatrixWorld(true); g.traverse(o => { if (o.isSprite || o.isPoints) o.userData.keep = true; }); const m = mergeStatic(g); m.name = 'ctry'; scene.remove(g); scene.add(m); CTRY.group = m; CTRY.mergedN = m.children.length; } } catch (e) { console.warn('ctry merge', e); }
+  return r; }; }
 
 // ===================== 瀬戸内の海辺: 牡蠣いかだ と 消波ブロック =====================
 // 牡蠣いかだ: bamboo rafts on black and white floats, moored in groups off a quiet shore; they rise and fall with the tide.
@@ -11998,7 +12139,7 @@ HUD2.side = function () {
 { const _rt = GAME.renderTracker; GAME.renderTracker = function () { const r = _rt.apply(this, arguments); try { HUD2.side(); } catch (e) { } return r; }; }
 // the tracker sits right under the clock card, whatever height the clock card has (the tide line made it taller)
 HUD2.place = function () { const c = document.querySelector('#hud .card.clock'), s = GAME.el && GAME.el.side; if (!c || !s || c.offsetParent === null) return; const b = c.offsetTop + c.offsetHeight + 8; if (Math.abs((parseFloat(s.style.top) || 0) - b) > 1) s.style.top = b + 'px'; };
-{ const _c = UI.clock; UI.clock = function () { const r = _c.apply(this, arguments); try { HUD2.place(); } catch (e) { } return r; }; }
+{ const _c = UI.clock; UI.clock = function () { const r = _c.apply(this, arguments); try { const sig = ['hT', 'hD', 'hTide'].map(id => { const e = document.getElementById(id); return e ? e.textContent : ''; }).join('|') + '|' + innerWidth + 'x' + innerHeight + '|' + (GAME.el && GAME.el.side && GAME.el.side.className); if (sig !== HUD2._clk) { HUD2._clk = sig; HUD2.place(); } } catch (e) { } return r; }; }  // reading offsetTop forces a layout: only when something changed
 // ---------- the controls line disappears once you have played a while (⚙ → ❔ brings it back) ----------
 HUD2.helpTimer = function () {
   let seen = false; try { seen = localStorage.getItem('hoshinami.helpSeen') === '1'; } catch (e) { }
@@ -12010,6 +12151,44 @@ HUD2.helpTimer = function () {
 { const st = document.createElement('style'); st.textContent = `#hud .card.ctl{padding:8px 10px}#hud .ctlBar{display:flex;gap:6px;justify-content:flex-end}#hud .ctlBar button{border:none;border-radius:12px;padding:6px 12px;font-weight:800;font-size:13px;background:#fff;color:#2f4440;cursor:pointer;box-shadow:0 1px 0 rgba(0,0,0,.06)}#hud .ctlBar button:hover{background:#eef5ee}#hud .ctlMore{display:none;flex-direction:column;gap:6px;margin-top:6px}#hud .card.ctl.open .ctlMore{display:flex}
 #hud .gside .foldBtn{display:block;margin:6px 0 0 auto;border:none;background:none;color:#4a6a62;font-size:12px;font-weight:800;cursor:pointer;padding:2px 4px}#hud .gside .sum{font-size:13px;font-weight:800;color:#3a4f4a;margin:6px 0 2px;line-height:1.5}
 #hud .gside.compact>*:not(.money):not(.vit):not(.sum):not(.btns):not(.foldBtn){display:none!important}#hud .gside.compact{width:236px}`; document.head.appendChild(st); }
+
+// ===================== 止まらないように: シェーダーの下ごしらえ =====================
+// The first time a kind of object is drawn, the browser has to build its shader program and draw state; that took a
+// noticeable pause each time you reached a new place (the hill, the waterfall, the beach…). Right after the island is
+// built, everything is drawn once into the off-screen buffer — all objects, no culling, the sun's shadow covering the
+// whole island — so those pauses happen once while the game starts instead of while you walk.
+const WARM = { t: null, n: 0 };
+WARM.render = function () {
+  if (!renderer || !composer || !scene || !camera || GAME.inside) return;
+  try { SEE.patchWorld(); } catch (e) { console.warn('see world', e); }
+  const t0 = performance.now(), saved = [], sun = typeof SKY !== 'undefined' && SKY.sun, sc = sun && sun.shadow && sun.shadow.camera;
+  scene.traverse(o => { if (!(o.isMesh || o.isPoints || o.isLine || o.isSprite || o.isGroup)) return; const s = [o, o.visible, o.frustumCulled, o.layers.mask, o.isInstancedMesh ? o.count : -1]; saved.push(s);
+    o.visible = true; o.frustumCulled = false; o.layers.enable(0); if (o.isInstancedMesh && o.count === 0) o.count = 1; });
+  const sv = sc ? [sc.left, sc.right, sc.top, sc.bottom, sc.near, sc.far] : null;
+  const prevRT = renderer.getRenderTarget(), au = renderer.shadowMap.autoUpdate;
+  try {
+    if (sc) { sc.left = -420; sc.right = 420; sc.top = 420; sc.bottom = -420; sc.far = Math.max(sc.far, 900); sc.updateProjectionMatrix(); }
+    renderer.shadowMap.autoUpdate = true; renderer.shadowMap.needsUpdate = true;
+    renderer.setRenderTarget(composer.readBuffer); renderer.render(scene, camera);
+  } catch (e) { console.warn('warm', e); }
+  finally {
+    renderer.setRenderTarget(prevRT); renderer.shadowMap.autoUpdate = au; renderer.shadowMap.needsUpdate = true;
+    if (sc) { [sc.left, sc.right, sc.top, sc.bottom, sc.near, sc.far] = sv; sc.updateProjectionMatrix(); }
+    for (const [o, v, f, m, c] of saved) { o.visible = v; o.frustumCulled = f; o.layers.mask = m; if (c >= 0) o.count = c; }
+  }
+  WARM.n++; WARM.ms = Math.round(performance.now() - t0);
+};
+WARM.later = function (ms = 400) { clearTimeout(WARM.t); WARM.t = setTimeout(() => { if (window.__manual) return;
+  // the first time it takes a moment: say so, let the note paint, then do it
+  const first = !WARM.n; let el = null; if (first) { el = document.createElement('div'); el.className = 'warmNote'; el.textContent = '🌱 島のしたく中…'; el.style.cssText = 'position:fixed;left:50%;bottom:22%;transform:translateX(-50%);padding:8px 16px;border-radius:999px;background:rgba(40,52,44,.78);color:#fff;font:600 14px "M PLUS Rounded 1c",sans-serif;z-index:60;pointer-events:none'; document.body.appendChild(el); }
+  setTimeout(() => { try { WARM.render(); } catch (e) { } if (el) el.remove(); }, first ? 60 : 0); }, ms); };
+{ const _b = GAME.begin; GAME.begin = function () { const r = _b.apply(this, arguments); try { SEE.patchWorld(); } catch (e) { } WARM.later(600); return r; }; }
+{ const _rd = GAME.refreshDev; GAME.refreshDev = function () { const r = _rd.apply(this, arguments); if (GAME.p && WARM.n) WARM.later(800); return r; }; }
+
+// indoors, cut-scenes and the title keep the wider lens they were framed for
+{ const _ur = GAME.updateRoom; GAME.updateRoom = function () { CAM.fov(55); return _ur.apply(this, arguments); }; }
+{ const _co = GAME.camOverride; GAME.camOverride = function () { const r = _co.apply(this, arguments); if (r) CAM.fov(55); return r; }; }
+{ const _tc = GAME.titleCam; GAME.titleCam = function () { CAM.fov(55); return _tc.apply(this, arguments); }; }
 
 // ===================== MAIN =====================
 let renderer, scene, camera;

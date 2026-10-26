@@ -13,7 +13,7 @@ html,body{height:100%} body{margin:0;background:#9fcde8;overflow:hidden;font-fam
 :root{--ink:#22323a;--paper:#f6f8f3;--leaf:#3f8f5a;--sun:#f2a541;--gl:max(16px,env(safe-area-inset-left,0px));--gr:max(16px,env(safe-area-inset-right,0px))}
 #hud{position:fixed;inset:0;pointer-events:none}
 #hud .card{pointer-events:auto;background:rgba(246,248,243,.88);border-radius:16px;box-shadow:0 6px 18px rgba(10,30,40,.18);padding:10px 14px}
-#hud .clock{position:absolute;top:calc(14px + env(safe-area-inset-top,0px));left:var(--gl)}
+#hud .clock{position:absolute;top:calc(14px + env(safe-area-inset-top,0px));left:var(--gl);min-width:236px;box-sizing:border-box}
 #hud .clock .t{font-family:"Mochiy Pop One","M PLUS Rounded 1c",sans-serif;font-size:30px;line-height:1;font-variant-numeric:tabular-nums}
 #hud .clock .d{font-size:12px;font-weight:800;margin-top:4px;color:#4f6560}
 #hud .sndp{position:absolute;top:calc(170px + env(safe-area-inset-top,0px));right:var(--gr);z-index:30;pointer-events:auto;display:flex;flex-direction:column;gap:8px;min-width:220px;font-size:13px}#hud .sndp label{display:flex;align-items:center;gap:8px;justify-content:space-between}#hud .sndp input{width:120px;accent-color:#3f8f5a}#hud .sndp button{border:0;border-radius:99px;padding:6px 12px;background:#22323a;color:#fff;font-weight:800;cursor:pointer}

@@ -141,4 +141,4 @@ SHORE_ITEMS.push({ id: 'hoshizuna', name: '星の砂', st: 3, p: 700, kind: 'gla
 { const _u = GAME.update; GAME.update = function (dt) { const r = _u.apply(this, arguments); try { SEA.update(dt || 0.016); } catch (e) { if (!SEA._err) { SEA._err = 1; console.warn('tide', e); } } return r; }; }
 // the clock card shows the next tide turn
 { const _ck = UI.clock; UI.clock = function (hf) { _ck.apply(this, arguments); let el = document.getElementById('hTide'); if (!el) { const d = document.getElementById('hD'); if (!d) return; el = document.createElement('div'); el.id = 'hTide'; el.className = 'd'; d.after(el); }
-    if (!GAME.p) { el.textContent = ''; return; } const ev = SEA.events(SEA.nowMs() + 1800000, 14)[0]; el.textContent = `🌊 ${SEA.state()}${ev ? `　${ev.type} ${SEA.fmt(ev.ms)}` : ''}`; }; }
+    if (!GAME.p) { el.textContent = ''; return; } const mk = Math.floor(SEA.nowMs() / 60000); if (SEA._evK !== mk) { SEA._evK = mk; SEA._ev = SEA.events(SEA.nowMs() + 1800000, 14)[0]; } const ev = SEA._ev; el.textContent = `🌊 ${SEA.state()}${ev ? `　${ev.type} ${SEA.fmt(ev.ms)}` : ''}`; }; }

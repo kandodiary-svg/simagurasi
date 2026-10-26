@@ -30,7 +30,7 @@ function limbGeom(points, r0, r1, radial = 7, segs = 6) {
 }
 const CANOPY = { top: new THREE.Color('#b6e05a'), mid: new THREE.Color('#6fb23c'), low: new THREE.Color('#2f6a2a') };
 function clumpGeom(c, r, seed, flat = 0.78, tint = [1, 1, 1], yRange = null) {
-  const g = new THREE.IcosahedronGeometry(r, 2); const p = g.attributes.position, col = [];
+  const g = new THREE.IcosahedronGeometry(r, VEG.clumpDetail === undefined ? 2 : VEG.clumpDetail); const p = g.attributes.position, col = [];
   const [y0, y1] = yRange || [c.y - r, c.y + r]; const tc = new THREE.Color();
   for (let i = 0; i < p.count; i++) {
     const v = new THREE.Vector3(p.getX(i), p.getY(i), p.getZ(i)), n = v.clone().normalize();
@@ -64,7 +64,7 @@ function makeTreeVariant(kind, seed) {
   const R = mulberry(seed), bark = [], clumps = [], cards = [], fruit = [];
   if (kind === 'broad') {
     const H = 5.2 + R() * 2.6, lean = new THREE.Vector3((R() - 0.5) * 1.0, 0, (R() - 0.5) * 1.0);
-    const top = new THREE.Vector3(lean.x, H * 0.48, lean.z);
+    const top = new THREE.Vector3(lean.x, H * 0.6, lean.z);   // a taller clear trunk: the crowns no longer form a low ceiling you walk into
     bark.push(limbGeom([new THREE.Vector3(0, -0.4, 0), new THREE.Vector3(lean.x * 0.2, H * 0.22, lean.z * 0.2), new THREE.Vector3(lean.x * 0.6, H * 0.4, lean.z * 0.6), top], 0.36, 0.17, 8, 5));
     const nb = 4 + Math.floor(R() * 3), ends = [];
     for (let b = 0; b < nb; b++) {

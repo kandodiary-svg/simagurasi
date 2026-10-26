@@ -19,7 +19,9 @@ function loadModels() {
   return Promise.all(Object.entries(MODEL_DATA).map(([k, s]) => (/\.glb$/.test(s) ? fetch(s).then(r => { if (!r.ok) throw new Error('model ' + s + ' ' + r.status); return r.arrayBuffer(); }) : Promise.resolve(b64(s))).then(buf => new Promise((res, rej) => loader.parse(buf, '', g => { g.scene.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; if (VEHICLE_MODELS.includes(k)) { o.material.side = THREE.FrontSide; if (o.material.name === 'glass') { o.material.transparent = true; o.material.opacity = 0.35; o.material.depthWrite = false; } } } }); MODELS[k] = g.scene; res(); }, rej)))));
 }
 const PL = { x: 0, z: 0, y: 0, rot: 0, speed: 0, mesh: null, parts: {}, ph: 0, veh: null, onPier: false };
-const CAM = { mode: 'third', fpPitch: 0, fpLook: 0, lastDrag: -9, yaw: 0, pitch: 0.24, dist: 5.2, distT: 5.2, target: new THREE.Vector3(), drag: false };
+const CAM = { mode: 'third', fpPitch: 0, fpLook: 0, lastDrag: -9, yaw: 0, pitch: 0.34, dist: 5.2, distT: 5.2, target: new THREE.Vector3(), drag: false,
+  FOV: 42, FOV1: 62, K: 1.35 };   // a longer lens from further back (diorama-like, less distortion); K keeps every old distance's framing
+CAM.fov = function (f) { if (Math.abs(camera.fov - f) > 0.01) { camera.fov = f; camera.updateProjectionMatrix(); } };
 function wheelsOf(m) { const w = partsOf(m, ['wheelFL', 'wheelFR', 'wheelRL', 'wheelRR']); for (const k in w) if (w[k]) { w[k].rotation.order = 'YXZ'; w[k].userData.r = Math.max(0.2, w[k].position.y); } return w; }
 function partsOf(root, names) { const p = {}; names.forEach(n => p[n] = root.getObjectByName(n)); return p; }
 function spawnPlayer(scene) {
@@ -157,7 +159,7 @@ function updateVehicles(dt, locked) {
     else { PL.mesh.visible = true; PL.mesh.position.set(v.x + s * 0.4 + c * 0.0, v.mesh.position.y + 0.85, v.z + c * 0.4); PL.mesh.scale.setScalar(1); PL.mesh.rotation.y = v.rot; animateHero(dt, 0); PL.parts.upperArmL.rotation.x = PL.parts.upperArmR.rotation.x = -0.9; }
   }
 }
-function setViewMode(m) { CAM.mode = m; CAM.snap = true; CAM.fpPitch = 0; CAM.fpLook = 0; if (m === 'third') { CAM.yaw = (PL.veh ? PL.veh.rot : PL.rot) + Math.PI; CAM.pitch = 0.24; CAM.target.set(PL.x, PL.y + 1.05, PL.z); } UI.viewMode(m); }
+function setViewMode(m) { CAM.mode = m; CAM.snap = true; CAM.fpPitch = 0; CAM.fpLook = 0; if (m === 'third') { CAM.yaw = (PL.veh ? PL.veh.rot : PL.rot) + Math.PI; CAM.pitch = 0.34; CAM.target.set(PL.x, PL.y + 1.05, PL.z); } UI.viewMode(m); }
 function hitsAnyBld(x, z) { return collidersNear(x, z).some(c => !c.off && c.kind === 'bld' && hitsCollider(c, x, z, 0.3)); }
 function nearVehicle() { let best = null, bd = 4.2; for (const v of VEH) { const d = Math.hypot(v.x - PL.x, v.z - PL.z) - (v.kind === 'boat' ? 2.5 : 0); if (d < bd) { bd = d; best = v; } } return best; }
 function toggleVehicle() {
@@ -180,7 +182,7 @@ function toggleVehicle() {
   PL.veh = v; v.v = 0; CAM.distT = VSPEC[v.kind].cam; return true;
 }
 function updateCamera(dt) {
-  const now = performance.now() / 1000;
+  const now = performance.now() / 1000; CAM.fov(CAM.mode === 'first' ? CAM.FOV1 : CAM.FOV);
   if (CAM.mode === 'first') {
     let eye, yaw;
     if (PL.veh) {
@@ -198,22 +200,44 @@ function updateCamera(dt) {
   const free = now - CAM.lastDrag > 1.5 && !CAM.drag && !(typeof EDIT !== 'undefined' && EDIT.on);
   if (PL.veh && free) CAM.yaw = angLerp(CAM.yaw, PL.veh.rot + Math.PI, Math.min(1, dt * 2.2));
   else if (!PL.veh && free && PL.speed > 0.3) {
-    // swing gently behind the walking direction (not when walking toward the camera)
-    const d = angDiff(PL.rot + Math.PI, CAM.yaw);
-    if (Math.abs(d) < 2.5) CAM.yaw += d * Math.min(1, dt * 1.6 * Math.min(1, PL.speed / 2.2));
-    CAM.pitch = lerp(CAM.pitch, 0.24, Math.min(1, dt * 0.8));
+    // on foot the camera does not swing around by itself: the controls are relative to the camera, so turning it behind a
+    // sideways walk turned the walk again and you went round in circles (that was the "ぐわんぐわん"). Only the tilt settles back.
+    CAM.pitch = lerp(CAM.pitch, 0.34, Math.min(1, dt * 0.5));
   }
   if (KEYS.KeyQ) { CAM.yaw += dt * 1.8; CAM.lastDrag = now; } if (KEYS.KeyE && !PL.veh) { CAM.yaw -= dt * 1.8; CAM.lastDrag = now; }
   CAM.dist = lerp(CAM.dist, CAM.distT, Math.min(1, dt * 4));
-  CAM.target.lerp(focus, Math.min(1, dt * 10));
-  const cp = Math.cos(CAM.pitch), pos = new THREE.Vector3(CAM.target.x + Math.sin(CAM.yaw) * cp * CAM.dist, CAM.target.y + Math.sin(CAM.pitch) * CAM.dist, CAM.target.z + Math.cos(CAM.yaw) * cp * CAM.dist);
-  // keep the camera out of buildings and the ground
-  const dir = pos.clone().sub(CAM.target), full = dir.length(); dir.normalize(); let L = full;
-  for (let t = 0.8; t < full; t += 0.4) { const p = CAM.target.clone().addScaledVector(dir, t); let hit = false;
-    for (const c of collidersNear(p.x, p.z)) { if (c.r !== undefined || p.y - groundH(p.x, p.z) > 9) continue; const [qx, qz] = pushOut(p.x, p.z, 0.05); if (Math.hypot(qx - p.x, qz - p.z) > 0.001) { hit = true; break; } }
-    if (hit) { L = Math.max(1.2, t - 0.4); break; } }
-  CAM.len = lerp(CAM.len || L, L, L < (CAM.len || L) ? 1 : Math.min(1, dt * 3)); pos.copy(CAM.target).addScaledVector(dir, CAM.len);
-  const gy = Math.max(groundH(pos.x, pos.z), 0) + 0.6; if (pos.y < gy) pos.y = gy;
+  // follow: close behind sideways, softly up and down (steps and rough ground no longer bob the whole view)
+  if (CAM.snap || CAM.target.distanceToSquared(focus) > 400) { CAM.target.copy(focus); CAM.lift = 0; CAM.len = 0; CAM.snap = false; }
+  else { const kx = Math.min(1, dt * 12), dy = focus.y - CAM.target.y, ky = Math.min(1, dt * (Math.abs(dy) > 1.5 ? 9 : PL.veh ? 6 : 3.5));
+    CAM.target.x += (focus.x - CAM.target.x) * kx; CAM.target.z += (focus.z - CAM.target.z) * kx; CAM.target.y += dy * ky; }
+  const T = CAM.target, full = CAM.dist * CAM.K, minL = Math.min(full, 2.6);
+  // walls of buildings: tilt up a little to look over them (smoothly, let go after a moment) and pull in, but never closer than
+  // 2.6 m: what is still in the way (a wall, an eave, leaves) is cut out around you in the shader instead (see.js).
+  // Low walls and fences only count near the ground; trees and posts don't count.
+  const crowns = typeof SEE !== 'undefined' && SEE.crownsAt && SEE.grid && !PL.veh;
+  const freeLen = (pitch, trees) => { const cp = Math.cos(pitch), dx = Math.sin(CAM.yaw) * cp, dy = Math.sin(pitch), dz = Math.cos(CAM.yaw) * cp;
+    for (let t = 0.8; t < full; t += 0.4) { const px = T.x + dx * t, py = T.y + dy * t, pz = T.z + dz * t, hy = py - groundH(px, pz); if (hy > 9) continue;
+      for (const c of collidersNear(px, pz)) { if (c.off || c.r !== undefined) continue; if (hy > 1.4 && Math.min(c.hw || 0, c.hd || 0) < 0.25) continue;
+        const cs = Math.cos(c.rot || 0), sn = Math.sin(c.rot || 0), lx = (px - c.x) * cs - (pz - c.z) * sn, lz = (px - c.x) * sn + (pz - c.z) * cs; if (Math.abs(lx) < c.hw + 0.05 && Math.abs(lz) < c.hd + 0.05) return Math.max(minL, t - 0.4); }
+      // in a wood: stop short of the leaf crowns overhead (the crown you are still in is cut out in the shader)
+      if (trees && t > 2.2 && SEE.crownsAt(px, py, pz, 0.95).length) return Math.max(minL, t - 0.4); }
+    return full; };
+  CAM.pb = CAM.pb || 0; CAM.pbHold = Math.max(0, (CAM.pbHold || 0) - dt); let pbT = 0;
+  if (!PL.veh && full > 2.5 && freeLen(CAM.pitch) < full * 0.9) { pbT = 0.35; for (const b of [0.15, 0.25]) if (freeLen(Math.min(0.85, CAM.pitch + b)) >= full * 0.85) { pbT = b; break; } pbT = Math.min(pbT, Math.max(0, 0.85 - CAM.pitch)); CAM.pbHold = 0.8; }
+  else if (CAM.pbHold > 0) pbT = CAM.pb;
+  CAM.pb = lerp(CAM.pb, pbT, Math.min(1, dt * (pbT > CAM.pb ? 3.5 : 1.2)));
+  const pitch = CAM.pitch + CAM.pb, cp = Math.cos(pitch), dir = new THREE.Vector3(Math.sin(CAM.yaw) * cp, Math.sin(pitch), Math.cos(CAM.yaw) * cp);
+  let L = freeLen(pitch, crowns);
+  // come back out only once it has stayed clear for a moment (walking under trees made the distance breathe)
+  if (CAM.len && L > CAM.len + 0.3) { CAM.outT = (CAM.outT || 0) + dt; if (CAM.outT < 0.9) L = CAM.len; } else CAM.outT = 0;
+  CAM.len = !CAM.len ? L : lerp(CAM.len, L, Math.min(1, dt * (L < CAM.len ? 6 : 1.6)));
+  const pos = T.clone().addScaledVector(dir, CAM.len);
+  // ground behind you (a slope, a bank): lift the camera smoothly instead of jumping to the ground every frame
+  const sea = typeof SEA !== 'undefined' && SEA.h !== undefined ? SEA.h : 0; let need = 0;
+  for (const f of [0.5, 0.75, 1, 1.2]) { const t = CAM.len * f, px = T.x + dir.x * t, pz = T.z + dir.z * t; need = Math.max(need, Math.max(groundH(px, pz), sea) + 0.75 - (T.y + dir.y * t)); }
+  CAM.lift = CAM.lift || 0; CAM.lift = lerp(CAM.lift, need, Math.min(1, dt * (need > CAM.lift ? 5 : 1.4)));
+  pos.y += Math.max(0, CAM.lift);
+  const gy = Math.max(groundH(pos.x, pos.z), sea) + 0.35; if (pos.y < gy) pos.y = gy;
   camera.position.copy(pos); camera.lookAt(CAM.target);
 }
 // ---------- effects ----------

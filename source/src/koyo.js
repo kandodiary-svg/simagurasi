@@ -10,7 +10,7 @@ KOYO.col = function (it, doy, out) {
   out.setRGB(0.9 + a * 0.16, 0.9 + b * 0.14, 0.86 + c * 0.16);
   if (it.kind === 'momiji') { if (doy >= 288 && doy <= 350) out.g *= 0.72 + b * 0.42; return out; } // maples: some redder, some more orange than their neighbours
   if (it.kind !== 'broad' || a > 0.4) return out;
-  const start = 293 + Math.floor(b * 26), peak = start + 16 + Math.floor(c * 8), brown = peak + 18; // day-of-year: from ~10/20
+  const start = 285 + Math.floor(b * 28), peak = start + 16 + Math.floor(c * 8), brown = peak + 20; // day-of-year: from ~10/12 (a game's autumn shows a little early)
   const d = doy < 90 ? doy + 365 : doy;
   let k = d < start ? 0 : d < peak ? (d - start) / (peak - start) : 1; k = k * k * (3 - 2 * k);
   const T = c < 0.4 ? [1.55, 1.08, 0.32] : c < 0.75 ? [1.6, 0.78, 0.3] : [1.62, 0.45, 0.3];

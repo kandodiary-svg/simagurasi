@@ -100,7 +100,10 @@ FLORA.build = function () {
   FLORA.mats.plume.emissive = new THREE.Color('#2a2418');
   FLORA.items = FLORA.place();
   const by = { susuki: [[], []], cosmos: [[], []], higan: [[], []] }; for (const it of FLORA.items) by[it.type][it.v].push(it);
-  const mk = (geo, m, list) => { const im = new THREE.InstancedMesh(geo, m, Math.max(1, list.length)); im.receiveShadow = true; im.castShadow = false; im.frustumCulled = false; im.userData.list = list; g.add(im); return im; };
+  // one mesh per 96 m block (they used to be one mesh each for the whole island, drawn every frame wherever you looked)
+  FLORA.chunks = [];
+  const mk = (geo, m, list) => { const cells = new Map(); for (const it of list) { const k = Math.floor(it.x / 96) + ',' + Math.floor(it.z / 96); if (!cells.has(k)) cells.set(k, []); cells.get(k).push(it); }
+    return [...cells.values()].map(cl => { const im = new THREE.InstancedMesh(geo, m, Math.max(1, cl.length)); im.receiveShadow = true; im.castShadow = false; im.frustumCulled = true; im.userData.list = cl; g.add(im); FLORA.chunks.push(im); return im; }); };
   for (const v of [0, 1]) { const S = FLORA.geoSusuki(101 + v); FLORA.sets['susuki' + v] = [mk(S.leaf, FLORA.mats.leaf, by.susuki[v]), mk(S.plume, FLORA.mats.plume, by.susuki[v])];
     FLORA.sets['cosmos' + v] = [mk(FLORA.geoCosmos(201 + v), FLORA.mats.cosmos, by.cosmos[v])]; FLORA.sets['higan' + v] = [mk(FLORA.geoHigan(301 + v), FLORA.mats.higan, by.higan[v])]; }
   FLORA.refresh(true);
@@ -110,19 +113,22 @@ FLORA.refresh = function () {
   FLORA.key = W.key; let shown = 0;
   // the season's colours: green leaves in summer, golden in late autumn
   const dry = W.dry; FLORA.mats.leaf.color.set(dry ? '#c9b27a' : '#ffffff'); FLORA.mats.plume.color.set(dry ? '#c7bba0' : '#ffffff');
-  for (const k in FLORA.sets) for (const [idx, im] of FLORA.sets[k].entries()) {
+  for (const k in FLORA.sets) for (const [idx, ims] of FLORA.sets[k].entries()) for (const im of ims) {
     const list = im.userData.list, type = k.replace(/\d$/, ''), on = type === 'susuki' ? (idx === 0 ? W.susuki : W.plume) : W[type];
     let n = 0;
     for (const it of list) {
       const ok = on && roadDistAt(it.x, it.z) >= 2.2 && waterDepthAt(it.x, it.z) <= 0.05 && Math.abs(groundH(it.x, it.z) - it.y) < 0.35;
       if (!ok) continue; e.set(0, it.r, 0); q.setFromEuler(e); v.set(it.x, groundH(it.x, it.z) - 0.03, it.z); sc.setScalar(it.s * (type === 'susuki' ? 1.15 : 1)); m4.compose(v, q, sc); im.setMatrixAt(n++, m4);
     }
-    im.count = n; im.instanceMatrix.needsUpdate = true; im.visible = n > 0; shown += n;
+    im.count = n; im.instanceMatrix.needsUpdate = true; im.userData.has = n > 0; im.visible = n > 0; shown += n; if (n) { im.computeBoundingSphere(); im.boundingSphere.radius += 2; }
   }
   FLORA.shown = shown;
 };
 { const _b = GAME.begin; GAME.begin = function () { const r = _b.apply(this, arguments); try { FLORA.build(); FLORA.refresh(); } catch (e) { console.warn('flora', e); } return r; }; }
 { const _s = scheduleSave; scheduleSave = function () { FLORA.dirty = true; FLORA.chkT = 1.5; return _s.apply(this, arguments); }; }
 { const _u = updateStructures; updateStructures = function (t, night) { const r = _u.apply(this, arguments);
-  const now = performance.now(); if (FLORA.built && now - (FLORA._t || 0) > 2000) { FLORA._t = now; if (FLORA.dirty && !EDIT.on) { FLORA.dirty = false; FLORA.refresh(); } else if (FLORA.when().key !== FLORA.key) FLORA.refresh(); }
+  const now = performance.now();
+  // small plants far away are a few pixels in the haze: skip the blocks beyond ~140 m
+  if (FLORA.built && FLORA.chunks && now - (FLORA._ct || 0) > 400) { FLORA._ct = now; const cp = camera.position; for (const im of FLORA.chunks) { const b = im.boundingSphere; im.visible = !!im.userData.has && !!b && Math.hypot(b.center.x - cp.x, b.center.z - cp.z) - b.radius < 140; } }
+  if (FLORA.built && now - (FLORA._t || 0) > 2000) { FLORA._t = now; if (FLORA.dirty && !EDIT.on) { FLORA.dirty = false; FLORA.refresh(); } else if (FLORA.when().key !== FLORA.key) FLORA.refresh(); }
   return r; }; }

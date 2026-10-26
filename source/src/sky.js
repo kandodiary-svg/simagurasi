@@ -89,6 +89,12 @@ function updateEnv(s, sunDir, night, weather) {
   ENV.sun.position.copy(sunDir).multiplyScalar(8); ENV.sun.material.color.copy(s.sunCol).convertSRGBToLinear().multiplyScalar(sunDir.y > 0 ? 6 : 0);
   if (ENV.rt) ENV.rt.dispose(); ENV.rt = ENV.pmrem.fromScene(ENV.scene, 0.02); scene.environment = ENV.rt.texture;
 }
+// (wrapped) the reflection map of the sky is rebuilt only for a visible change of colour, at most every 4 s (each rebuild is a
+// burst of GPU work and a new render target: in real-time mode it used to happen every few seconds and gave a hitch)
+{ const _ue = updateEnv; updateEnv = function (s, sunDir, night, weather) { const now = performance.now(), L = ENV.last;
+  if (L && L.weather === weather && ENV.rt) { const d = Math.max(Math.abs(s.top.r - L.top.r), Math.abs(s.top.g - L.top.g), Math.abs(s.top.b - L.top.b), Math.abs(s.hor.r - L.hor.r), Math.abs(s.hor.g - L.hor.g), Math.abs(s.hor.b - L.hor.b));
+    if (d < 0.004 || now - L.t < 4000 || (d < 0.035 && now - L.t < 60000)) return; }
+  ENV.last = { top: s.top.clone(), hor: s.hor.clone(), weather, t: now }; ENV.key = ''; return _ue(s, sunDir, night, weather); }; }
 function skyAt(hf) {
   let a = SKYKEYS[0], b = SKYKEYS[1];
   for (let i = 0; i < SKYKEYS.length - 1; i++) if (hf >= SKYKEYS[i][0] && hf < SKYKEYS[i + 1][0]) { a = SKYKEYS[i]; b = SKYKEYS[i + 1]; }

@@ -16,7 +16,7 @@ CTRY.findPaddies = function () {
   return out;
 };
 CTRY.paddyMats = function () { if (CTRY.M) return CTRY.M; const M = CTRY.M = {};
-  M.mud = stdM('#6a5338', 0.95); M.mudDry = stdM('#8a7050', 0.95); M.ridge = worldMat(TEX.dirt, 0.5, '#8a7a5a', 1);
+  M.mud = stdM('#6a5338', 0.95); M.mudDry = stdM('#8a7050', 0.95); M.ridge = worldMat(TEX.grass || TEX.dirt, 0.45, '#a3a37a', 1);   // 畦: grassy banks (they read as dark mud walls before)
   M.water = new THREE.MeshStandardMaterial({ color: '#7aa8b8', roughness: 0.05, metalness: 0.35, transparent: true, opacity: 0.82 });
   M.rice = { water: stdM('#7ab84a', 0.8, 0, { side: THREE.DoubleSide }), green: stdM('#5f9a32', 0.8, 0, { side: THREE.DoubleSide }), gold: stdM('#d8b040', 0.75, 0, { side: THREE.DoubleSide }), hazakake: stdM('#a8905a', 0.9, 0, { side: THREE.DoubleSide }), fallow: stdM('#8a7a58', 0.9, 0, { side: THREE.DoubleSide }) };
   M.wood = stdM('#7a6248', 0.9); M.straw = stdM('#c8a860', 0.85); return M; };
@@ -31,7 +31,7 @@ CTRY.buildPaddies = function (g) {
     // the soil / water surface, and the grassy ridges (あぜ) all round
     const top = p.y; B(s, p.W, Math.max(0.2, top - p.base + 0.15), p.L, st === 'water' ? M.mud : M.mudDry, 0, (top + p.base - 0.15) / 2 - 0.02, 0);
     if (st === 'water') { const w = new THREE.Mesh(new THREE.PlaneGeometry(p.W - 0.5, p.L - 0.5), M.water); w.rotation.x = -Math.PI / 2; w.position.set(0, top + 0.03, 0); w.receiveShadow = true; s.add(w); }
-    { const rh = top - p.base + 0.28, rc = (top + 0.18 + p.base - 0.1) / 2; for (const sx of [-1, 1]) { B(s, 0.55, rh, p.L + 0.55, M.ridge, sx * (p.W / 2), rc, 0); B(s, p.W + 0.55, rh, 0.55, M.ridge, 0, rc, sx * (p.L / 2)); } }
+    { const rh = top - p.base + 0.2, rc = (top + 0.1 + p.base - 0.1) / 2; for (const sx of [-1, 1]) { B(s, 0.55, rh, p.L + 0.55, M.ridge, sx * (p.W / 2), rc, 0); B(s, p.W + 0.55, rh, 0.55, M.ridge, 0, rc, sx * (p.L / 2)); } }
     // rice in rows
     const c = Math.cos(p.rot), sn = Math.sin(p.rot);
     for (let a = -p.W / 2 + 0.6; a <= p.W / 2 - 0.6 && n < MAXI; a += step) for (let b = -p.L / 2 + 0.6; b <= p.L / 2 - 0.6 && n < MAXI; b += step) { const x = p.x + a * c + b * sn, z = p.z - a * sn + b * c; D.position.set(x + (Math.random() - 0.5) * 0.04, top, z + (Math.random() - 0.5) * 0.04); D.rotation.set(0, Math.random() * 6.28, 0); const k = 0.85 + Math.random() * 0.3; D.scale.set(k, k * (st === 'gold' ? 0.9 + Math.random() * 0.2 : 1), k); D.updateMatrix(); im.setMatrixAt(n++, D.matrix); }

@@ -38,7 +38,7 @@ HUD2.side = function () {
 { const _rt = GAME.renderTracker; GAME.renderTracker = function () { const r = _rt.apply(this, arguments); try { HUD2.side(); } catch (e) { } return r; }; }
 // the tracker sits right under the clock card, whatever height the clock card has (the tide line made it taller)
 HUD2.place = function () { const c = document.querySelector('#hud .card.clock'), s = GAME.el && GAME.el.side; if (!c || !s || c.offsetParent === null) return; const b = c.offsetTop + c.offsetHeight + 8; if (Math.abs((parseFloat(s.style.top) || 0) - b) > 1) s.style.top = b + 'px'; };
-{ const _c = UI.clock; UI.clock = function () { const r = _c.apply(this, arguments); try { HUD2.place(); } catch (e) { } return r; }; }
+{ const _c = UI.clock; UI.clock = function () { const r = _c.apply(this, arguments); try { const sig = ['hT', 'hD', 'hTide'].map(id => { const e = document.getElementById(id); return e ? e.textContent : ''; }).join('|') + '|' + innerWidth + 'x' + innerHeight + '|' + (GAME.el && GAME.el.side && GAME.el.side.className); if (sig !== HUD2._clk) { HUD2._clk = sig; HUD2.place(); } } catch (e) { } return r; }; }  // reading offsetTop forces a layout: only when something changed
 // ---------- the controls line disappears once you have played a while (⚙ → ❔ brings it back) ----------
 HUD2.helpTimer = function () {
   let seen = false; try { seen = localStorage.getItem('hoshinami.helpSeen') === '1'; } catch (e) { }

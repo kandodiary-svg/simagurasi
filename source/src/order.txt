@@ -51,6 +51,7 @@ perf.js
 see.js
 flora.js
 koyo.js
+lod.js
 seaside.js
 ferry.js
 ohashi.js
@@ -58,4 +59,5 @@ kitchen.js
 photo.js
 savesafe.js
 hud.js
+warm.js
 main.js
