@@ -52,6 +52,8 @@ see.js
 flora.js
 koyo.js
 seaside.js
+ferry.js
+ohashi.js
 kitchen.js
 photo.js
 savesafe.js

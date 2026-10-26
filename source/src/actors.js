@@ -33,7 +33,7 @@ function onPierAt(x, z) {
   const H = PLACED.harbor && PLACED.harbor.walk; if (!H) return false;
   const dx = x - H.x, dz = z - H.z, c = Math.cos(H.dir), s = Math.sin(H.dir);
   const lx = dx * c - dz * s, lz = dx * s + dz * c; // into breakwater local space
-  return Math.abs(lx) < H.w / 2 + 0.3 && lz < 0.5 && lz > -H.len;
+  return Math.abs(lx) < H.w / 2 + 0.3 && lz < 14 && lz > -H.len; // the concrete body runs 14 m inland (you used to sink into it there)
 }
 function walkDeckY(x, z) { if (typeof WALKDECKS === 'undefined') return null; for (const d of WALKDECKS) { const cs = Math.cos(d.rot), sn = Math.sin(d.rot), dx = x - d.x, dz = z - d.z, lx = dx * cs - dz * sn, lz = dx * sn + dz * cs; if (Math.abs(lx) < d.hw && Math.abs(lz) < d.hd) return d.y; } return null; }
 function standY(x, z) { const wd = walkDeckY(x, z); if (wd !== null) return Math.max(groundH(x, z), wd); const DK = typeof PROJ !== 'undefined' && PROJ.deck; if (DK && Math.abs(x - DK.x) < DK.hw && Math.abs(z - DK.z) < DK.hw) return Math.max(groundH(x, z), DK.y); if (onPierAt(x, z)) return Math.max(groundH(x, z), PLACED.harbor.walk.top); const d = deckY(x, z); if (d !== null) return d; return groundH(x, z); }
