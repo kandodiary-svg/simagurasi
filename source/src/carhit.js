@@ -24,7 +24,7 @@ CARHIT.others = function (self, x, z, y) {
   const O = [], add = (o, ox, oz, oy, rot, hl, hw) => {
     if (o === self || !isFinite(ox) || !isFinite(oz)) return; if (Math.hypot(ox - x, oz - z) > hl + 4) return;
     if (isFinite(y) && isFinite(oy) && Math.abs(oy - y) > 2.6) return; // under / over a bridge
-    O.push({ o, b: CARHIT.box(ox, oz, rot || 0, hl, hw) });
+    O.push({ o, y: oy, b: CARHIT.box(ox, oz, rot || 0, hl, hw) });
   };
   if (typeof DV !== 'undefined' && DV.bus) add(DV.bus, DV.bus.x, DV.bus.z, DV.bus.y, DV.bus.rot, CARHIT.BUS[0], CARHIT.BUS[1]);
   if (typeof BUSX !== 'undefined' && BUSX.extra) for (const b of BUSX.extra) add(b, b.x, b.z, b.y, b.rot, CARHIT.BUS[0], CARHIT.BUS[1]);
@@ -36,6 +36,7 @@ CARHIT.others = function (self, x, z, y) {
 CARHIT.pen = function (v, x, z, rot) {
   if (!isFinite(x) || !isFinite(z)) return 0; const A = CARHIT.mine(v, x, z, rot); let d = 0;
   for (const q of CARHIT.others(v, x, z, v.y)) { const h = CARHIT.sat(A, q.b); if (h) d += h.d; }
+  for (const q of CARHIT.people(v)) { if (Math.abs(q.x - x) > 6 || Math.abs(q.z - z) > 6 || (isFinite(v.y) && Math.abs(q.y - v.y) > 2.6)) continue; const h = CARHIT.circ(A, q.x, q.z, CARHIT.PR); if (h) d += h.d; }
   return d;
 };
 // replaces the old "2.6 m from the bus centre / 2.3 m from a traffic car centre" checks
@@ -65,7 +66,8 @@ CARHIT.resolve = function (v) {
 
 // ---- the others give way ----
 // your car(s) as boxes
-CARHIT.mineAll = function () { const R = []; for (const v of VEH) if (v.kind === 'truck' && isFinite(v.x)) R.push({ v, b: CARHIT.mine(v, v.x, v.z, v.rot) }); return R; };
+CARHIT.mineAll = function (bus) { const R = []; for (const v of VEH) if (v.kind === 'truck' && isFinite(v.x)) R.push({ v, b: CARHIT.mine(v, v.x, v.z, v.rot) });
+  for (const q of CARHIT.people(bus)) R.push({ v: { y: q.y, x: q.x, z: q.z }, b: CARHIT.box(q.x, q.z, 0, CARHIT.PR, CARHIT.PR), person: 1 }); return R; };
 // overlap of a box with your car(s)
 CARHIT.vsMine = function (B, y, M) { let d = 0; for (const m of M) { if (isFinite(y) && isFinite(m.v.y) && Math.abs(m.v.y - y) > 2.6) continue; const h = CARHIT.sat(B, m.b); if (h) d += h.d; } return d; };
 // a box stretched ahead of a vehicle by `ahead` metres
@@ -74,7 +76,7 @@ CARHIT.ahead = function (x, z, rot, hl, hw, ahead, dir) { const g = dir < 0 ? -1
 // island bus: brake when your car is in its path, never drive deeper into it
 { const _ub = GAME.updateBus; GAME.updateBus = function (dt) {
   const B = DV.bus; if (!B || B.x === undefined || !B.mesh) return _ub.apply(this, arguments);
-  const M = CARHIT.mineAll().filter(m => PL.veh !== B || m.v !== PL.veh); if (!M.length) return _ub.apply(this, arguments);
+  const M = CARHIT.mineAll(B).filter(m => PL.veh !== B || m.v !== PL.veh); if (!M.length) return _ub.apply(this, arguments);
   const d = dt || 0.016, [hl, hw] = CARHIT.BUS;
   if (!(B.wait > 0)) { const look = 1.2 + (B.v || 0) * (B.v || 0) / 9; if (CARHIT.vsMine(CARHIT.ahead(B.x, B.z, B.rot, hl, hw, look, 1), B.y, M) > 0) B.v = Math.max(0, (B.v || 0) - 7 * d); }
   const before = CARHIT.vsMine(CARHIT.box(B.x, B.z, B.rot, hl, hw), B.y, M);
@@ -111,3 +113,44 @@ CARHIT.ahead = function (x, z, rot, hl, hw, ahead, dir) { const g = dir < 0 ? -1
   }
   return r;
 }; }
+
+// ===== ver.44: people never sink into cars =====
+// you (on foot) and the villagers are circles; cars are the same boxes as above (your own car, the bus, traffic, parked cars)
+CARHIT.PR = 0.32;
+// circle (x,z,r) against box B → push for the circle { d, nx, nz } or null
+CARHIT.circ = function (B, x, z, r) {
+  const dx = x - B.x, dz = z - B.z, a = dx * B.s + dz * B.c, b = dx * B.c - dz * B.s, ca = clamp(a, -B.hl, B.hl), cb = clamp(b, -B.hw, B.hw), ea = a - ca, eb = b - cb, d = Math.hypot(ea, eb);
+  if (d > 1e-6) { if (d >= r) return null; const na = ea / d, nb = eb / d; return { d: r - d, nx: na * B.s + nb * B.c, nz: na * B.c - nb * B.s }; }
+  const pa = B.hl - Math.abs(a), pb = B.hw - Math.abs(b);
+  if (pa < pb) { const g = Math.sign(a) || 1; return { d: pa + r, nx: g * B.s, nz: g * B.c }; }
+  const g = Math.sign(b) || 1; return { d: pb + r, nx: g * B.c, nz: -g * B.s };
+};
+// who is walking around (not riding, not indoors)
+CARHIT.walking = () => !PL.veh && !GAME.inside && !(typeof BUS2 !== 'undefined' && BUS2.anim);
+CARHIT.people = function (bus) {
+  const P = []; if (!GAME.p) return P;
+  if (CARHIT.walking() && !(bus && typeof BUS2 !== 'undefined' && BUS2.anim)) P.push({ x: PL.x, z: PL.z, y: PL.y, pl: 1 });
+  for (const n of NPCS) if (!n.inRoom && !n.seat && n.mesh && n.mesh.visible && isFinite(n.x)) P.push({ x: n.x, z: n.z, y: n.y, n });
+  return P;
+};
+// how deep a person standing at (x,z) would be inside cars
+CARHIT.cars = function (x, z) { const O = CARHIT.others(null, x, z); if (!O.length) return O; const y = standY(x, z); return O.filter(q => !isFinite(q.y) || Math.abs(q.y - y) < 2.6); };
+CARHIT.ppen = function (x, z) { let d = 0; for (const q of CARHIT.cars(x, z)) { const h = CARHIT.circ(q.b, x, z, CARHIT.PR); if (h) d += h.d; } return d; };
+// walking into a car is like walking into a wall (people slide along it; villagers walk round it)
+{ const _cw = canWalk; CARHIT.walk0 = _cw; canWalk = function (x0, z0, x1, z1) {
+  if (!_cw.apply(this, arguments)) return false;
+  try { const p1 = CARHIT.ppen(x1, z1); if (p1 <= 0.002) return true; return p1 < CARHIT.ppen(x0, z0) - 0.002; } catch (e) { return true; } }; }
+// still inside one (a car stopped on you, you got out between two cars…): step out of it
+CARHIT.unstick = function (x, z) {
+  for (let it = 0; it < 3; it++) { let hit = null; for (const q of CARHIT.cars(x, z)) { const h = CARHIT.circ(q.b, x, z, CARHIT.PR); if (h && (!hit || h.d > hit.d)) hit = h; } if (!hit) break;
+    const k = Math.min(1.2, hit.d + 0.02); let moved = false;
+    for (const f of [1, 0.6, 0.3]) { const nx = x + hit.nx * k * f, nz = z + hit.nz * k * f, [qx, qz] = pushOut(nx, nz, 0.3); if (Math.hypot(qx - nx, qz - nz) < 0.01 && CARHIT.walk0(x, z, nx, nz)) { x = nx; z = nz; moved = true; break; } }
+    if (!moved) { x += hit.nx * k; z += hit.nz * k; break; } }   // nowhere better: out of the car anyway
+  return [x, z];
+};
+{ const _up = updatePlayer; updatePlayer = function () { const r = _up.apply(this, arguments);
+  try { if (CARHIT.walking() && GAME.p) { const [x, z] = CARHIT.unstick(PL.x, PL.z); if (x !== PL.x || z !== PL.z) { PL.x = x; PL.z = z; PL.y = Math.max(PL.y, standY(x, z)); PL.mesh.position.x = x; PL.mesh.position.z = z; } } } catch (e) { }
+  return r; }; }
+{ const _uv = updateVillagers; updateVillagers = function () { const r = _uv.apply(this, arguments);
+  try { if (GAME.p && !GAME.inside) for (const n of NPCS) { if (n.inRoom || n.seat || !n.mesh || !n.mesh.visible || !isFinite(n.x)) continue; const [x, z] = CARHIT.unstick(n.x, n.z); if (x !== n.x || z !== n.z) { n.x = x; n.z = z; n.mesh.position.x = x; n.mesh.position.z = z; } } } catch (e) { }
+  return r; }; }

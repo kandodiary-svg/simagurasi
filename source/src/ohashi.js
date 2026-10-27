@@ -56,6 +56,18 @@ OHB.clearVeg = function () { if (!OHB.s || !VEG.sets || !VEG.sets.length || !VEG
   for (const u of [-17, 4]) for (const o of [-OHB.Wd / 2 - 0.4, OHB.Wd / 2 + 0.4]) { xs.push(S.x + S.dx * u + S.side[0] * o); zs.push(S.z + S.dz * u + S.side[1] * o); }
   OHB.box = [Math.min(...xs) - 1, Math.min(...zs) - 1, Math.max(...xs) + 1, Math.max(...zs) + 1]; VEG.refresh(...OHB.box); };
 { const _rd = GAME.refreshDev; GAME.refreshDev = function () { const had = OHB.box; OHB.s = null; OHB.box = null; const r = _rd.apply(this, arguments); if (had && !OHB.s) { try { VEG.refresh(...had); } catch (e) { } } return r; }; }
+// the paved approach on the island side, draped over the ground and rising to the deck
+OHB.apron = function (s, g) { const P = (u, o = 0, y = 0) => new THREE.Vector3(s.x + s.dx * u + s.side[0] * o, y, s.z + s.dz * u + s.side[1] * o), Wd = OHB.Wd;
+  // (when a road comes up to the bridge, the approach starts where that road ends)
+  let U0 = -16; for (const r of ROADS) { if (isFoot(r)) continue; for (const P0 of [r.pts[0], r.pts[r.pts.length - 1]]) { const px = P0[0] - s.x, pz = P0[1] - s.z, u = px * s.dx + pz * s.dz, v = px * s.side[0] + pz * s.side[1]; if (u > -20 && u < 1 && Math.abs(v) < Wd / 2) U0 = Math.max(U0, Math.min(-2, u - 1)); } }
+  { const pos = [], col = [], idx = [], N = Math.max(4, Math.round(-U0)), hw = (Wd - 2.6) / 2, M = 4, dark = new THREE.Color('#6c6e70'), yl = new THREE.Color('#e8b320');
+    for (let i = 0; i <= N; i++) { const u = U0 + (0 - U0) * i / N; for (let k = 0; k <= M; k++) { const o = -hw - 0.6 + (2 * hw + 1.2) * k / M, p = P(u, o), y = Math.max(groundH(p.x, p.z) + 0.05, OHB.top(0) + u * 0.11 + 0.02) + (k === 0 || k === M ? -0.08 : 0); pos.push(p.x, y, p.z); const c = dark; col.push(c.r, c.g, c.b); }
+      if (i) for (let k = 0; k < M; k++) { const a = (i - 1) * (M + 1) + k, b = a + M + 1; idx.push(a, b, a + 1, a + 1, b, b + 1); } }
+    const ge = new THREE.BufferGeometry(); ge.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); ge.setAttribute('color', new THREE.Float32BufferAttribute(col, 3)); ge.setIndex(idx); ge.computeVertexNormals();
+    const ap = new THREE.Mesh(ge, worldMat(TEX.asphalt || TEX.concrete, 0.3, '#e6e6e2', 0.92, { polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 })); ap.receiveShadow = true; ap.userData.keep = true; g.add(ap); OHB.apronMesh = ap; }
+};
+// rebuild just the approach (a road was just drawn up to the bridge)
+OHB.reApron = function () { const ap = OHB.apronMesh; if (!OHB.s || !ap || !ap.parent) return; const g = ap.parent; g.remove(ap); ap.geometry.dispose(); OHB.apron(OHB.s, g); };
 OHB.dress = function (s) {
   const g = new THREE.Group(), P = (u, o = 0, y = 0) => new THREE.Vector3(s.x + s.dx * u + s.side[0] * o, y, s.z + s.dz * u + s.side[1] * o), Wd = OHB.Wd;
   const asph = worldMat(TEX.asphalt || TEX.concrete, 0.3, '#e6e6e2', 0.92), line = stdM('#f2f0e8', 0.6), yel = stdM('#e8b320', 0.55), curb = stdM('#cfcac0', 0.7);
@@ -65,12 +77,7 @@ OHB.dress = function (s) {
     strip(u, u1, 0.12, 0.1, 0.035, yel); strip(u, u1, -0.12, 0.1, 0.035, yel);   // double yellow centre line
     for (const o of [-(Wd / 2 - 1.35), Wd / 2 - 1.35]) strip(u, u1, o, 0.12, 0.035, line);
     for (const o of [-(Wd / 2 - 1.3), Wd / 2 - 1.3]) strip(u, u1, o + Math.sign(o) * 0.12, 0.2, 0.08, curb, 0.16); }
-  // the paved approach on the island side, draped over the ground and rising to the deck
-  { const pos = [], col = [], idx = [], N = 16, U0 = -16, hw = (Wd - 2.6) / 2, M = 4, dark = new THREE.Color('#6c6e70'), yl = new THREE.Color('#e8b320');
-    for (let i = 0; i <= N; i++) { const u = U0 + (0 - U0) * i / N; for (let k = 0; k <= M; k++) { const o = -hw - 0.6 + (2 * hw + 1.2) * k / M, p = P(u, o), y = Math.max(groundH(p.x, p.z) + 0.05, OHB.top(0) + u * 0.11 + 0.02) + (k === 0 || k === M ? -0.08 : 0); pos.push(p.x, y, p.z); const c = dark; col.push(c.r, c.g, c.b); }
-      if (i) for (let k = 0; k < M; k++) { const a = (i - 1) * (M + 1) + k, b = a + M + 1; idx.push(a, b, a + 1, a + 1, b, b + 1); } }
-    const ge = new THREE.BufferGeometry(); ge.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); ge.setAttribute('color', new THREE.Float32BufferAttribute(col, 3)); ge.setIndex(idx); ge.computeVertexNormals();
-    const ap = new THREE.Mesh(ge, worldMat(TEX.asphalt || TEX.concrete, 0.3, '#e6e6e2', 0.92, { polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 })); ap.receiveShadow = true; ap.userData.keep = true; g.add(ap); }
+  OHB.apron(s, g);
   // the toll plaza: a canopy over the lanes, two booths, barriers down, a sign
   const gu = OHB.gate + 2.5, gy = OHB.top(gu), rot = Math.atan2(s.dx, s.dz), pl = new THREE.Group(); pl.position.copy(P(gu, 0, gy)); pl.rotation.y = rot; g.add(pl);
   const wh = stdM('#f4f2ec', 0.5), gr = stdM('#2c7a4a', 0.5), rd = stdM('#d8423a', 0.5), gl = stdM('#9fc6dc', 0.15, 0.3, { transparent: true, opacity: 0.6 });
@@ -84,3 +91,14 @@ OHB.dress = function (s) {
   { const sg = dynSign(3.6, 0.9, 'ほしなみ島 →', '#1f4f8a', '#ffffff'); const p = P(14, -Wd / 2 + 0.4, OHB.top(14) + 2.6); sg.position.copy(p); sg.rotation.y = rot; g.add(sg); const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 2.4, 6), wh); pole.position.copy(p).add(new THREE.Vector3(0, -1.4, 0)); g.add(pole); }
   return typeof mergeLocal === 'function' ? mergeLocal(g) : g;
 };
+
+// ---------- ver.44: nothing is built on the bridge or in front of its island end ----------
+OHB.keepOut = function (x, z, m = 2.5) { if (!OHB.s) return false; const { u, v } = OHB.local(x, z); return u > -12 && u < OHB.L + 5 && Math.abs(v) < OHB.Wd / 2 + m; };
+// a road that ends at the bridge carries on over it (no dead-end kerb there)
+OHB.roadEnd = function (x, z) { if (!OHB.s) return false; const { u, v } = OHB.local(x, z); return u > -14 && u < 2 && Math.abs(v) < OHB.Wd / 2; };
+{ const _pa = CITY.planAt; CITY.planAt = function (id, p, rot) { const pl = _pa.apply(this, arguments); if (!pl || !pl.ok || !OHB.s) return pl; const T = CITY_TYPES[id], o = { x: pl.x, z: pl.z, rot: pl.rot };
+  for (let a = -T.w / 2; a <= T.w / 2 + 0.01; a += 2) for (let b = -T.d / 2; b <= T.d / 2 + 0.01; b += 2) { const [x, z] = toWorld(o, a, b); if (OHB.keepOut(x, z)) { pl.ok = false; pl.err = '大橋にかかっています'; return pl; } }
+  return pl; }; }
+queueMicrotask(() => { const _bp = GAME.buildPlan; GAME.buildPlan = function (p) { const pl = _bp.apply(this, arguments), d = this.placing; if (!pl || !pl.ok || !OHB.s || !d || d.id === 'ohashi') return pl; const o = { x: pl.x, z: pl.z, rot: pl.rot };
+  for (let a = -d.w / 2 - 1; a <= d.w / 2 + 1.01; a += 1.5) for (let b = -d.d / 2 - 1; b <= d.d / 2 + 2.01; b += 1.5) { const [x, z] = toWorld(o, a, b); if (OHB.keepOut(x, z)) { pl.ok = false; pl.err = '大橋にかかっています'; return pl; } }
+  return pl; }; });

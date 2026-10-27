@@ -83,6 +83,15 @@ DEMO2.road = function (spec) {
   for (let i = 0; i < spec.p.length - 1; i++) { const nd = DEMO2.nodes(spec, [spec.p[i], spec.p[i + 1]]), pl = planUserRoad(nd); if (pl.err) { fails++; DEMO2.log.push(`  ${spec.n} ${i}: ${pl.err}`); continue; } EDIT.nodes = nd; finishRoad(); EDIT.nodes = []; }
   return fails;
 };
+// 大橋通り: once the big bridge stands, a wide road from the ring road straight onto its deck (the bridge's place is chosen by the game, so this comes after it)
+DEMO2.bridgeRoad = function () {
+  if (!OHB.s) return; const S = OHB.s, mx = S.x - S.dx * 0.8, mz = S.z - S.dz * 0.8;
+  let best = null; for (const r of ROADS) { if (isFoot(r)) continue; const pr = rProject(r, mx, mz); if (pr && pr.d < 45 && (!best || pr.d < best.d)) best = { r, ...pr }; } if (!best) { DEMO2.log.push('大橋通り: no road near'); return; }
+  const n = Math.max(2, Math.round(best.d / 6)), pts = []; for (let i = 0; i <= n; i++) pts.push([lerp(best.x, mx, i / n), lerp(best.z, mz, i / n)]);
+  EDIT.rtype = 'asphalt'; EDIT.roadW = 'wide'; EDIT.rside = true;
+  const nodes = pts.map(([x, z], i) => i === 0 ? snapNode({ x, z }, false) : { x, z, snap: null }); nodes[n].snap = { y: OHB.top(0) - 0.25 };   // meet the deck's height
+  const pl = planUserRoad(nodes); if (pl.err) { DEMO2.log.push('大橋通り: ' + pl.err); return; } EDIT.nodes = nodes; finishRoad(); EDIT.nodes = []; OHB.reApron();
+};
 // ---------- everything the story unlocks (as before), money, cars ----------
 DEMO2.base = function () {
   const g = GAME, p = g.p;
@@ -239,12 +248,12 @@ GAME.startDemo = function () {
       DEMO.say('島の計画図をひろげています…'); await tick(); DEMO2.base();
       DEMO.say('丘をならして街の土地をつくっています…'); await tick(); DEMO2.terraform();
       for (const r of DEMO2.PLAN.roads) { DEMO.say(`道路をひいています…（${r.n}）`); await tick(); try { DEMO2.road(r); } catch (e) { DEMO2.log.push(`${r.n}: ${e}`); } }
-      DEMO.say('施設を建てています…'); await tick(); skipped = DEMO2.devs(); DEMO2.newcomers(); DEMO2.bridges();
+      DEMO.say('施設を建てています…'); await tick(); skipped = DEMO2.devs(); try { DEMO2.bridgeRoad(); } catch (e) { DEMO2.log.push('大橋通り: ' + e); } DEMO2.newcomers(); DEMO2.bridges();
       DEMO.say('スタジアム・遊園地・タワーを建てています…'); await tick(); DEMO2.bigN = DEMO2.landmarks();
       await DEMO2.fill(DEMO.say);
       DEMO.say('並木を植えています…'); await tick(); DEMO2.treeN = DEMO2.trees();
       DEMO.say('仕上げています…'); await tick();
-      try { JN.carve(); } catch (e) { DEMO2.log.push('carve ' + e); }
+      try { rebuildRoadMeshes(); JN.carve(); } catch (e) { DEMO2.log.push('carve ' + e); }
       refreshAll(); VEG.refresh(-400, -400, 400, 400); CITY.rebuildAll(); this.refreshDev(); this.refreshProjects(); this.syncNewcomers(); this.applyTruck && this.applyTruck(); this.mapDirty = true; MINI.builtAt = -99; this.renderTracker();
     } catch (e) { console.warn('demo2', e); DEMO2.log.push('error ' + e); }
     finally { DEMO2.building = false; UI.toast = toast; EDIT.nodes = []; EDIT.undo = []; EDIT.rtype = 'asphalt'; EDIT.roadW = 'narrow'; EDIT.rside = false; }

@@ -21,7 +21,8 @@ function cbFacade(g, w, h, d, y0, fac, back = true, sides = true, cols = 4, rows
 function cbTree(g, x, z, h, R) { const M = cbM(); CY(g, 0.18, h * 0.5, M.trunk, x, h * 0.25, z, 6); SP(g, h * 0.32, R() < 0.5 ? M.leaf : M.leaf2, x, h * 0.62, z, 0.9, 9); }
 function cbLamp(g, x, z, h = 4) { const M = cbM(); CY(g, 0.06, h, M.dark, x, h / 2, z, 6); SP(g, 0.2, M.lampW, x, h + 0.1, z, 1, 8); }
 function cbBase(g, w, d, m) { B(g, w, 3.6, d, m || AM.block, 0, -1.55, 0); }
-function cbCar(g, x, z, ry, R) { const M = cbM(), s = sub(g, x, 0, z, ry), c = cbPick(R, [M.red, M.blue, M.white, M.dark, M.yellow, M.metal]); B(s, 1.7, 0.7, 4.0, c, 0, 0.55, 0); B(s, 1.5, 0.55, 2.0, M.dark, 0, 1.15, -0.2); }
+function cbCar(g, x, z, ry, R) { const M = cbM(), s = sub(g, x, 0, z, ry), c = cbPick(R, [M.red, M.blue, M.white, M.dark, M.yellow, M.metal]); B(s, 1.7, 0.7, 4.0, c, 0, 0.55, 0); B(s, 1.5, 0.55, 2.0, M.dark, 0, 1.15, -0.2);
+  if (CITY.curB) { const b = CITY.curB, w = cityW(b, x, 0, z); addCollider({ x: w.x, z: w.z, hw: 0.88, hd: 2.05, rot: b.rot + ry, kind: 'car' }); } }   // parked cars are solid
 const CB_NAMES = { hotel: ['GRAND HOSHINAMI', 'SETO BLUE HOTEL', 'HOTEL AZURE', 'OCEAN PALACE', 'CORAL BAY RESORT', 'SUNSET TERRACE', 'MARINE GARDEN'], glass: ['SKY HOTEL', 'THE HOSHINAMI', 'HARBOR TOWER', 'BLUE HORIZON', 'STAR PEARL'], office: ['HOSHINAMI BANK', 'SETO TRADING', 'ISLAND TECH', 'MARINE CORP', 'HOSHI SOFT'] };
 // ---------- the catalog ----------
 const CITY_TYPES = {

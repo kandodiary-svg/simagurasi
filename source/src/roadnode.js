@@ -159,7 +159,7 @@ JN.meshes = function () {
   if (JN.group) { TERR.roadGroup.remove(JN.group); JN.group.traverse(o => { if (o.geometry) o.geometry.dispose(); }); }
   const g = JN.group = new THREE.Group(); TERR.roadGroup.add(g); JN.walk = [];
   for (const j of JN.list) { try { JN.meshOne(j, g); } catch (e) { console.warn('junction mesh', e); } }
-  for (const r of ROADS) for (const e of [0, 1]) if (!r.tAt[e] && r.side && !isFoot(r) && !(r === ROADS[0] && !r.user && e === 1)) { try { JN.cul(r, e, g); } catch (e2) { } }
+  for (const r of ROADS) for (const e of [0, 1]) if (!r.tAt[e] && r.side && !isFoot(r) && !(r === ROADS[0] && !r.user && e === 1)) { const P = e ? r.pts[r.pts.length - 1] : r.pts[0]; if (typeof OHB !== 'undefined' && OHB.roadEnd && OHB.roadEnd(P[0], P[1])) continue; try { JN.cul(r, e, g); } catch (e2) { } }
 };
 JN.tri = function (pos, idx, mat, g) { const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.Float32BufferAttribute(pos.p, 3)); if (pos.i) geo.setAttribute('rinfo', new THREE.Float32BufferAttribute(pos.i, 3)); geo.setIndex(idx); geo.computeVertexNormals();
   let up = 0; if (pos.up) { const P = pos.p, I = idx; for (let i = 0; i < I.length; i += 3) { const a = I[i] * 3, b = I[i + 1] * 3, c = I[i + 2] * 3; up += (P[b + 2] - P[a + 2]) * (P[c] - P[a]) - (P[b] - P[a]) * (P[c + 2] - P[a + 2]); } }

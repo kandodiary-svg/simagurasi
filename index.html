@@ -3186,7 +3186,7 @@ JN.meshes = function () {
   if (JN.group) { TERR.roadGroup.remove(JN.group); JN.group.traverse(o => { if (o.geometry) o.geometry.dispose(); }); }
   const g = JN.group = new THREE.Group(); TERR.roadGroup.add(g); JN.walk = [];
   for (const j of JN.list) { try { JN.meshOne(j, g); } catch (e) { console.warn('junction mesh', e); } }
-  for (const r of ROADS) for (const e of [0, 1]) if (!r.tAt[e] && r.side && !isFoot(r) && !(r === ROADS[0] && !r.user && e === 1)) { try { JN.cul(r, e, g); } catch (e2) { } }
+  for (const r of ROADS) for (const e of [0, 1]) if (!r.tAt[e] && r.side && !isFoot(r) && !(r === ROADS[0] && !r.user && e === 1)) { const P = e ? r.pts[r.pts.length - 1] : r.pts[0]; if (typeof OHB !== 'undefined' && OHB.roadEnd && OHB.roadEnd(P[0], P[1])) continue; try { JN.cul(r, e, g); } catch (e2) { } }
 };
 JN.tri = function (pos, idx, mat, g) { const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.Float32BufferAttribute(pos.p, 3)); if (pos.i) geo.setAttribute('rinfo', new THREE.Float32BufferAttribute(pos.i, 3)); geo.setIndex(idx); geo.computeVertexNormals();
   let up = 0; if (pos.up) { const P = pos.p, I = idx; for (let i = 0; i < I.length; i += 3) { const a = I[i] * 3, b = I[i + 1] * 3, c = I[i + 2] * 3; up += (P[b + 2] - P[a + 2]) * (P[c] - P[a]) - (P[b] - P[a]) * (P[c + 2] - P[a + 2]); } }
@@ -8116,7 +8116,8 @@ function cbFacade(g, w, h, d, y0, fac, back = true, sides = true, cols = 4, rows
 function cbTree(g, x, z, h, R) { const M = cbM(); CY(g, 0.18, h * 0.5, M.trunk, x, h * 0.25, z, 6); SP(g, h * 0.32, R() < 0.5 ? M.leaf : M.leaf2, x, h * 0.62, z, 0.9, 9); }
 function cbLamp(g, x, z, h = 4) { const M = cbM(); CY(g, 0.06, h, M.dark, x, h / 2, z, 6); SP(g, 0.2, M.lampW, x, h + 0.1, z, 1, 8); }
 function cbBase(g, w, d, m) { B(g, w, 3.6, d, m || AM.block, 0, -1.55, 0); }
-function cbCar(g, x, z, ry, R) { const M = cbM(), s = sub(g, x, 0, z, ry), c = cbPick(R, [M.red, M.blue, M.white, M.dark, M.yellow, M.metal]); B(s, 1.7, 0.7, 4.0, c, 0, 0.55, 0); B(s, 1.5, 0.55, 2.0, M.dark, 0, 1.15, -0.2); }
+function cbCar(g, x, z, ry, R) { const M = cbM(), s = sub(g, x, 0, z, ry), c = cbPick(R, [M.red, M.blue, M.white, M.dark, M.yellow, M.metal]); B(s, 1.7, 0.7, 4.0, c, 0, 0.55, 0); B(s, 1.5, 0.55, 2.0, M.dark, 0, 1.15, -0.2);
+  if (CITY.curB) { const b = CITY.curB, w = cityW(b, x, 0, z); addCollider({ x: w.x, z: w.z, hw: 0.88, hd: 2.05, rot: b.rot + ry, kind: 'car' }); } }   // parked cars are solid
 const CB_NAMES = { hotel: ['GRAND HOSHINAMI', 'SETO BLUE HOTEL', 'HOTEL AZURE', 'OCEAN PALACE', 'CORAL BAY RESORT', 'SUNSET TERRACE', 'MARINE GARDEN'], glass: ['SKY HOTEL', 'THE HOSHINAMI', 'HARBOR TOWER', 'BLUE HORIZON', 'STAR PEARL'], office: ['HOSHINAMI BANK', 'SETO TRADING', 'ISLAND TECH', 'MARINE CORP', 'HOSHI SOFT'] };
 // ---------- the catalog ----------
 const CITY_TYPES = {
@@ -8696,6 +8697,15 @@ DEMO2.road = function (spec) {
   for (let i = 0; i < spec.p.length - 1; i++) { const nd = DEMO2.nodes(spec, [spec.p[i], spec.p[i + 1]]), pl = planUserRoad(nd); if (pl.err) { fails++; DEMO2.log.push(`  ${spec.n} ${i}: ${pl.err}`); continue; } EDIT.nodes = nd; finishRoad(); EDIT.nodes = []; }
   return fails;
 };
+// 大橋通り: once the big bridge stands, a wide road from the ring road straight onto its deck (the bridge's place is chosen by the game, so this comes after it)
+DEMO2.bridgeRoad = function () {
+  if (!OHB.s) return; const S = OHB.s, mx = S.x - S.dx * 0.8, mz = S.z - S.dz * 0.8;
+  let best = null; for (const r of ROADS) { if (isFoot(r)) continue; const pr = rProject(r, mx, mz); if (pr && pr.d < 45 && (!best || pr.d < best.d)) best = { r, ...pr }; } if (!best) { DEMO2.log.push('大橋通り: no road near'); return; }
+  const n = Math.max(2, Math.round(best.d / 6)), pts = []; for (let i = 0; i <= n; i++) pts.push([lerp(best.x, mx, i / n), lerp(best.z, mz, i / n)]);
+  EDIT.rtype = 'asphalt'; EDIT.roadW = 'wide'; EDIT.rside = true;
+  const nodes = pts.map(([x, z], i) => i === 0 ? snapNode({ x, z }, false) : { x, z, snap: null }); nodes[n].snap = { y: OHB.top(0) - 0.25 };   // meet the deck's height
+  const pl = planUserRoad(nodes); if (pl.err) { DEMO2.log.push('大橋通り: ' + pl.err); return; } EDIT.nodes = nodes; finishRoad(); EDIT.nodes = []; OHB.reApron();
+};
 // ---------- everything the story unlocks (as before), money, cars ----------
 DEMO2.base = function () {
   const g = GAME, p = g.p;
@@ -8852,12 +8862,12 @@ GAME.startDemo = function () {
       DEMO.say('島の計画図をひろげています…'); await tick(); DEMO2.base();
       DEMO.say('丘をならして街の土地をつくっています…'); await tick(); DEMO2.terraform();
       for (const r of DEMO2.PLAN.roads) { DEMO.say(`道路をひいています…（${r.n}）`); await tick(); try { DEMO2.road(r); } catch (e) { DEMO2.log.push(`${r.n}: ${e}`); } }
-      DEMO.say('施設を建てています…'); await tick(); skipped = DEMO2.devs(); DEMO2.newcomers(); DEMO2.bridges();
+      DEMO.say('施設を建てています…'); await tick(); skipped = DEMO2.devs(); try { DEMO2.bridgeRoad(); } catch (e) { DEMO2.log.push('大橋通り: ' + e); } DEMO2.newcomers(); DEMO2.bridges();
       DEMO.say('スタジアム・遊園地・タワーを建てています…'); await tick(); DEMO2.bigN = DEMO2.landmarks();
       await DEMO2.fill(DEMO.say);
       DEMO.say('並木を植えています…'); await tick(); DEMO2.treeN = DEMO2.trees();
       DEMO.say('仕上げています…'); await tick();
-      try { JN.carve(); } catch (e) { DEMO2.log.push('carve ' + e); }
+      try { rebuildRoadMeshes(); JN.carve(); } catch (e) { DEMO2.log.push('carve ' + e); }
       refreshAll(); VEG.refresh(-400, -400, 400, 400); CITY.rebuildAll(); this.refreshDev(); this.refreshProjects(); this.syncNewcomers(); this.applyTruck && this.applyTruck(); this.mapDirty = true; MINI.builtAt = -99; this.renderTracker();
     } catch (e) { console.warn('demo2', e); DEMO2.log.push('error ' + e); }
     finally { DEMO2.building = false; UI.toast = toast; EDIT.nodes = []; EDIT.undo = []; EDIT.rtype = 'asphalt'; EDIT.roadW = 'narrow'; EDIT.rside = false; }
@@ -9350,7 +9360,7 @@ FSH.updatePanel = function () {
 { const _ok2 = GAME.onKey; GAME.onKey = function (e) { if (!e.repeat && e.code === 'KeyT' && this.p && !this.modal && !EDIT.on && !PL.veh && !LIFE.fish && FSH.holdKg() > 0.05) { const S = DECO.ship, H = this.LM.harbor; if ((S && Math.hypot(PL.x - S.x, PL.z - S.z) < 12) || (H && Math.hypot(PL.x - H.x, PL.z - H.z) < 60)) { FSH.openLanding(true); return true; } } return _ok2.apply(this, arguments); }; }
 { const _p2 = GAME.prompt; GAME.prompt = function () { if (this.p && !PL.veh && !this.modal && this.nearShip && this.nearShip() && FSH.holdKg() > 0.05) return `Space：出荷所　T：網の魚を水揚げ（魚倉 ${FSH.holdKg().toFixed(0)}kg）`; return _p2.apply(this, arguments); }; }
 // version label so you can tell whether the page has updated
-const GAME_VER = '43（10/27）';
+const GAME_VER = '44（10/27）';
 { const v = document.createElement('div'); v.id = 'verTag'; v.textContent = 'ver.' + GAME_VER; v.style.cssText = 'position:fixed;left:6px;bottom:4px;z-index:5;font-size:10px;color:rgba(255,255,255,.75);text-shadow:0 1px 2px rgba(0,0,0,.6);pointer-events:none;font-family:sans-serif'; document.body.appendChild(v); }
 
 // ===================== 島の収益: 建物ごとに1時間あたりの売上が入りつづける（留守のあいだも最大24時間分） =====================
@@ -12001,6 +12011,18 @@ OHB.clearVeg = function () { if (!OHB.s || !VEG.sets || !VEG.sets.length || !VEG
   for (const u of [-17, 4]) for (const o of [-OHB.Wd / 2 - 0.4, OHB.Wd / 2 + 0.4]) { xs.push(S.x + S.dx * u + S.side[0] * o); zs.push(S.z + S.dz * u + S.side[1] * o); }
   OHB.box = [Math.min(...xs) - 1, Math.min(...zs) - 1, Math.max(...xs) + 1, Math.max(...zs) + 1]; VEG.refresh(...OHB.box); };
 { const _rd = GAME.refreshDev; GAME.refreshDev = function () { const had = OHB.box; OHB.s = null; OHB.box = null; const r = _rd.apply(this, arguments); if (had && !OHB.s) { try { VEG.refresh(...had); } catch (e) { } } return r; }; }
+// the paved approach on the island side, draped over the ground and rising to the deck
+OHB.apron = function (s, g) { const P = (u, o = 0, y = 0) => new THREE.Vector3(s.x + s.dx * u + s.side[0] * o, y, s.z + s.dz * u + s.side[1] * o), Wd = OHB.Wd;
+  // (when a road comes up to the bridge, the approach starts where that road ends)
+  let U0 = -16; for (const r of ROADS) { if (isFoot(r)) continue; for (const P0 of [r.pts[0], r.pts[r.pts.length - 1]]) { const px = P0[0] - s.x, pz = P0[1] - s.z, u = px * s.dx + pz * s.dz, v = px * s.side[0] + pz * s.side[1]; if (u > -20 && u < 1 && Math.abs(v) < Wd / 2) U0 = Math.max(U0, Math.min(-2, u - 1)); } }
+  { const pos = [], col = [], idx = [], N = Math.max(4, Math.round(-U0)), hw = (Wd - 2.6) / 2, M = 4, dark = new THREE.Color('#6c6e70'), yl = new THREE.Color('#e8b320');
+    for (let i = 0; i <= N; i++) { const u = U0 + (0 - U0) * i / N; for (let k = 0; k <= M; k++) { const o = -hw - 0.6 + (2 * hw + 1.2) * k / M, p = P(u, o), y = Math.max(groundH(p.x, p.z) + 0.05, OHB.top(0) + u * 0.11 + 0.02) + (k === 0 || k === M ? -0.08 : 0); pos.push(p.x, y, p.z); const c = dark; col.push(c.r, c.g, c.b); }
+      if (i) for (let k = 0; k < M; k++) { const a = (i - 1) * (M + 1) + k, b = a + M + 1; idx.push(a, b, a + 1, a + 1, b, b + 1); } }
+    const ge = new THREE.BufferGeometry(); ge.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); ge.setAttribute('color', new THREE.Float32BufferAttribute(col, 3)); ge.setIndex(idx); ge.computeVertexNormals();
+    const ap = new THREE.Mesh(ge, worldMat(TEX.asphalt || TEX.concrete, 0.3, '#e6e6e2', 0.92, { polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 })); ap.receiveShadow = true; ap.userData.keep = true; g.add(ap); OHB.apronMesh = ap; }
+};
+// rebuild just the approach (a road was just drawn up to the bridge)
+OHB.reApron = function () { const ap = OHB.apronMesh; if (!OHB.s || !ap || !ap.parent) return; const g = ap.parent; g.remove(ap); ap.geometry.dispose(); OHB.apron(OHB.s, g); };
 OHB.dress = function (s) {
   const g = new THREE.Group(), P = (u, o = 0, y = 0) => new THREE.Vector3(s.x + s.dx * u + s.side[0] * o, y, s.z + s.dz * u + s.side[1] * o), Wd = OHB.Wd;
   const asph = worldMat(TEX.asphalt || TEX.concrete, 0.3, '#e6e6e2', 0.92), line = stdM('#f2f0e8', 0.6), yel = stdM('#e8b320', 0.55), curb = stdM('#cfcac0', 0.7);
@@ -12010,12 +12032,7 @@ OHB.dress = function (s) {
     strip(u, u1, 0.12, 0.1, 0.035, yel); strip(u, u1, -0.12, 0.1, 0.035, yel);   // double yellow centre line
     for (const o of [-(Wd / 2 - 1.35), Wd / 2 - 1.35]) strip(u, u1, o, 0.12, 0.035, line);
     for (const o of [-(Wd / 2 - 1.3), Wd / 2 - 1.3]) strip(u, u1, o + Math.sign(o) * 0.12, 0.2, 0.08, curb, 0.16); }
-  // the paved approach on the island side, draped over the ground and rising to the deck
-  { const pos = [], col = [], idx = [], N = 16, U0 = -16, hw = (Wd - 2.6) / 2, M = 4, dark = new THREE.Color('#6c6e70'), yl = new THREE.Color('#e8b320');
-    for (let i = 0; i <= N; i++) { const u = U0 + (0 - U0) * i / N; for (let k = 0; k <= M; k++) { const o = -hw - 0.6 + (2 * hw + 1.2) * k / M, p = P(u, o), y = Math.max(groundH(p.x, p.z) + 0.05, OHB.top(0) + u * 0.11 + 0.02) + (k === 0 || k === M ? -0.08 : 0); pos.push(p.x, y, p.z); const c = dark; col.push(c.r, c.g, c.b); }
-      if (i) for (let k = 0; k < M; k++) { const a = (i - 1) * (M + 1) + k, b = a + M + 1; idx.push(a, b, a + 1, a + 1, b, b + 1); } }
-    const ge = new THREE.BufferGeometry(); ge.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); ge.setAttribute('color', new THREE.Float32BufferAttribute(col, 3)); ge.setIndex(idx); ge.computeVertexNormals();
-    const ap = new THREE.Mesh(ge, worldMat(TEX.asphalt || TEX.concrete, 0.3, '#e6e6e2', 0.92, { polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 })); ap.receiveShadow = true; ap.userData.keep = true; g.add(ap); }
+  OHB.apron(s, g);
   // the toll plaza: a canopy over the lanes, two booths, barriers down, a sign
   const gu = OHB.gate + 2.5, gy = OHB.top(gu), rot = Math.atan2(s.dx, s.dz), pl = new THREE.Group(); pl.position.copy(P(gu, 0, gy)); pl.rotation.y = rot; g.add(pl);
   const wh = stdM('#f4f2ec', 0.5), gr = stdM('#2c7a4a', 0.5), rd = stdM('#d8423a', 0.5), gl = stdM('#9fc6dc', 0.15, 0.3, { transparent: true, opacity: 0.6 });
@@ -12029,6 +12046,17 @@ OHB.dress = function (s) {
   { const sg = dynSign(3.6, 0.9, 'ほしなみ島 →', '#1f4f8a', '#ffffff'); const p = P(14, -Wd / 2 + 0.4, OHB.top(14) + 2.6); sg.position.copy(p); sg.rotation.y = rot; g.add(sg); const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 2.4, 6), wh); pole.position.copy(p).add(new THREE.Vector3(0, -1.4, 0)); g.add(pole); }
   return typeof mergeLocal === 'function' ? mergeLocal(g) : g;
 };
+
+// ---------- ver.44: nothing is built on the bridge or in front of its island end ----------
+OHB.keepOut = function (x, z, m = 2.5) { if (!OHB.s) return false; const { u, v } = OHB.local(x, z); return u > -12 && u < OHB.L + 5 && Math.abs(v) < OHB.Wd / 2 + m; };
+// a road that ends at the bridge carries on over it (no dead-end kerb there)
+OHB.roadEnd = function (x, z) { if (!OHB.s) return false; const { u, v } = OHB.local(x, z); return u > -14 && u < 2 && Math.abs(v) < OHB.Wd / 2; };
+{ const _pa = CITY.planAt; CITY.planAt = function (id, p, rot) { const pl = _pa.apply(this, arguments); if (!pl || !pl.ok || !OHB.s) return pl; const T = CITY_TYPES[id], o = { x: pl.x, z: pl.z, rot: pl.rot };
+  for (let a = -T.w / 2; a <= T.w / 2 + 0.01; a += 2) for (let b = -T.d / 2; b <= T.d / 2 + 0.01; b += 2) { const [x, z] = toWorld(o, a, b); if (OHB.keepOut(x, z)) { pl.ok = false; pl.err = '大橋にかかっています'; return pl; } }
+  return pl; }; }
+queueMicrotask(() => { const _bp = GAME.buildPlan; GAME.buildPlan = function (p) { const pl = _bp.apply(this, arguments), d = this.placing; if (!pl || !pl.ok || !OHB.s || !d || d.id === 'ohashi') return pl; const o = { x: pl.x, z: pl.z, rot: pl.rot };
+  for (let a = -d.w / 2 - 1; a <= d.w / 2 + 1.01; a += 1.5) for (let b = -d.d / 2 - 1; b <= d.d / 2 + 2.01; b += 1.5) { const [x, z] = toWorld(o, a, b); if (OHB.keepOut(x, z)) { pl.ok = false; pl.err = '大橋にかかっています'; return pl; } }
+  return pl; }; });
 
 // ===================== 山の幸ひろい と 料理 =====================
 // 山の幸: 季節ごとに林の中や林のふち・竹やぶに、毎日ちがう場所で見つかる（F でひろう）。
@@ -13290,7 +13318,7 @@ CARHIT.others = function (self, x, z, y) {
   const O = [], add = (o, ox, oz, oy, rot, hl, hw) => {
     if (o === self || !isFinite(ox) || !isFinite(oz)) return; if (Math.hypot(ox - x, oz - z) > hl + 4) return;
     if (isFinite(y) && isFinite(oy) && Math.abs(oy - y) > 2.6) return; // under / over a bridge
-    O.push({ o, b: CARHIT.box(ox, oz, rot || 0, hl, hw) });
+    O.push({ o, y: oy, b: CARHIT.box(ox, oz, rot || 0, hl, hw) });
   };
   if (typeof DV !== 'undefined' && DV.bus) add(DV.bus, DV.bus.x, DV.bus.z, DV.bus.y, DV.bus.rot, CARHIT.BUS[0], CARHIT.BUS[1]);
   if (typeof BUSX !== 'undefined' && BUSX.extra) for (const b of BUSX.extra) add(b, b.x, b.z, b.y, b.rot, CARHIT.BUS[0], CARHIT.BUS[1]);
@@ -13302,6 +13330,7 @@ CARHIT.others = function (self, x, z, y) {
 CARHIT.pen = function (v, x, z, rot) {
   if (!isFinite(x) || !isFinite(z)) return 0; const A = CARHIT.mine(v, x, z, rot); let d = 0;
   for (const q of CARHIT.others(v, x, z, v.y)) { const h = CARHIT.sat(A, q.b); if (h) d += h.d; }
+  for (const q of CARHIT.people(v)) { if (Math.abs(q.x - x) > 6 || Math.abs(q.z - z) > 6 || (isFinite(v.y) && Math.abs(q.y - v.y) > 2.6)) continue; const h = CARHIT.circ(A, q.x, q.z, CARHIT.PR); if (h) d += h.d; }
   return d;
 };
 // replaces the old "2.6 m from the bus centre / 2.3 m from a traffic car centre" checks
@@ -13331,7 +13360,8 @@ CARHIT.resolve = function (v) {
 
 // ---- the others give way ----
 // your car(s) as boxes
-CARHIT.mineAll = function () { const R = []; for (const v of VEH) if (v.kind === 'truck' && isFinite(v.x)) R.push({ v, b: CARHIT.mine(v, v.x, v.z, v.rot) }); return R; };
+CARHIT.mineAll = function (bus) { const R = []; for (const v of VEH) if (v.kind === 'truck' && isFinite(v.x)) R.push({ v, b: CARHIT.mine(v, v.x, v.z, v.rot) });
+  for (const q of CARHIT.people(bus)) R.push({ v: { y: q.y, x: q.x, z: q.z }, b: CARHIT.box(q.x, q.z, 0, CARHIT.PR, CARHIT.PR), person: 1 }); return R; };
 // overlap of a box with your car(s)
 CARHIT.vsMine = function (B, y, M) { let d = 0; for (const m of M) { if (isFinite(y) && isFinite(m.v.y) && Math.abs(m.v.y - y) > 2.6) continue; const h = CARHIT.sat(B, m.b); if (h) d += h.d; } return d; };
 // a box stretched ahead of a vehicle by `ahead` metres
@@ -13340,7 +13370,7 @@ CARHIT.ahead = function (x, z, rot, hl, hw, ahead, dir) { const g = dir < 0 ? -1
 // island bus: brake when your car is in its path, never drive deeper into it
 { const _ub = GAME.updateBus; GAME.updateBus = function (dt) {
   const B = DV.bus; if (!B || B.x === undefined || !B.mesh) return _ub.apply(this, arguments);
-  const M = CARHIT.mineAll().filter(m => PL.veh !== B || m.v !== PL.veh); if (!M.length) return _ub.apply(this, arguments);
+  const M = CARHIT.mineAll(B).filter(m => PL.veh !== B || m.v !== PL.veh); if (!M.length) return _ub.apply(this, arguments);
   const d = dt || 0.016, [hl, hw] = CARHIT.BUS;
   if (!(B.wait > 0)) { const look = 1.2 + (B.v || 0) * (B.v || 0) / 9; if (CARHIT.vsMine(CARHIT.ahead(B.x, B.z, B.rot, hl, hw, look, 1), B.y, M) > 0) B.v = Math.max(0, (B.v || 0) - 7 * d); }
   const before = CARHIT.vsMine(CARHIT.box(B.x, B.z, B.rot, hl, hw), B.y, M);
@@ -13377,6 +13407,47 @@ CARHIT.ahead = function (x, z, rot, hl, hw, ahead, dir) { const g = dir < 0 ? -1
   }
   return r;
 }; }
+
+// ===== ver.44: people never sink into cars =====
+// you (on foot) and the villagers are circles; cars are the same boxes as above (your own car, the bus, traffic, parked cars)
+CARHIT.PR = 0.32;
+// circle (x,z,r) against box B → push for the circle { d, nx, nz } or null
+CARHIT.circ = function (B, x, z, r) {
+  const dx = x - B.x, dz = z - B.z, a = dx * B.s + dz * B.c, b = dx * B.c - dz * B.s, ca = clamp(a, -B.hl, B.hl), cb = clamp(b, -B.hw, B.hw), ea = a - ca, eb = b - cb, d = Math.hypot(ea, eb);
+  if (d > 1e-6) { if (d >= r) return null; const na = ea / d, nb = eb / d; return { d: r - d, nx: na * B.s + nb * B.c, nz: na * B.c - nb * B.s }; }
+  const pa = B.hl - Math.abs(a), pb = B.hw - Math.abs(b);
+  if (pa < pb) { const g = Math.sign(a) || 1; return { d: pa + r, nx: g * B.s, nz: g * B.c }; }
+  const g = Math.sign(b) || 1; return { d: pb + r, nx: g * B.c, nz: -g * B.s };
+};
+// who is walking around (not riding, not indoors)
+CARHIT.walking = () => !PL.veh && !GAME.inside && !(typeof BUS2 !== 'undefined' && BUS2.anim);
+CARHIT.people = function (bus) {
+  const P = []; if (!GAME.p) return P;
+  if (CARHIT.walking() && !(bus && typeof BUS2 !== 'undefined' && BUS2.anim)) P.push({ x: PL.x, z: PL.z, y: PL.y, pl: 1 });
+  for (const n of NPCS) if (!n.inRoom && !n.seat && n.mesh && n.mesh.visible && isFinite(n.x)) P.push({ x: n.x, z: n.z, y: n.y, n });
+  return P;
+};
+// how deep a person standing at (x,z) would be inside cars
+CARHIT.cars = function (x, z) { const O = CARHIT.others(null, x, z); if (!O.length) return O; const y = standY(x, z); return O.filter(q => !isFinite(q.y) || Math.abs(q.y - y) < 2.6); };
+CARHIT.ppen = function (x, z) { let d = 0; for (const q of CARHIT.cars(x, z)) { const h = CARHIT.circ(q.b, x, z, CARHIT.PR); if (h) d += h.d; } return d; };
+// walking into a car is like walking into a wall (people slide along it; villagers walk round it)
+{ const _cw = canWalk; CARHIT.walk0 = _cw; canWalk = function (x0, z0, x1, z1) {
+  if (!_cw.apply(this, arguments)) return false;
+  try { const p1 = CARHIT.ppen(x1, z1); if (p1 <= 0.002) return true; return p1 < CARHIT.ppen(x0, z0) - 0.002; } catch (e) { return true; } }; }
+// still inside one (a car stopped on you, you got out between two cars…): step out of it
+CARHIT.unstick = function (x, z) {
+  for (let it = 0; it < 3; it++) { let hit = null; for (const q of CARHIT.cars(x, z)) { const h = CARHIT.circ(q.b, x, z, CARHIT.PR); if (h && (!hit || h.d > hit.d)) hit = h; } if (!hit) break;
+    const k = Math.min(1.2, hit.d + 0.02); let moved = false;
+    for (const f of [1, 0.6, 0.3]) { const nx = x + hit.nx * k * f, nz = z + hit.nz * k * f, [qx, qz] = pushOut(nx, nz, 0.3); if (Math.hypot(qx - nx, qz - nz) < 0.01 && CARHIT.walk0(x, z, nx, nz)) { x = nx; z = nz; moved = true; break; } }
+    if (!moved) { x += hit.nx * k; z += hit.nz * k; break; } }   // nowhere better: out of the car anyway
+  return [x, z];
+};
+{ const _up = updatePlayer; updatePlayer = function () { const r = _up.apply(this, arguments);
+  try { if (CARHIT.walking() && GAME.p) { const [x, z] = CARHIT.unstick(PL.x, PL.z); if (x !== PL.x || z !== PL.z) { PL.x = x; PL.z = z; PL.y = Math.max(PL.y, standY(x, z)); PL.mesh.position.x = x; PL.mesh.position.z = z; } } } catch (e) { }
+  return r; }; }
+{ const _uv = updateVillagers; updateVillagers = function () { const r = _uv.apply(this, arguments);
+  try { if (GAME.p && !GAME.inside) for (const n of NPCS) { if (n.inRoom || n.seat || !n.mesh || !n.mesh.visible || !isFinite(n.x)) continue; const [x, z] = CARHIT.unstick(n.x, n.z); if (x !== n.x || z !== n.z) { n.x = x; n.z = z; n.mesh.position.x = x; n.mesh.position.z = z; } } } catch (e) { }
+  return r; }; }
 
 // ===================== MAIN =====================
 let renderer, scene, camera;
