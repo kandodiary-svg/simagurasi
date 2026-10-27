@@ -44,7 +44,13 @@ function canWalk(x0, z0, x1, z1) {
   if (y1 < -0.85 && !onPierAt(x1, z1) && walkDeckY(x1, z1) === null) return false;      // too deep
   const ontoDeck = walkDeckY(x1, z1) !== null || onPierAt(x1, z1) || (typeof PROJ !== 'undefined' && PROJ.deck && Math.abs(x1 - PROJ.deck.x) < PROJ.deck.hw && Math.abs(z1 - PROJ.deck.z) < PROJ.deck.hw);
   if (deckY(x1, z1) === null && !ontoDeck) { const w1 = waterDepthAt(x1, z1); if (w1 > 0.75 && w1 > waterDepthAt(x0, z0)) return false; }
-  if ((y1 - y0) / d > 1.25 && !(ontoDeck && y1 - y0 < 2.4)) return false;   // too steep to climb (pier/deck edges can be stepped onto)
+  // too steep to climb (pier/deck edges can be stepped onto). A kerb, the edge of a road or a low step (up to 0.35 m) is simply
+  // stepped up; whether the ground is too steep is judged over the next half metre, not over one frame's tiny step
+  // (that tiny step made every 12 cm kerb look like a wall: crossing a road at walking pace used to stop dead at the edge)
+  const rise = y1 - y0;
+  if (rise > 0.005 && !(ontoDeck && rise < 2.4)) {
+    if (rise > 0.35) return false;
+    const ya = standY(x0 + (x1 - x0) / d * 0.5, z0 + (z1 - z0) / d * 0.5) - y0; if (ya > 0.35 && ya / 0.5 > 1.25) return false; }
   if (Math.abs(x1) > 352 || Math.abs(z1) > 352) return false;
   return true;
 }
@@ -163,7 +169,11 @@ function updateVehicles(dt, locked) {
     else { PL.mesh.visible = true; PL.mesh.position.set(v.x + s * 0.4 + c * 0.0, v.mesh.position.y + 0.85, v.z + c * 0.4); PL.mesh.scale.setScalar(1); PL.mesh.rotation.y = v.rot; animateHero(dt, 0); PL.parts.upperArmL.rotation.x = PL.parts.upperArmR.rotation.x = -0.9; }
   }
 }
-function setViewMode(m) { CAM.mode = m; CAM.snap = true; CAM.fpPitch = 0; CAM.fpLook = 0; if (m === 'third') { CAM.yaw = (PL.veh ? PL.veh.rot : PL.rot) + Math.PI; CAM.pitch = 0.34; CAM.target.set(PL.x, PL.y + 1.05, PL.z); } UI.viewMode(m); }
+// views: 'third' (behind you), 'top' (looking down from high up, the way doesn't change by itself — like a diorama), 'first' (your eyes)
+function setViewMode(m) { const top = m === 'top'; if (top) m = 'third'; CAM.style = top ? 'top' : 'back'; CAM.mode = m; CAM.snap = true; CAM.fpPitch = 0; CAM.fpLook = 0;
+  if (m === 'third') { if (!top) CAM.yaw = (PL.veh ? PL.veh.rot : PL.rot) + Math.PI; CAM.pitch = top ? 0.9 : 0.34; if (!PL.veh) CAM.distT = 5.2; CAM.target.set(PL.x, PL.y + 1.05, PL.z); }
+  try { localStorage.setItem('hoshinami_view', top ? 'top' : m); } catch (e) { }
+  UI.viewMode(top ? 'top' : m); }
 function hitsAnyBld(x, z) { return collidersNear(x, z).some(c => !c.off && c.kind === 'bld' && hitsCollider(c, x, z, 0.3)); }
 function nearVehicle() { let best = null, bd = 4.2; for (const v of VEH) { const d = Math.hypot(v.x - PL.x, v.z - PL.z) - (v.kind === 'boat' ? 2.5 : 0); if (d < bd) { bd = d; best = v; } } return best; }
 function toggleVehicle() {
@@ -202,42 +212,46 @@ function updateCamera(dt) {
   }
   const focus = PL.veh ? new THREE.Vector3(PL.veh.x, PL.veh.mesh.position.y + (PL.veh.kind === 'boat' ? 2.4 : 1.6), PL.veh.z) : new THREE.Vector3(PL.x, PL.y + 1.05, PL.z);
   const free = now - CAM.lastDrag > 1.5 && !CAM.drag && !(typeof EDIT !== 'undefined' && EDIT.on);
-  if (PL.veh && free) CAM.yaw = angLerp(CAM.yaw, PL.veh.rot + Math.PI, Math.min(1, dt * 2.2));
-  else if (!PL.veh && free && PL.speed > 0.6) {
-    // on foot the camera comes round behind the way you are walking, gently (it eases in over ~0.8 s and never flips round
-    // when you walk towards it). The walk itself keeps its direction (see updatePlayer), so this no longer makes circles.
-    CAM.followT = Math.min(1, (CAM.followT || 0) + dt / 0.8);
-    const d = angDiff(PL.rot + Math.PI, CAM.yaw);
-    if (Math.abs(d) < 2.1) CAM.yaw += d * Math.min(1, dt * 1.15 * CAM.followT * Math.min(1, PL.speed / 2.2));
-    CAM.pitch = lerp(CAM.pitch, 0.34, Math.min(1, dt * 0.5));
-  } else if (!PL.veh) CAM.followT = Math.max(0, (CAM.followT || 0) - dt * 2);
+  // ---- which way the camera looks (ver.45) ----
+  // vehicles: stay behind them. On foot: when the way you walk differs clearly from where the camera looks (more than ~20°),
+  // the camera turns round behind you at an even, limited speed until it is straight behind, then stops. Small zig-zags don't
+  // sway it, walking toward the camera never flips it, and your own pitch and zoom are left alone.
+  if (PL.veh && free) { CAM.yaw = angLerp(CAM.yaw, PL.veh.rot + Math.PI, Math.min(1, dt * 2.2)); CAM.yawV = 0; }
+  else {
+    let want = 0;
+    if (!PL.veh && free && PL.speed > 0.6 && CAM.follow !== false && CAM.style !== 'top') {
+      const d = angDiff(PL.rot + Math.PI, CAM.yaw), ad = Math.abs(d);
+      if (!CAM.turning && ad > 0.36 && ad < 2.0) CAM.turning = true; if (CAM.turning && (ad < 0.04 || ad > 2.3)) CAM.turning = false;
+      CAM.followT = Math.min(1, (CAM.followT || 0) + dt / 0.5);
+      if (CAM.turning) want = Math.sign(d) * Math.min(0.85, ad * 1.2) * CAM.followT * Math.min(1, PL.speed / 2.2);
+    } else { CAM.followT = Math.max(0, (CAM.followT || 0) - dt * 2); CAM.turning = false; }
+    CAM.yawV = lerp(CAM.yawV || 0, want, Math.min(1, dt * 4)); CAM.yaw += CAM.yawV * dt;
+  }
   if (KEYS.KeyQ) { CAM.yaw += dt * 1.8; CAM.lastDrag = now; } if (KEYS.KeyE && !PL.veh) { CAM.yaw -= dt * 1.8; CAM.lastDrag = now; }
   CAM.dist = lerp(CAM.dist, CAM.distT, Math.min(1, dt * 4));
   // follow: close behind sideways, softly up and down (steps and rough ground no longer bob the whole view)
-  if (CAM.snap || CAM.target.distanceToSquared(focus) > 400) { CAM.target.copy(focus); CAM.lift = 0; CAM.len = 0; CAM.snap = false; }
+  if (CAM.snap || CAM.target.distanceToSquared(focus) > 400) { CAM.target.copy(focus); CAM.lift = 0; CAM.len = 0; CAM.pb = 0; CAM.snap = false; }
   else { const kx = Math.min(1, dt * 12), dy = focus.y - CAM.target.y, ky = Math.min(1, dt * (Math.abs(dy) > 1.5 ? 9 : PL.veh ? 6 : 3.5));
     CAM.target.x += (focus.x - CAM.target.x) * kx; CAM.target.z += (focus.z - CAM.target.z) * kx; CAM.target.y += dy * ky; }
-  const T = CAM.target, full = CAM.dist * CAM.K, minL = Math.min(full, 2.6);
-  // walls of buildings: tilt up a little to look over them (smoothly, let go after a moment) and pull in, but never closer than
-  // 2.6 m: what is still in the way (a wall, an eave, leaves) is cut out around you in the shader instead (see.js).
-  // Low walls and fences only count near the ground; trees and posts don't count.
+  const topV = CAM.style === 'top' && !PL.veh, T = CAM.target, full = CAM.dist * CAM.K * (topV ? 1.35 : 1);
+  if (topV) CAM.pitch = clamp(CAM.pitch, 0.6, 1.35);   // the look-down view stays a look-down view
+  // ---- things in the way (ver.45): buildings with their real height, walls, fences, cars ----
+  // Low things (a fence, a wall, a parked car) are looked over by tilting up a little; anything tall (a house, a tower) makes the
+  // camera come in front of it — quickly in, slowly back out. The camera is never left inside a building.
   const crowns = typeof SEE !== 'undefined' && SEE.crownsAt && SEE.grid && !PL.veh;
-  const freeLen = (pitch, trees) => { const cp = Math.cos(pitch), dx = Math.sin(CAM.yaw) * cp, dy = Math.sin(pitch), dz = Math.cos(CAM.yaw) * cp;
-    for (let t = 0.8; t < full; t += 0.4) { const px = T.x + dx * t, py = T.y + dy * t, pz = T.z + dz * t, hy = py - groundH(px, pz); if (hy > 9) continue;
-      for (const c of collidersNear(px, pz)) { if (c.off || c.r !== undefined) continue; if (hy > 1.4 && Math.min(c.hw || 0, c.hd || 0) < 0.25) continue;
-        const cs = Math.cos(c.rot || 0), sn = Math.sin(c.rot || 0), lx = (px - c.x) * cs - (pz - c.z) * sn, lz = (px - c.x) * sn + (pz - c.z) * cs; if (Math.abs(lx) < c.hw + 0.05 && Math.abs(lz) < c.hd + 0.05) return Math.max(minL, t - 0.4); }
-      // in a wood: stop short of the leaf crowns overhead (the crown you are still in is cut out in the shader)
-      if (trees && t > 2.2 && SEE.crownsAt(px, py, pz, 0.95).length) return Math.max(minL, t - 0.4); }
-    return full; };
-  CAM.pb = CAM.pb || 0; CAM.pbHold = Math.max(0, (CAM.pbHold || 0) - dt); let pbT = 0;
-  if (!PL.veh && full > 2.5 && freeLen(CAM.pitch) < full * 0.9) { pbT = 0.35; for (const b of [0.15, 0.25]) if (freeLen(Math.min(0.85, CAM.pitch + b)) >= full * 0.85) { pbT = b; break; } pbT = Math.min(pbT, Math.max(0, 0.85 - CAM.pitch)); CAM.pbHold = 0.8; }
+  const ray = (pitch) => { const cp = Math.cos(pitch); return new THREE.Vector3(Math.sin(CAM.yaw) * cp, Math.sin(pitch), Math.cos(CAM.yaw) * cp); };
+  const probe = (dir) => CAMX.free(T, dir, full, crowns);
+  let base = probe(ray(CAM.pitch)), pbT = 0;
+  CAM.pb = CAM.pb || 0; CAM.pbHold = Math.max(0, (CAM.pbHold || 0) - dt);
+  if (base.L < 2.2 && full > 2.5) { // backed right up against a wall: rise over your shoulder rather than sit in the wall
+    let best = base.L; for (const b of [0.3, 0.6, 0.9, 1.1]) { if (CAM.pitch + b > 1.45) break; const L2 = probe(ray(CAM.pitch + b)).L; if (L2 > best + 0.5) { best = L2; pbT = b; } if (L2 >= full * 0.9) break; } if (pbT) CAM.pbHold = 0.6; }
   else if (CAM.pbHold > 0) pbT = CAM.pb;
-  CAM.pb = lerp(CAM.pb, pbT, Math.min(1, dt * (pbT > CAM.pb ? 3.5 : 1.2)));
-  const pitch = CAM.pitch + CAM.pb, cp = Math.cos(pitch), dir = new THREE.Vector3(Math.sin(CAM.yaw) * cp, Math.sin(pitch), Math.cos(CAM.yaw) * cp);
-  let L = freeLen(pitch, crowns);
-  // come back out only once it has stayed clear for a moment (walking under trees made the distance breathe)
-  if (CAM.len && L > CAM.len + 0.3) { CAM.outT = (CAM.outT || 0) + dt; if (CAM.outT < 0.9) L = CAM.len; } else CAM.outT = 0;
-  CAM.len = !CAM.len ? L : lerp(CAM.len, L, Math.min(1, dt * (L < CAM.len ? 6 : 1.6)));
+  CAM.pb = lerp(CAM.pb, pbT, Math.min(1, dt * (pbT > CAM.pb ? 4 : 1.5)));
+  const pitch = CAM.pitch + CAM.pb, dir = ray(pitch);
+  let L = probe(dir).L;
+  // come back out only once it has stayed clear for a moment (walking past posts and doorways made the distance breathe)
+  if (CAM.len && L > CAM.len + 0.3) { CAM.outT = (CAM.outT || 0) + dt; if (CAM.outT < 0.6) L = CAM.len; } else CAM.outT = 0;
+  CAM.len = !CAM.len ? L : L < CAM.len ? Math.max(L, lerp(CAM.len, L, Math.min(1, dt * 9))) : lerp(CAM.len, L, Math.min(1, dt * 1.6));   // in quickly, out gently
   const pos = T.clone().addScaledVector(dir, CAM.len);
   // ground behind you (a slope, a bank): lift the camera smoothly instead of jumping to the ground every frame
   const sea = typeof SEA !== 'undefined' && SEA.h !== undefined ? SEA.h : 0; let need = 0;
@@ -245,8 +259,43 @@ function updateCamera(dt) {
   CAM.lift = CAM.lift || 0; CAM.lift = lerp(CAM.lift, need, Math.min(1, dt * (need > CAM.lift ? 5 : 1.4)));
   pos.y += Math.max(0, CAM.lift);
   const gy = Math.max(groundH(pos.x, pos.z), sea) + 0.35; if (pos.y < gy) pos.y = gy;
+  // walking along a house: the camera would sit in its eaves — step it out sideways a little instead of pulling it in
+  const ev = CAMX.eaves(pos); CAM.push = CAM.push || new THREE.Vector3(); CAM.push.lerp(ev, Math.min(1, dt * 6)); pos.add(CAM.push);
   camera.position.copy(pos); camera.lookAt(CAM.target);
 }
+// ---------- what the camera can't be inside (ver.45) ----------
+const CAMX = { MIN: 1.0 };
+// top of a collider: city buildings and developments know their height; thin walls and fences are low; anything else ~8.5 m
+CAMX.top = function (c) { if (c.base === undefined) c.base = groundH(c.x, c.z); const thin = Math.min(c.hw || 0, c.hd || 0) < 0.25; if (thin) return c.base + Math.min(1.6, c.top !== undefined ? c.top - c.base : 1.6); return c.top !== undefined ? c.top : c.base + 8.5; };
+// is the point (x,y,z) inside something solid? → { top } or null
+CAMX.solid = function (x, y, z, cars = true) {
+  for (const c of collidersNear(x, z)) { if (c.off || c.r !== undefined || c.kind === 'tree' || c.kind === 'rock') continue;
+    const cs = Math.cos(c.rot || 0), sn = Math.sin(c.rot || 0), lx = (x - c.x) * cs - (z - c.z) * sn, lz = (x - c.x) * sn + (z - c.z) * cs;
+    if (Math.abs(lx) < (c.hw || 0) + 0.06 && Math.abs(lz) < (c.hd || 0) + 0.06) { const top = CAMX.top(c); if (y < top + 0.25) return { top }; } }
+  if (cars && typeof CARHIT !== 'undefined') for (const q of CARHIT.others(PL.veh || null, x, z)) { const h = q.o && (q.o === DV.bus || (typeof BUSX !== 'undefined' && BUSX.extra && BUSX.extra.includes(q.o))) ? 3.4 : 1.8, top = (isFinite(q.y) ? q.y : groundH(x, z)) + h;
+    if (y < top && CARHIT.circ(q.b, x, z, 0.15)) return { top }; }
+  return null;
+};
+// roofs reach ~0.7 m past the walls: a camera up at roof height that close to a building is pushed out of that zone
+CAMX.eaves = function (p) { const out = new THREE.Vector3();
+  for (const c of collidersNear(p.x, p.z)) { if (c.off || c.r !== undefined || c.kind === 'tree' || c.kind === 'rock') continue; if (Math.min(c.hw || 0, c.hd || 0) < 0.25) continue;
+    if (c.base === undefined) c.base = groundH(c.x, c.z); if (p.y < c.base + 2.0 || p.y > CAMX.top(c) + 0.6) continue;
+    const cs = Math.cos(c.rot || 0), sn = Math.sin(c.rot || 0), lx = (p.x - c.x) * cs - (p.z - c.z) * sn, lz = (p.x - c.x) * sn + (p.z - c.z) * cs, ex = Math.abs(lx) - c.hw, ez = Math.abs(lz) - c.hd, m = 0.75;
+    if (ex > m || ez > m || (ex < 0 && ez < 0)) continue;
+    let ox = 0, oz = 0; if (ex >= ez) ox = Math.sign(lx) * (m - ex); else oz = Math.sign(lz) * (m - ez);
+    out.x += ox * cs + oz * sn; out.z += -ox * sn + oz * cs; }
+  return out; };
+// how far back along dir (from the target) the camera can go; low = what stopped it is low enough to look over
+// (low things — fences, garden walls, cars — never push the camera in: a metre or two behind you the camera is already above them,
+//  and if one hides your legs the see-through window shows you. The probe is a little thick so a grazing corner doesn't flicker.)
+CAMX.free = function (T, dir, full, trees) {
+  const sx = dir.z, sz = -dir.x, sl = Math.hypot(sx, sz) || 1;
+  for (let t = 0.6; t < full; t += 0.3) { const y = T.y + dir.y * t; let s = null;
+    for (const o of [0, 0.15, -0.15]) { const x = T.x + dir.x * t + sx / sl * o, z = T.z + dir.z * t + sz / sl * o, q = CAMX.solid(x, y, z, false); if (q && q.top > T.y + 1.2) { s = q; break; } }
+    if (s) return { L: Math.max(CAMX.MIN, t - 0.45), low: false };
+    if (trees && t > 2.2 && SEE.crownsAt(T.x + dir.x * t, y, T.z + dir.z * t, 0.95).length) return { L: Math.max(2.2, t - 0.4), low: false }; }
+  return { L: full, low: false };
+};
 // ---------- effects ----------
 const FX = {
   list: [], scene: null,

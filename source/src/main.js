@@ -74,7 +74,7 @@ function initInput() {
       if (e.code === 'KeyR' && !e.repeat && EDIT.tool === 'house') { EDIT.hRotOff = ((EDIT.hRotOff || 0) + Math.PI / 2) % (Math.PI * 2); EDIT.housePick = null; UI.editPanel(); }
       if (e.code === 'Space') return;
     }
-    if (e.code === 'KeyV' && !e.repeat) { setViewMode(CAM.mode === 'first' ? 'third' : 'first'); return; }
+    if (e.code === 'KeyV' && !e.repeat) { setViewMode(CAM.mode === 'first' ? 'third' : CAM.style === 'top' || PL.veh ? 'first' : 'top'); return; }   // うしろから → 見おろし → 目線（乗り物では うしろから ⇄ 目線）
     if (e.code === 'KeyF' && !e.repeat) { GAME.fishKey(); return; }
     if (UI._choices && /^Digit[1-9]$/.test(e.code)) { const o = UI._choices[+e.code.slice(5) - 1]; if (o) { o.f(); return; } }
     if (e.code === 'Space' && !e.repeat) { if (GAME.fishing()) { GAME.fishKey(); return; } if (UI._choices) { UI._choices[UI._choices.length - 1].f(); return; } if (PL.veh && (PL.veh.kind === 'bus' || PL.veh.kind === 'ferry')) { GAME.rideKey(); return; } if (advanceTalk()) return; const n = !PL.veh && nearVillager(); if (n) { startTalk(n); return; } if (GAME.interact()) return; toggleVehicle(); }

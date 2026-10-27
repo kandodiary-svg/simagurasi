@@ -1,42 +1,43 @@
 // ===================== カメラ: 木の葉や幹・建物・車でキャラが隠れないように =====================
-// 1) the camera never sits inside a tree crown: it drops under the crown (still behind you) or, if that would be too low, moves closer
-// 2) when a building or a parked car is in the way it rises over it instead of collapsing onto the back of your head
-// 3) whatever still crosses the line of sight (a trunk, a crown edge) is cut out in a narrow tube around that line:
-//    clear in the middle, a thin dithered rim. Shadows are untouched (they use their own depth material).
-const SEE = { p: { value: new THREE.Vector3() }, on: { value: 0 }, crC: { value: [new THREE.Vector4(0, -999, 0, 0), new THREE.Vector4(0, -999, 0, 0)] }, crV: { value: [1, 1] }, mats: new Set(), adj: new THREE.Vector3(), grid: null, sig: '' };
+// ver.45: when something really hides you (a wall, a tree, a car between the camera and you), a round window opens around you
+// on the screen — only through what is in front of you, never through what is beside or behind you — and closes again when
+// you are in the open. Leaves right around the camera fade out. Shadows are untouched (they use their own depth material).
+const SEE = { p: { value: new THREE.Vector3() }, on: { value: 0 }, ndc: { value: new THREE.Vector2() }, asp: { value: 1 }, rad: { value: 0.2 }, dist: { value: 10 }, margin: { value: 0.6 }, nearOn: { value: 0 },
+  crC: { value: [new THREE.Vector4(0, -999, 0, 0), new THREE.Vector4(0, -999, 0, 0)] }, crV: { value: [1, 1] }, mats: new Set(), adj: new THREE.Vector3(), grid: null, sig: '', k: 0, hidT: 0 };
 SEE.patch = function (m, near = 2.6, crown = false) {
   if (!m || SEE.mats.has(m) || !m.isMeshStandardMaterial) return; SEE.mats.add(m);
   const prev = m.onBeforeCompile, base = THREE.Material.prototype.customProgramCacheKey, own = m.customProgramCacheKey !== base ? m.customProgramCacheKey.bind(m) : null, prevSrc = prev ? prev.toString() : '';
   // the program cache key must still tell materials with different shader tweaks apart (three.js keys custom shaders by the
   // source of onBeforeCompile, and this wrapper's source is the same for every material it wraps)
-  m.customProgramCacheKey = () => 'see|' + (crown ? 'cr|' : '') + prevSrc + '|' + (own ? own() : '');
+  m.customProgramCacheKey = () => 'see45|' + (crown ? 'cr|' : '') + prevSrc + '|' + (own ? own() : '');
   m.onBeforeCompile = (sh, r) => {
     if (prev) prev(sh, r);
-    sh.uniforms.uSeeP = SEE.p; sh.uniforms.uSeeOn = SEE.on; sh.uniforms.uSeeNear = { value: near }; if (crown) { sh.uniforms.uCrC = SEE.crC; sh.uniforms.uCrV = SEE.crV; }
-    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vSeeW;').replace('#include <project_vertex>', `#include <project_vertex>
+    sh.uniforms.uSeeOn = SEE.on; sh.uniforms.uSeeNdc = SEE.ndc; sh.uniforms.uSeeAsp = SEE.asp; sh.uniforms.uSeeRad = SEE.rad; sh.uniforms.uSeeDist = SEE.dist; sh.uniforms.uSeeMargin = SEE.margin; sh.uniforms.uSeeNearOn = SEE.nearOn; sh.uniforms.uSeeNear = { value: near };
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vSeeW; varying vec4 vSeeClip;').replace('#include <project_vertex>', `#include <project_vertex>
+      vSeeClip = gl_Position;
       #ifdef USE_INSTANCING
         vSeeW = (modelMatrix * instanceMatrix * vec4(transformed, 1.0)).xyz;
       #else
         vSeeW = (modelMatrix * vec4(transformed, 1.0)).xyz;
       #endif`);
-    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vSeeW; uniform vec3 uSeeP; uniform float uSeeOn; uniform float uSeeNear;' + (crown ? ' uniform vec4 uCrC[2]; uniform float uCrV[2];' : '')).replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>
-      if (uSeeOn > 0.5) {
-        vec3 ab = uSeeP - cameraPosition; float L2 = max(dot(ab, ab), 1e-4);
-        float t = clamp(dot(vSeeW - cameraPosition, ab) / L2, 0.0, 1.0);
-        float pd = length(vSeeW - (cameraPosition + ab * t)), rr = mix(0.55, 1.25, t);
-        float k = smoothstep(rr, rr * 0.72, pd) * smoothstep(0.97, 0.86, t);
-        k = max(k, smoothstep(uSeeNear, uSeeNear * 0.46, length(vSeeW - cameraPosition)));   // things right around the camera fade out (trees: 2.6 m, the camera no longer dodges crowns; buildings: 1 m)
-        ${crown ? `// the crown the camera is in disappears (instead of the camera dodging it)
-        for (int i = 0; i < 2; i++) { vec4 c = uCrC[i]; if (c.w > 0.0) { vec3 d = vSeeW - c.xyz; float q = (d.x * d.x + d.z * d.z) / (c.w * c.w) + d.y * d.y / (uCrV[i] * uCrV[i]); k = max(k, smoothstep(1.0, 0.82, q)); } }` : ''}
-        float ign = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
-        if (ign < k) discard;
+    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vSeeW; varying vec4 vSeeClip; uniform float uSeeOn; uniform vec2 uSeeNdc; uniform float uSeeAsp; uniform float uSeeRad; uniform float uSeeDist; uniform float uSeeMargin; uniform float uSeeNear; uniform float uSeeNearOn;').replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>
+      {
+        float fd = length(vSeeW - cameraPosition), k = 0.0;
+        // right in front of the lens (leaves around the camera, a wall it brushes)
+        k = uSeeNearOn * smoothstep(uSeeNear, uSeeNear * 0.45, fd);
+        // the window round you: only what is nearer to the camera than you are
+        if (uSeeOn > 0.001 && fd < uSeeDist - uSeeMargin) {
+          vec2 q = (vSeeClip.xy / vSeeClip.w - uSeeNdc) * vec2(uSeeAsp, 1.0); float r = length(q) / max(uSeeRad, 1e-4);
+          k = max(k, smoothstep(1.0, 0.78, r) * smoothstep(0.0, 0.25, uSeeOn) * smoothstep(uSeeDist - uSeeMargin, uSeeDist - uSeeMargin - 0.6, fd));
+        }
+        if (k > 0.0) { float ign = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715)))); if (ign < k) discard; }
       }`);
   };
   m.needsUpdate = true;
 };
 SEE.patchTrees = function () {
-  for (const st of VEG.sets || []) if (st.kind === 'tree') SEE.patch(st.mesh.material, 2.6, true);
-  for (const k in VEG.userSets || {}) for (const st of VEG.userSets[k] || []) st && st.mesh && SEE.patch(st.mesh.material, 2.6, true);
+  for (const st of VEG.sets || []) if (st.kind === 'tree') SEE.patch(st.mesh.material, 3.0, true);
+  for (const k in VEG.userSets || {}) for (const st of VEG.userSets[k] || []) st && st.mesh && SEE.patch(st.mesh.material, 3.0, true);
 };
 { const _b = buildVegetation; buildVegetation = function () { const r = _b.apply(this, arguments); try { SEE.patchTrees(); } catch (e) { console.warn('see', e); } return r; }; }
 // ---------- tree crowns (rough ellipsoids per kind, scaled like the instances) ----------
@@ -99,13 +100,29 @@ SEE.crownUpdate = function () {
   const cp = camera.position, L = SEE.crownsAt(cp.x, cp.y, cp.z);
   for (let i = 0; i < 2; i++) { const c = L[i], v = SEE.crC.value[i]; if (c) { v.set(c.x, c.y, c.z, c.rh); SEE.crV.value[i] = c.rv; } else v.w = 0; }
 };
+// is the line from the camera to you blocked? (buildings with their height, walls, cars, tree crowns)
+SEE.hidden = function () {
+  const c = camera.position, T = CAM.target, pts = [T, new THREE.Vector3(T.x, T.y + 0.55, T.z)], foot = !PL.veh;
+  let n0 = 0; for (const P of pts) { const L = c.distanceTo(P), n = Math.ceil(L / 0.35); let blocked = false;
+    for (let i = 1; i < n; i++) { const t = i / n; if (L * (1 - t) < (foot ? 0.55 : 2.6)) break; const x = c.x + (P.x - c.x) * t, y = c.y + (P.y - c.y) * t, z = c.z + (P.z - c.z) * t;
+      if (CAMX.solid(x, y, z, true) || (SEE.grid && SEE.crownsAt(x, y, z, 0.85).length)) { blocked = true; break; }
+      if (collidersNear(x, z).some(q => !q.off && q.r !== undefined && q.kind === 'tree' && Math.hypot(x - q.x, z - q.z) < q.r + 0.1 && y < groundH(q.x, q.z) + 3)) { blocked = true; break; } }
+    if (blocked) n0++; }
+  return n0 === pts.length;   // you are hidden only when both your body and your head are
+};
 { const _u = updateCamera; updateCamera = function (dt) { const r = _u.apply(this, arguments);
   const on = !SEE.disabled && CAM.mode === 'third' && !GAME.inside && !window.__freecam && GAME.modal !== 'title' && !(GAME.camOverride && GAME.camOverride());
   if (on) {
-    if (!SEE.noFix) try { SEE.fix(dt || 0.016); } catch (e) { }
     try { SEE.crownUpdate(); } catch (e) { }
-  } else SEE.adj.set(0, 0, 0);
-  SEE.on.value = on ? 1 : 0; if (on) SEE.p.value.copy(CAM.target); return r; }; }
+    // open the window only while you are really hidden; close it a moment after you come out (no flicker at edges)
+    let hid = false; try { hid = SEE.hidden(); } catch (e) { }
+    SEE.hidT = hid ? 0.35 : Math.max(0, SEE.hidT - (dt || 0.016));
+    SEE.k = lerp(SEE.k, hid || SEE.hidT > 0 ? 1 : 0, Math.min(1, (dt || 0.016) * (hid ? 7 : 3)));
+    const T = CAM.target, v = T.clone().project(camera), d = camera.position.distanceTo(T), R = PL.veh ? Math.max(2.2, (VSPEC[PL.veh.kind] || {}).len || 2) + 0.8 : 0.95;
+    SEE.ndc.value.set(v.x, v.y); SEE.asp.value = camera.aspect; SEE.dist.value = d; SEE.margin.value = PL.veh ? ((VSPEC[PL.veh.kind] || {}).len || 2) + 0.9 : 0.55;
+    SEE.rad.value = (R / (d * Math.tan(camera.fov * Math.PI / 360))) * (0.55 + 0.45 * SEE.k);
+  } else { SEE.adj.set(0, 0, 0); SEE.k = 0; }
+  SEE.on.value = on ? SEE.k : 0; SEE.nearOn.value = on ? 1 : 0; if (on) SEE.p.value.copy(CAM.target); return r; }; }
 
 // ---------- walls, eaves, fences, cars… between the camera and you are cut out the same way (the camera no longer hugs walls) ----------
 SEE.skip = new Set();

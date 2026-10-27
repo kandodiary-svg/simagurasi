@@ -26,10 +26,10 @@ CARHIT.others = function (self, x, z, y) {
     if (isFinite(y) && isFinite(oy) && Math.abs(oy - y) > 2.6) return; // under / over a bridge
     O.push({ o, y: oy, b: CARHIT.box(ox, oz, rot || 0, hl, hw) });
   };
-  if (typeof DV !== 'undefined' && DV.bus) add(DV.bus, DV.bus.x, DV.bus.z, DV.bus.y, DV.bus.rot, CARHIT.BUS[0], CARHIT.BUS[1]);
+  if (typeof DV !== 'undefined' && DV.bus && (!DV.bus.mesh || DV.bus.mesh.visible)) add(DV.bus, DV.bus.x, DV.bus.z, DV.bus.y, DV.bus.rot, CARHIT.BUS[0], CARHIT.BUS[1]);   // (only what you can see is solid)
   if (typeof BUSX !== 'undefined' && BUSX.extra) for (const b of BUSX.extra) add(b, b.x, b.z, b.y, b.rot, CARHIT.BUS[0], CARHIT.BUS[1]);
   if (typeof TRF !== 'undefined') for (const c of (TRF.cars || []).concat(TRF.parked || [])) { const T = CAR_TYPES[c.type] || CAR_TYPES.kei; add(c, c.x, c.z, c.y, c.rot, T.L / 2 + 0.02, T.W / 2 + 0.02); }
-  for (const v of VEH) if (v.kind === 'truck' && v !== self) add(v, v.x, v.z, v.y, v.rot, VSPEC.truck.len, VSPEC.truck.wid);
+  for (const v of VEH) if (v.kind === 'truck' && v !== self && (!v.mesh || v.mesh.visible)) add(v, v.x, v.z, v.y, v.rot, VSPEC.truck.len, VSPEC.truck.wid);
   return O;
 };
 // how deep your car would be inside other cars at this pose (sum of overlaps)

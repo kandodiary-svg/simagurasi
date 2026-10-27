@@ -2029,7 +2029,13 @@ function canWalk(x0, z0, x1, z1) {
   if (y1 < -0.85 && !onPierAt(x1, z1) && walkDeckY(x1, z1) === null) return false;      // too deep
   const ontoDeck = walkDeckY(x1, z1) !== null || onPierAt(x1, z1) || (typeof PROJ !== 'undefined' && PROJ.deck && Math.abs(x1 - PROJ.deck.x) < PROJ.deck.hw && Math.abs(z1 - PROJ.deck.z) < PROJ.deck.hw);
   if (deckY(x1, z1) === null && !ontoDeck) { const w1 = waterDepthAt(x1, z1); if (w1 > 0.75 && w1 > waterDepthAt(x0, z0)) return false; }
-  if ((y1 - y0) / d > 1.25 && !(ontoDeck && y1 - y0 < 2.4)) return false;   // too steep to climb (pier/deck edges can be stepped onto)
+  // too steep to climb (pier/deck edges can be stepped onto). A kerb, the edge of a road or a low step (up to 0.35 m) is simply
+  // stepped up; whether the ground is too steep is judged over the next half metre, not over one frame's tiny step
+  // (that tiny step made every 12 cm kerb look like a wall: crossing a road at walking pace used to stop dead at the edge)
+  const rise = y1 - y0;
+  if (rise > 0.005 && !(ontoDeck && rise < 2.4)) {
+    if (rise > 0.35) return false;
+    const ya = standY(x0 + (x1 - x0) / d * 0.5, z0 + (z1 - z0) / d * 0.5) - y0; if (ya > 0.35 && ya / 0.5 > 1.25) return false; }
   if (Math.abs(x1) > 352 || Math.abs(z1) > 352) return false;
   return true;
 }
@@ -2148,7 +2154,11 @@ function updateVehicles(dt, locked) {
     else { PL.mesh.visible = true; PL.mesh.position.set(v.x + s * 0.4 + c * 0.0, v.mesh.position.y + 0.85, v.z + c * 0.4); PL.mesh.scale.setScalar(1); PL.mesh.rotation.y = v.rot; animateHero(dt, 0); PL.parts.upperArmL.rotation.x = PL.parts.upperArmR.rotation.x = -0.9; }
   }
 }
-function setViewMode(m) { CAM.mode = m; CAM.snap = true; CAM.fpPitch = 0; CAM.fpLook = 0; if (m === 'third') { CAM.yaw = (PL.veh ? PL.veh.rot : PL.rot) + Math.PI; CAM.pitch = 0.34; CAM.target.set(PL.x, PL.y + 1.05, PL.z); } UI.viewMode(m); }
+// views: 'third' (behind you), 'top' (looking down from high up, the way doesn't change by itself — like a diorama), 'first' (your eyes)
+function setViewMode(m) { const top = m === 'top'; if (top) m = 'third'; CAM.style = top ? 'top' : 'back'; CAM.mode = m; CAM.snap = true; CAM.fpPitch = 0; CAM.fpLook = 0;
+  if (m === 'third') { if (!top) CAM.yaw = (PL.veh ? PL.veh.rot : PL.rot) + Math.PI; CAM.pitch = top ? 0.9 : 0.34; if (!PL.veh) CAM.distT = 5.2; CAM.target.set(PL.x, PL.y + 1.05, PL.z); }
+  try { localStorage.setItem('hoshinami_view', top ? 'top' : m); } catch (e) { }
+  UI.viewMode(top ? 'top' : m); }
 function hitsAnyBld(x, z) { return collidersNear(x, z).some(c => !c.off && c.kind === 'bld' && hitsCollider(c, x, z, 0.3)); }
 function nearVehicle() { let best = null, bd = 4.2; for (const v of VEH) { const d = Math.hypot(v.x - PL.x, v.z - PL.z) - (v.kind === 'boat' ? 2.5 : 0); if (d < bd) { bd = d; best = v; } } return best; }
 function toggleVehicle() {
@@ -2187,42 +2197,46 @@ function updateCamera(dt) {
   }
   const focus = PL.veh ? new THREE.Vector3(PL.veh.x, PL.veh.mesh.position.y + (PL.veh.kind === 'boat' ? 2.4 : 1.6), PL.veh.z) : new THREE.Vector3(PL.x, PL.y + 1.05, PL.z);
   const free = now - CAM.lastDrag > 1.5 && !CAM.drag && !(typeof EDIT !== 'undefined' && EDIT.on);
-  if (PL.veh && free) CAM.yaw = angLerp(CAM.yaw, PL.veh.rot + Math.PI, Math.min(1, dt * 2.2));
-  else if (!PL.veh && free && PL.speed > 0.6) {
-    // on foot the camera comes round behind the way you are walking, gently (it eases in over ~0.8 s and never flips round
-    // when you walk towards it). The walk itself keeps its direction (see updatePlayer), so this no longer makes circles.
-    CAM.followT = Math.min(1, (CAM.followT || 0) + dt / 0.8);
-    const d = angDiff(PL.rot + Math.PI, CAM.yaw);
-    if (Math.abs(d) < 2.1) CAM.yaw += d * Math.min(1, dt * 1.15 * CAM.followT * Math.min(1, PL.speed / 2.2));
-    CAM.pitch = lerp(CAM.pitch, 0.34, Math.min(1, dt * 0.5));
-  } else if (!PL.veh) CAM.followT = Math.max(0, (CAM.followT || 0) - dt * 2);
+  // ---- which way the camera looks (ver.45) ----
+  // vehicles: stay behind them. On foot: when the way you walk differs clearly from where the camera looks (more than ~20°),
+  // the camera turns round behind you at an even, limited speed until it is straight behind, then stops. Small zig-zags don't
+  // sway it, walking toward the camera never flips it, and your own pitch and zoom are left alone.
+  if (PL.veh && free) { CAM.yaw = angLerp(CAM.yaw, PL.veh.rot + Math.PI, Math.min(1, dt * 2.2)); CAM.yawV = 0; }
+  else {
+    let want = 0;
+    if (!PL.veh && free && PL.speed > 0.6 && CAM.follow !== false && CAM.style !== 'top') {
+      const d = angDiff(PL.rot + Math.PI, CAM.yaw), ad = Math.abs(d);
+      if (!CAM.turning && ad > 0.36 && ad < 2.0) CAM.turning = true; if (CAM.turning && (ad < 0.04 || ad > 2.3)) CAM.turning = false;
+      CAM.followT = Math.min(1, (CAM.followT || 0) + dt / 0.5);
+      if (CAM.turning) want = Math.sign(d) * Math.min(0.85, ad * 1.2) * CAM.followT * Math.min(1, PL.speed / 2.2);
+    } else { CAM.followT = Math.max(0, (CAM.followT || 0) - dt * 2); CAM.turning = false; }
+    CAM.yawV = lerp(CAM.yawV || 0, want, Math.min(1, dt * 4)); CAM.yaw += CAM.yawV * dt;
+  }
   if (KEYS.KeyQ) { CAM.yaw += dt * 1.8; CAM.lastDrag = now; } if (KEYS.KeyE && !PL.veh) { CAM.yaw -= dt * 1.8; CAM.lastDrag = now; }
   CAM.dist = lerp(CAM.dist, CAM.distT, Math.min(1, dt * 4));
   // follow: close behind sideways, softly up and down (steps and rough ground no longer bob the whole view)
-  if (CAM.snap || CAM.target.distanceToSquared(focus) > 400) { CAM.target.copy(focus); CAM.lift = 0; CAM.len = 0; CAM.snap = false; }
+  if (CAM.snap || CAM.target.distanceToSquared(focus) > 400) { CAM.target.copy(focus); CAM.lift = 0; CAM.len = 0; CAM.pb = 0; CAM.snap = false; }
   else { const kx = Math.min(1, dt * 12), dy = focus.y - CAM.target.y, ky = Math.min(1, dt * (Math.abs(dy) > 1.5 ? 9 : PL.veh ? 6 : 3.5));
     CAM.target.x += (focus.x - CAM.target.x) * kx; CAM.target.z += (focus.z - CAM.target.z) * kx; CAM.target.y += dy * ky; }
-  const T = CAM.target, full = CAM.dist * CAM.K, minL = Math.min(full, 2.6);
-  // walls of buildings: tilt up a little to look over them (smoothly, let go after a moment) and pull in, but never closer than
-  // 2.6 m: what is still in the way (a wall, an eave, leaves) is cut out around you in the shader instead (see.js).
-  // Low walls and fences only count near the ground; trees and posts don't count.
+  const topV = CAM.style === 'top' && !PL.veh, T = CAM.target, full = CAM.dist * CAM.K * (topV ? 1.35 : 1);
+  if (topV) CAM.pitch = clamp(CAM.pitch, 0.6, 1.35);   // the look-down view stays a look-down view
+  // ---- things in the way (ver.45): buildings with their real height, walls, fences, cars ----
+  // Low things (a fence, a wall, a parked car) are looked over by tilting up a little; anything tall (a house, a tower) makes the
+  // camera come in front of it — quickly in, slowly back out. The camera is never left inside a building.
   const crowns = typeof SEE !== 'undefined' && SEE.crownsAt && SEE.grid && !PL.veh;
-  const freeLen = (pitch, trees) => { const cp = Math.cos(pitch), dx = Math.sin(CAM.yaw) * cp, dy = Math.sin(pitch), dz = Math.cos(CAM.yaw) * cp;
-    for (let t = 0.8; t < full; t += 0.4) { const px = T.x + dx * t, py = T.y + dy * t, pz = T.z + dz * t, hy = py - groundH(px, pz); if (hy > 9) continue;
-      for (const c of collidersNear(px, pz)) { if (c.off || c.r !== undefined) continue; if (hy > 1.4 && Math.min(c.hw || 0, c.hd || 0) < 0.25) continue;
-        const cs = Math.cos(c.rot || 0), sn = Math.sin(c.rot || 0), lx = (px - c.x) * cs - (pz - c.z) * sn, lz = (px - c.x) * sn + (pz - c.z) * cs; if (Math.abs(lx) < c.hw + 0.05 && Math.abs(lz) < c.hd + 0.05) return Math.max(minL, t - 0.4); }
-      // in a wood: stop short of the leaf crowns overhead (the crown you are still in is cut out in the shader)
-      if (trees && t > 2.2 && SEE.crownsAt(px, py, pz, 0.95).length) return Math.max(minL, t - 0.4); }
-    return full; };
-  CAM.pb = CAM.pb || 0; CAM.pbHold = Math.max(0, (CAM.pbHold || 0) - dt); let pbT = 0;
-  if (!PL.veh && full > 2.5 && freeLen(CAM.pitch) < full * 0.9) { pbT = 0.35; for (const b of [0.15, 0.25]) if (freeLen(Math.min(0.85, CAM.pitch + b)) >= full * 0.85) { pbT = b; break; } pbT = Math.min(pbT, Math.max(0, 0.85 - CAM.pitch)); CAM.pbHold = 0.8; }
+  const ray = (pitch) => { const cp = Math.cos(pitch); return new THREE.Vector3(Math.sin(CAM.yaw) * cp, Math.sin(pitch), Math.cos(CAM.yaw) * cp); };
+  const probe = (dir) => CAMX.free(T, dir, full, crowns);
+  let base = probe(ray(CAM.pitch)), pbT = 0;
+  CAM.pb = CAM.pb || 0; CAM.pbHold = Math.max(0, (CAM.pbHold || 0) - dt);
+  if (base.L < 2.2 && full > 2.5) { // backed right up against a wall: rise over your shoulder rather than sit in the wall
+    let best = base.L; for (const b of [0.3, 0.6, 0.9, 1.1]) { if (CAM.pitch + b > 1.45) break; const L2 = probe(ray(CAM.pitch + b)).L; if (L2 > best + 0.5) { best = L2; pbT = b; } if (L2 >= full * 0.9) break; } if (pbT) CAM.pbHold = 0.6; }
   else if (CAM.pbHold > 0) pbT = CAM.pb;
-  CAM.pb = lerp(CAM.pb, pbT, Math.min(1, dt * (pbT > CAM.pb ? 3.5 : 1.2)));
-  const pitch = CAM.pitch + CAM.pb, cp = Math.cos(pitch), dir = new THREE.Vector3(Math.sin(CAM.yaw) * cp, Math.sin(pitch), Math.cos(CAM.yaw) * cp);
-  let L = freeLen(pitch, crowns);
-  // come back out only once it has stayed clear for a moment (walking under trees made the distance breathe)
-  if (CAM.len && L > CAM.len + 0.3) { CAM.outT = (CAM.outT || 0) + dt; if (CAM.outT < 0.9) L = CAM.len; } else CAM.outT = 0;
-  CAM.len = !CAM.len ? L : lerp(CAM.len, L, Math.min(1, dt * (L < CAM.len ? 6 : 1.6)));
+  CAM.pb = lerp(CAM.pb, pbT, Math.min(1, dt * (pbT > CAM.pb ? 4 : 1.5)));
+  const pitch = CAM.pitch + CAM.pb, dir = ray(pitch);
+  let L = probe(dir).L;
+  // come back out only once it has stayed clear for a moment (walking past posts and doorways made the distance breathe)
+  if (CAM.len && L > CAM.len + 0.3) { CAM.outT = (CAM.outT || 0) + dt; if (CAM.outT < 0.6) L = CAM.len; } else CAM.outT = 0;
+  CAM.len = !CAM.len ? L : L < CAM.len ? Math.max(L, lerp(CAM.len, L, Math.min(1, dt * 9))) : lerp(CAM.len, L, Math.min(1, dt * 1.6));   // in quickly, out gently
   const pos = T.clone().addScaledVector(dir, CAM.len);
   // ground behind you (a slope, a bank): lift the camera smoothly instead of jumping to the ground every frame
   const sea = typeof SEA !== 'undefined' && SEA.h !== undefined ? SEA.h : 0; let need = 0;
@@ -2230,8 +2244,43 @@ function updateCamera(dt) {
   CAM.lift = CAM.lift || 0; CAM.lift = lerp(CAM.lift, need, Math.min(1, dt * (need > CAM.lift ? 5 : 1.4)));
   pos.y += Math.max(0, CAM.lift);
   const gy = Math.max(groundH(pos.x, pos.z), sea) + 0.35; if (pos.y < gy) pos.y = gy;
+  // walking along a house: the camera would sit in its eaves — step it out sideways a little instead of pulling it in
+  const ev = CAMX.eaves(pos); CAM.push = CAM.push || new THREE.Vector3(); CAM.push.lerp(ev, Math.min(1, dt * 6)); pos.add(CAM.push);
   camera.position.copy(pos); camera.lookAt(CAM.target);
 }
+// ---------- what the camera can't be inside (ver.45) ----------
+const CAMX = { MIN: 1.0 };
+// top of a collider: city buildings and developments know their height; thin walls and fences are low; anything else ~8.5 m
+CAMX.top = function (c) { if (c.base === undefined) c.base = groundH(c.x, c.z); const thin = Math.min(c.hw || 0, c.hd || 0) < 0.25; if (thin) return c.base + Math.min(1.6, c.top !== undefined ? c.top - c.base : 1.6); return c.top !== undefined ? c.top : c.base + 8.5; };
+// is the point (x,y,z) inside something solid? → { top } or null
+CAMX.solid = function (x, y, z, cars = true) {
+  for (const c of collidersNear(x, z)) { if (c.off || c.r !== undefined || c.kind === 'tree' || c.kind === 'rock') continue;
+    const cs = Math.cos(c.rot || 0), sn = Math.sin(c.rot || 0), lx = (x - c.x) * cs - (z - c.z) * sn, lz = (x - c.x) * sn + (z - c.z) * cs;
+    if (Math.abs(lx) < (c.hw || 0) + 0.06 && Math.abs(lz) < (c.hd || 0) + 0.06) { const top = CAMX.top(c); if (y < top + 0.25) return { top }; } }
+  if (cars && typeof CARHIT !== 'undefined') for (const q of CARHIT.others(PL.veh || null, x, z)) { const h = q.o && (q.o === DV.bus || (typeof BUSX !== 'undefined' && BUSX.extra && BUSX.extra.includes(q.o))) ? 3.4 : 1.8, top = (isFinite(q.y) ? q.y : groundH(x, z)) + h;
+    if (y < top && CARHIT.circ(q.b, x, z, 0.15)) return { top }; }
+  return null;
+};
+// roofs reach ~0.7 m past the walls: a camera up at roof height that close to a building is pushed out of that zone
+CAMX.eaves = function (p) { const out = new THREE.Vector3();
+  for (const c of collidersNear(p.x, p.z)) { if (c.off || c.r !== undefined || c.kind === 'tree' || c.kind === 'rock') continue; if (Math.min(c.hw || 0, c.hd || 0) < 0.25) continue;
+    if (c.base === undefined) c.base = groundH(c.x, c.z); if (p.y < c.base + 2.0 || p.y > CAMX.top(c) + 0.6) continue;
+    const cs = Math.cos(c.rot || 0), sn = Math.sin(c.rot || 0), lx = (p.x - c.x) * cs - (p.z - c.z) * sn, lz = (p.x - c.x) * sn + (p.z - c.z) * cs, ex = Math.abs(lx) - c.hw, ez = Math.abs(lz) - c.hd, m = 0.75;
+    if (ex > m || ez > m || (ex < 0 && ez < 0)) continue;
+    let ox = 0, oz = 0; if (ex >= ez) ox = Math.sign(lx) * (m - ex); else oz = Math.sign(lz) * (m - ez);
+    out.x += ox * cs + oz * sn; out.z += -ox * sn + oz * cs; }
+  return out; };
+// how far back along dir (from the target) the camera can go; low = what stopped it is low enough to look over
+// (low things — fences, garden walls, cars — never push the camera in: a metre or two behind you the camera is already above them,
+//  and if one hides your legs the see-through window shows you. The probe is a little thick so a grazing corner doesn't flicker.)
+CAMX.free = function (T, dir, full, trees) {
+  const sx = dir.z, sz = -dir.x, sl = Math.hypot(sx, sz) || 1;
+  for (let t = 0.6; t < full; t += 0.3) { const y = T.y + dir.y * t; let s = null;
+    for (const o of [0, 0.15, -0.15]) { const x = T.x + dir.x * t + sx / sl * o, z = T.z + dir.z * t + sz / sl * o, q = CAMX.solid(x, y, z, false); if (q && q.top > T.y + 1.2) { s = q; break; } }
+    if (s) return { L: Math.max(CAMX.MIN, t - 0.45), low: false };
+    if (trees && t > 2.2 && SEE.crownsAt(T.x + dir.x * t, y, T.z + dir.z * t, 0.95).length) return { L: Math.max(2.2, t - 0.4), low: false }; }
+  return { L: full, low: false };
+};
 // ---------- effects ----------
 const FX = {
   list: [], scene: null,
@@ -2588,7 +2637,7 @@ const UI = {
     const el = document.createElement('div'); el.id = 'hud';
     el.innerHTML = `<div class="card clock"><div class="t" id="hT">--:--</div><div class="d" id="hD"></div></div>
       <div class="card ctl"><div class="row" id="tBtns"><button data-t="real" class="on">リアル時間</button><button data-t="7">朝</button><button data-t="12">昼</button><button data-t="18">夕方</button><button data-t="21">夜</button></div>
-      <div class="row" id="vBtns"><button data-v="third" class="on">うしろから</button><button data-v="first">目線</button></div>
+      <div class="row" id="vBtns"><button data-v="third" class="on">うしろから</button><button data-v="top">見おろし</button><button data-v="first">目線</button></div>
       <div class="row" id="wBtns"><button data-w="clear" class="on">晴れ</button><button data-w="cloudy">くもり</button><button data-w="rain">雨</button></div></div>
       <div class="prompt" id="prompt"></div><div class="dlg" id="dlg" hidden><div class="nm" id="dlgN"></div><div class="tx" id="dlgT"></div><div class="nx">▼ Space</div></div><div class="toasts" id="toasts"></div>
       <button class="buildBtn" id="buildBtn">🛠️ しまづくり <kbd>B</kbd></button>
@@ -9360,7 +9409,7 @@ FSH.updatePanel = function () {
 { const _ok2 = GAME.onKey; GAME.onKey = function (e) { if (!e.repeat && e.code === 'KeyT' && this.p && !this.modal && !EDIT.on && !PL.veh && !LIFE.fish && FSH.holdKg() > 0.05) { const S = DECO.ship, H = this.LM.harbor; if ((S && Math.hypot(PL.x - S.x, PL.z - S.z) < 12) || (H && Math.hypot(PL.x - H.x, PL.z - H.z) < 60)) { FSH.openLanding(true); return true; } } return _ok2.apply(this, arguments); }; }
 { const _p2 = GAME.prompt; GAME.prompt = function () { if (this.p && !PL.veh && !this.modal && this.nearShip && this.nearShip() && FSH.holdKg() > 0.05) return `Space：出荷所　T：網の魚を水揚げ（魚倉 ${FSH.holdKg().toFixed(0)}kg）`; return _p2.apply(this, arguments); }; }
 // version label so you can tell whether the page has updated
-const GAME_VER = '44（10/27）';
+const GAME_VER = '45（10/27）';
 { const v = document.createElement('div'); v.id = 'verTag'; v.textContent = 'ver.' + GAME_VER; v.style.cssText = 'position:fixed;left:6px;bottom:4px;z-index:5;font-size:10px;color:rgba(255,255,255,.75);text-shadow:0 1px 2px rgba(0,0,0,.6);pointer-events:none;font-family:sans-serif'; document.body.appendChild(v); }
 
 // ===================== 島の収益: 建物ごとに1時間あたりの売上が入りつづける（留守のあいだも最大24時間分） =====================
@@ -11353,44 +11402,45 @@ PERF.cull = function (now) {
   PERF.btn(); return r; }; }
 
 // ===================== カメラ: 木の葉や幹・建物・車でキャラが隠れないように =====================
-// 1) the camera never sits inside a tree crown: it drops under the crown (still behind you) or, if that would be too low, moves closer
-// 2) when a building or a parked car is in the way it rises over it instead of collapsing onto the back of your head
-// 3) whatever still crosses the line of sight (a trunk, a crown edge) is cut out in a narrow tube around that line:
-//    clear in the middle, a thin dithered rim. Shadows are untouched (they use their own depth material).
-const SEE = { p: { value: new THREE.Vector3() }, on: { value: 0 }, crC: { value: [new THREE.Vector4(0, -999, 0, 0), new THREE.Vector4(0, -999, 0, 0)] }, crV: { value: [1, 1] }, mats: new Set(), adj: new THREE.Vector3(), grid: null, sig: '' };
+// ver.45: when something really hides you (a wall, a tree, a car between the camera and you), a round window opens around you
+// on the screen — only through what is in front of you, never through what is beside or behind you — and closes again when
+// you are in the open. Leaves right around the camera fade out. Shadows are untouched (they use their own depth material).
+const SEE = { p: { value: new THREE.Vector3() }, on: { value: 0 }, ndc: { value: new THREE.Vector2() }, asp: { value: 1 }, rad: { value: 0.2 }, dist: { value: 10 }, margin: { value: 0.6 }, nearOn: { value: 0 },
+  crC: { value: [new THREE.Vector4(0, -999, 0, 0), new THREE.Vector4(0, -999, 0, 0)] }, crV: { value: [1, 1] }, mats: new Set(), adj: new THREE.Vector3(), grid: null, sig: '', k: 0, hidT: 0 };
 SEE.patch = function (m, near = 2.6, crown = false) {
   if (!m || SEE.mats.has(m) || !m.isMeshStandardMaterial) return; SEE.mats.add(m);
   const prev = m.onBeforeCompile, base = THREE.Material.prototype.customProgramCacheKey, own = m.customProgramCacheKey !== base ? m.customProgramCacheKey.bind(m) : null, prevSrc = prev ? prev.toString() : '';
   // the program cache key must still tell materials with different shader tweaks apart (three.js keys custom shaders by the
   // source of onBeforeCompile, and this wrapper's source is the same for every material it wraps)
-  m.customProgramCacheKey = () => 'see|' + (crown ? 'cr|' : '') + prevSrc + '|' + (own ? own() : '');
+  m.customProgramCacheKey = () => 'see45|' + (crown ? 'cr|' : '') + prevSrc + '|' + (own ? own() : '');
   m.onBeforeCompile = (sh, r) => {
     if (prev) prev(sh, r);
-    sh.uniforms.uSeeP = SEE.p; sh.uniforms.uSeeOn = SEE.on; sh.uniforms.uSeeNear = { value: near }; if (crown) { sh.uniforms.uCrC = SEE.crC; sh.uniforms.uCrV = SEE.crV; }
-    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vSeeW;').replace('#include <project_vertex>', `#include <project_vertex>
+    sh.uniforms.uSeeOn = SEE.on; sh.uniforms.uSeeNdc = SEE.ndc; sh.uniforms.uSeeAsp = SEE.asp; sh.uniforms.uSeeRad = SEE.rad; sh.uniforms.uSeeDist = SEE.dist; sh.uniforms.uSeeMargin = SEE.margin; sh.uniforms.uSeeNearOn = SEE.nearOn; sh.uniforms.uSeeNear = { value: near };
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vSeeW; varying vec4 vSeeClip;').replace('#include <project_vertex>', `#include <project_vertex>
+      vSeeClip = gl_Position;
       #ifdef USE_INSTANCING
         vSeeW = (modelMatrix * instanceMatrix * vec4(transformed, 1.0)).xyz;
       #else
         vSeeW = (modelMatrix * vec4(transformed, 1.0)).xyz;
       #endif`);
-    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vSeeW; uniform vec3 uSeeP; uniform float uSeeOn; uniform float uSeeNear;' + (crown ? ' uniform vec4 uCrC[2]; uniform float uCrV[2];' : '')).replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>
-      if (uSeeOn > 0.5) {
-        vec3 ab = uSeeP - cameraPosition; float L2 = max(dot(ab, ab), 1e-4);
-        float t = clamp(dot(vSeeW - cameraPosition, ab) / L2, 0.0, 1.0);
-        float pd = length(vSeeW - (cameraPosition + ab * t)), rr = mix(0.55, 1.25, t);
-        float k = smoothstep(rr, rr * 0.72, pd) * smoothstep(0.97, 0.86, t);
-        k = max(k, smoothstep(uSeeNear, uSeeNear * 0.46, length(vSeeW - cameraPosition)));   // things right around the camera fade out (trees: 2.6 m, the camera no longer dodges crowns; buildings: 1 m)
-        ${crown ? `// the crown the camera is in disappears (instead of the camera dodging it)
-        for (int i = 0; i < 2; i++) { vec4 c = uCrC[i]; if (c.w > 0.0) { vec3 d = vSeeW - c.xyz; float q = (d.x * d.x + d.z * d.z) / (c.w * c.w) + d.y * d.y / (uCrV[i] * uCrV[i]); k = max(k, smoothstep(1.0, 0.82, q)); } }` : ''}
-        float ign = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
-        if (ign < k) discard;
+    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vSeeW; varying vec4 vSeeClip; uniform float uSeeOn; uniform vec2 uSeeNdc; uniform float uSeeAsp; uniform float uSeeRad; uniform float uSeeDist; uniform float uSeeMargin; uniform float uSeeNear; uniform float uSeeNearOn;').replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>
+      {
+        float fd = length(vSeeW - cameraPosition), k = 0.0;
+        // right in front of the lens (leaves around the camera, a wall it brushes)
+        k = uSeeNearOn * smoothstep(uSeeNear, uSeeNear * 0.45, fd);
+        // the window round you: only what is nearer to the camera than you are
+        if (uSeeOn > 0.001 && fd < uSeeDist - uSeeMargin) {
+          vec2 q = (vSeeClip.xy / vSeeClip.w - uSeeNdc) * vec2(uSeeAsp, 1.0); float r = length(q) / max(uSeeRad, 1e-4);
+          k = max(k, smoothstep(1.0, 0.78, r) * smoothstep(0.0, 0.25, uSeeOn) * smoothstep(uSeeDist - uSeeMargin, uSeeDist - uSeeMargin - 0.6, fd));
+        }
+        if (k > 0.0) { float ign = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715)))); if (ign < k) discard; }
       }`);
   };
   m.needsUpdate = true;
 };
 SEE.patchTrees = function () {
-  for (const st of VEG.sets || []) if (st.kind === 'tree') SEE.patch(st.mesh.material, 2.6, true);
-  for (const k in VEG.userSets || {}) for (const st of VEG.userSets[k] || []) st && st.mesh && SEE.patch(st.mesh.material, 2.6, true);
+  for (const st of VEG.sets || []) if (st.kind === 'tree') SEE.patch(st.mesh.material, 3.0, true);
+  for (const k in VEG.userSets || {}) for (const st of VEG.userSets[k] || []) st && st.mesh && SEE.patch(st.mesh.material, 3.0, true);
 };
 { const _b = buildVegetation; buildVegetation = function () { const r = _b.apply(this, arguments); try { SEE.patchTrees(); } catch (e) { console.warn('see', e); } return r; }; }
 // ---------- tree crowns (rough ellipsoids per kind, scaled like the instances) ----------
@@ -11453,13 +11503,29 @@ SEE.crownUpdate = function () {
   const cp = camera.position, L = SEE.crownsAt(cp.x, cp.y, cp.z);
   for (let i = 0; i < 2; i++) { const c = L[i], v = SEE.crC.value[i]; if (c) { v.set(c.x, c.y, c.z, c.rh); SEE.crV.value[i] = c.rv; } else v.w = 0; }
 };
+// is the line from the camera to you blocked? (buildings with their height, walls, cars, tree crowns)
+SEE.hidden = function () {
+  const c = camera.position, T = CAM.target, pts = [T, new THREE.Vector3(T.x, T.y + 0.55, T.z)], foot = !PL.veh;
+  let n0 = 0; for (const P of pts) { const L = c.distanceTo(P), n = Math.ceil(L / 0.35); let blocked = false;
+    for (let i = 1; i < n; i++) { const t = i / n; if (L * (1 - t) < (foot ? 0.55 : 2.6)) break; const x = c.x + (P.x - c.x) * t, y = c.y + (P.y - c.y) * t, z = c.z + (P.z - c.z) * t;
+      if (CAMX.solid(x, y, z, true) || (SEE.grid && SEE.crownsAt(x, y, z, 0.85).length)) { blocked = true; break; }
+      if (collidersNear(x, z).some(q => !q.off && q.r !== undefined && q.kind === 'tree' && Math.hypot(x - q.x, z - q.z) < q.r + 0.1 && y < groundH(q.x, q.z) + 3)) { blocked = true; break; } }
+    if (blocked) n0++; }
+  return n0 === pts.length;   // you are hidden only when both your body and your head are
+};
 { const _u = updateCamera; updateCamera = function (dt) { const r = _u.apply(this, arguments);
   const on = !SEE.disabled && CAM.mode === 'third' && !GAME.inside && !window.__freecam && GAME.modal !== 'title' && !(GAME.camOverride && GAME.camOverride());
   if (on) {
-    if (!SEE.noFix) try { SEE.fix(dt || 0.016); } catch (e) { }
     try { SEE.crownUpdate(); } catch (e) { }
-  } else SEE.adj.set(0, 0, 0);
-  SEE.on.value = on ? 1 : 0; if (on) SEE.p.value.copy(CAM.target); return r; }; }
+    // open the window only while you are really hidden; close it a moment after you come out (no flicker at edges)
+    let hid = false; try { hid = SEE.hidden(); } catch (e) { }
+    SEE.hidT = hid ? 0.35 : Math.max(0, SEE.hidT - (dt || 0.016));
+    SEE.k = lerp(SEE.k, hid || SEE.hidT > 0 ? 1 : 0, Math.min(1, (dt || 0.016) * (hid ? 7 : 3)));
+    const T = CAM.target, v = T.clone().project(camera), d = camera.position.distanceTo(T), R = PL.veh ? Math.max(2.2, (VSPEC[PL.veh.kind] || {}).len || 2) + 0.8 : 0.95;
+    SEE.ndc.value.set(v.x, v.y); SEE.asp.value = camera.aspect; SEE.dist.value = d; SEE.margin.value = PL.veh ? ((VSPEC[PL.veh.kind] || {}).len || 2) + 0.9 : 0.55;
+    SEE.rad.value = (R / (d * Math.tan(camera.fov * Math.PI / 360))) * (0.55 + 0.45 * SEE.k);
+  } else { SEE.adj.set(0, 0, 0); SEE.k = 0; }
+  SEE.on.value = on ? SEE.k : 0; SEE.nearOn.value = on ? 1 : 0; if (on) SEE.p.value.copy(CAM.target); return r; }; }
 
 // ---------- walls, eaves, fences, cars… between the camera and you are cut out the same way (the camera no longer hugs walls) ----------
 SEE.skip = new Set();
@@ -13320,10 +13386,10 @@ CARHIT.others = function (self, x, z, y) {
     if (isFinite(y) && isFinite(oy) && Math.abs(oy - y) > 2.6) return; // under / over a bridge
     O.push({ o, y: oy, b: CARHIT.box(ox, oz, rot || 0, hl, hw) });
   };
-  if (typeof DV !== 'undefined' && DV.bus) add(DV.bus, DV.bus.x, DV.bus.z, DV.bus.y, DV.bus.rot, CARHIT.BUS[0], CARHIT.BUS[1]);
+  if (typeof DV !== 'undefined' && DV.bus && (!DV.bus.mesh || DV.bus.mesh.visible)) add(DV.bus, DV.bus.x, DV.bus.z, DV.bus.y, DV.bus.rot, CARHIT.BUS[0], CARHIT.BUS[1]);   // (only what you can see is solid)
   if (typeof BUSX !== 'undefined' && BUSX.extra) for (const b of BUSX.extra) add(b, b.x, b.z, b.y, b.rot, CARHIT.BUS[0], CARHIT.BUS[1]);
   if (typeof TRF !== 'undefined') for (const c of (TRF.cars || []).concat(TRF.parked || [])) { const T = CAR_TYPES[c.type] || CAR_TYPES.kei; add(c, c.x, c.z, c.y, c.rot, T.L / 2 + 0.02, T.W / 2 + 0.02); }
-  for (const v of VEH) if (v.kind === 'truck' && v !== self) add(v, v.x, v.z, v.y, v.rot, VSPEC.truck.len, VSPEC.truck.wid);
+  for (const v of VEH) if (v.kind === 'truck' && v !== self && (!v.mesh || v.mesh.visible)) add(v, v.x, v.z, v.y, v.rot, VSPEC.truck.len, VSPEC.truck.wid);
   return O;
 };
 // how deep your car would be inside other cars at this pose (sum of overlaps)
@@ -13449,6 +13515,18 @@ CARHIT.unstick = function (x, z) {
   try { if (GAME.p && !GAME.inside) for (const n of NPCS) { if (n.inRoom || n.seat || !n.mesh || !n.mesh.visible || !isFinite(n.x)) continue; const [x, z] = CARHIT.unstick(n.x, n.z); if (x !== n.x || z !== n.z) { n.x = x; n.z = z; n.mesh.position.x = x; n.mesh.position.z = z; } } } catch (e) { }
   return r; }; }
 
+// ===================== ver.45: buildings tell the camera how tall they are =====================
+// (the camera used to treat every building as ~9 m tall: next to the high-rises it ended up inside them)
+queueMicrotask(() => {
+  const topOf = (g, base) => { g.updateMatrixWorld(true); const box = new THREE.Box3().setFromObject(g); return isFinite(box.max.y) ? base + box.max.y : null; };
+  for (const k of Object.keys(CB_BUILD)) { const f = CB_BUILD[k]; CB_BUILD[k] = function (g, b) { const C = CITY.curChunk, n0 = C ? C.colls.length : 0, r = f.apply(this, arguments);
+    try { if (C && g) { const top = topOf(g, b.y || 0); if (top !== null) for (const c of C.colls.slice(n0)) if (c.top === undefined) c.top = top; } } catch (e) { } return r; }; }
+  for (const k of Object.keys(DEV_BUILD)) { const f = DEV_BUILD[k]; DEV_BUILD[k] = function () { const n0 = DV.track.length, g = f.apply(this, arguments);
+    try { if (g && g.isObject3D) { const top = topOf(g, 0); if (top !== null) for (const c of DV.track.slice(n0)) if (c.top === undefined) c.top = top; } } catch (e) { } return g; }; }
+});
+// the view you chose last time (うしろから / 見おろし / 目線) comes back when you open the island
+{ const _b = GAME.begin; GAME.begin = function () { const r = _b.apply(this, arguments); try { const v = localStorage.getItem('hoshinami_view'); if (v === 'top' || v === 'first') setViewMode(v); else CAM.style = 'back'; } catch (e) { } return r; }; }
+
 // ===================== MAIN =====================
 let renderer, scene, camera;
 const TIME = { mode: 'real', hf: 12, weather: 'clear' };
@@ -13525,7 +13603,7 @@ function initInput() {
       if (e.code === 'KeyR' && !e.repeat && EDIT.tool === 'house') { EDIT.hRotOff = ((EDIT.hRotOff || 0) + Math.PI / 2) % (Math.PI * 2); EDIT.housePick = null; UI.editPanel(); }
       if (e.code === 'Space') return;
     }
-    if (e.code === 'KeyV' && !e.repeat) { setViewMode(CAM.mode === 'first' ? 'third' : 'first'); return; }
+    if (e.code === 'KeyV' && !e.repeat) { setViewMode(CAM.mode === 'first' ? 'third' : CAM.style === 'top' || PL.veh ? 'first' : 'top'); return; }   // うしろから → 見おろし → 目線（乗り物では うしろから ⇄ 目線）
     if (e.code === 'KeyF' && !e.repeat) { GAME.fishKey(); return; }
     if (UI._choices && /^Digit[1-9]$/.test(e.code)) { const o = UI._choices[+e.code.slice(5) - 1]; if (o) { o.f(); return; } }
     if (e.code === 'Space' && !e.repeat) { if (GAME.fishing()) { GAME.fishKey(); return; } if (UI._choices) { UI._choices[UI._choices.length - 1].f(); return; } if (PL.veh && (PL.veh.kind === 'bus' || PL.veh.kind === 'ferry')) { GAME.rideKey(); return; } if (advanceTalk()) return; const n = !PL.veh && nearVillager(); if (n) { startTalk(n); return; } if (GAME.interact()) return; toggleVehicle(); }

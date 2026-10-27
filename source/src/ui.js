@@ -4,7 +4,7 @@ const UI = {
     const el = document.createElement('div'); el.id = 'hud';
     el.innerHTML = `<div class="card clock"><div class="t" id="hT">--:--</div><div class="d" id="hD"></div></div>
       <div class="card ctl"><div class="row" id="tBtns"><button data-t="real" class="on">リアル時間</button><button data-t="7">朝</button><button data-t="12">昼</button><button data-t="18">夕方</button><button data-t="21">夜</button></div>
-      <div class="row" id="vBtns"><button data-v="third" class="on">うしろから</button><button data-v="first">目線</button></div>
+      <div class="row" id="vBtns"><button data-v="third" class="on">うしろから</button><button data-v="top">見おろし</button><button data-v="first">目線</button></div>
       <div class="row" id="wBtns"><button data-w="clear" class="on">晴れ</button><button data-w="cloudy">くもり</button><button data-w="rain">雨</button></div></div>
       <div class="prompt" id="prompt"></div><div class="dlg" id="dlg" hidden><div class="nm" id="dlgN"></div><div class="tx" id="dlgT"></div><div class="nx">▼ Space</div></div><div class="toasts" id="toasts"></div>
       <button class="buildBtn" id="buildBtn">🛠️ しまづくり <kbd>B</kbd></button>
