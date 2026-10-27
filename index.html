@@ -413,15 +413,20 @@ function carveRiver(G) {
   for (let i = 0; i < pts.length; i++) {
     let g = Infinity; for (const [ox, oz] of [[0, 0], [1.5, 0], [-1.5, 0], [0, 1.5], [0, -1.5]]) g = Math.min(g, hAt(G, pts[i][0] + ox, pts[i][1] + oz));
     const L = Math.min(prev, g - 0.9); gs.push(g);
-    if (L < 0.25) { end = i + 1; lv.push(0); break; }
+    if (L < 0.25) { end = i; gs.pop(); break; }
     lv.push(L); prev = L;
   }
+  // the mouth (ver.46): the river used to stop in a pool ~20 m short of the sea, behind a strip of beach. Now it carries on
+  // across the beach until it reaches open water; its surface sinks to sea level and the channel is cut below the sea,
+  // so the sea flows in and the two waters meet without a step (the river surface fades out there, see river.js)
+  let mouth = end, shore = end; { const L0 = lv.length ? lv[lv.length - 1] : 0.3, M = []; for (let i = end; i < pts.length && M.length < 34; i++) { const g = hAt(G, pts[i][0], pts[i][1]); M.push(i); if (g < 0.05 && shore === end) shore = i; if (g < -2.4 && M.length > 3) break; }
+    M.forEach((i, k) => { const t = (k + 1) / M.length; lv.push(Math.max(0.0, L0 * (1 - t * t * (3 - 2 * t)))); gs.push(hAt(G, pts[i][0], pts[i][1])); }); end = end + M.length; if (shore === mouth) shore = end - 1; }
   pts = pts.slice(0, end);
-  const N = pts.length, hw = pts.map((_, i) => lerp(3.0, 6.5, i / N));
+  const N = pts.length, hw = pts.map((_, i) => lerp(3.0, 6.5, Math.min(i, mouth) / Math.max(1, mouth)) * (i > mouth ? 1 + 0.6 * Math.min(1, (i - mouth) / 10) : 1));
   // plunge pool below the biggest drop
   let fi = 1, fd = 0; for (let i = 1; i < N; i++) if (lv[i - 1] - lv[i] > fd) { fd = lv[i - 1] - lv[i]; fi = i; }
-  { const sm = lv.slice(); for (let i = 0; i < N; i++) { if (Math.abs(i - fi) <= 1) continue; let a = 0, c = 0; for (let k = -6; k <= 6; k++) { const q = i + k; if (q < 0 || q >= N || (q < fi) !== (i < fi)) continue; a += lv[q]; c++; } sm[i] = a / c; }
-    for (let i = 0; i < N; i++) { sm[i] = Math.min(sm[i], gs[i] - 0.4); if (i > 0) sm[i] = Math.min(sm[i], sm[i - 1]); } for (let i = 0; i < N; i++) lv[i] = sm[i]; }
+  { const sm = lv.slice(); for (let i = 0; i < N; i++) { if (Math.abs(i - fi) <= 1 || i >= mouth) continue; let a = 0, c = 0; for (let k = -6; k <= 6; k++) { const q = i + k; if (q < 0 || q >= N || (q < fi) !== (i < fi)) continue; a += lv[q]; c++; } sm[i] = c ? a / c : lv[i]; }   // the window runs into the mouth, so the surface eases down onto the beach instead of dropping off a step
+    for (let i = 0; i < N; i++) { if (i < mouth) sm[i] = Math.min(sm[i], gs[i] - 0.4); if (i > 0) sm[i] = Math.min(sm[i], sm[i - 1]); } for (let i = 0; i < N; i++) lv[i] = sm[i]; }
   for (let i = fi; i < Math.min(N, fi + 6); i++) hw[i] += 3.5 * (1 - (i - fi) / 6);
   const best = new Float32Array(n * n).fill(1e9), bi = new Int32Array(n * n).fill(-1);
   for (let s = 1; s < N; s++) {
@@ -437,9 +442,10 @@ function carveRiver(G) {
     if (bi[k] < 0) continue; const s = bi[k], d = best[k], w = hw[s], L = lv[s];
     if (d < w + 7) G.H[k] = Math.min(G.H[k], lerp(L + 0.35, G.H[k], sstep(w, w + 7, d)));
     if (d < w) { const deep = (s >= fi && s < fi + 5) ? 2.8 : 1.8; G.H[k] = Math.min(G.H[k], L - deep * (1 - Math.pow(d / w, 2) * 0.65)); }
-    if (d < w + 2.5 && L > 0.2) G.Wl[k] = L;
+    if (s >= mouth && d < w + 1.5) G.H[k] = Math.min(G.H[k], lerp(-2.4, -0.7, sstep(0, w + 1.5, d)));   // the mouth: cut below the sea so the sea comes in (only where the river is already down at sea level, so its banks still hold it upstream)
+    if (d < w + 2.5 && s <= shore + 1) { if (s >= mouth) G.Wl[k] = Math.max(L, 0.16); else if (L > 0.06) G.Wl[k] = L; }   // the river's own surface runs to the shoreline; river.js lays it onto the sea (tide) there, and past it the cut channel is the sea's
   }
-  G.river = { pts, lv, hw, falls: { x: pts[fi][0], z: pts[fi][1], top: lv[fi - 1], bottom: lv[fi] } };
+  G.river = { pts, lv, hw, mouth, shore, falls: { x: pts[fi][0], z: pts[fi][1], top: lv[fi - 1], bottom: lv[fi] } };
 }
 function waterLevelAt(G, x, z) { // level of the inland water cell under (x,z), NaN if none
   const { n, size } = WORLD, cell = size / (n - 1); const i = clamp(Math.floor((x + size / 2) / cell), 0, n - 2), j = clamp(Math.floor((z + size / 2) / cell), 0, n - 2), W = G.Wl;
@@ -807,6 +813,7 @@ function terrainMaterial() {
         { float sl = dot(sand, vec3(0.3, 0.59, 0.11)); sand = mix(sand, mix(sand, vec3(sl * 1.03, sl * 1.01, sl * 0.95), 0.32), uResort * smoothstep(-0.6, 0.2, vWPos.y)); }
         vec4 w = max(vSplat + (nz - 0.5) * vec4(0.45, 0.45, 0.2, 0.3), 0.0); w = w * w * w; w /= (w.x + w.y + w.z + w.w + 1e-5);
         diffuseColor.rgb *= grass * w.x + dirt * w.y + rock * w.z + sand * w.w;
+        diffuseColor.rgb *= mix(vec3(1.0), vec3(0.45, 0.74, 0.76), (1.0 - smoothstep(-3.2, -0.4, vWPos.y)) * 0.8);   // ground under a metre or more of water picks up the water's blue-green, so channels and drop-offs read as water, not wet sand
         float snowAmt = uSnow * smoothstep(0.55, 0.85, normalize(vWNor).y) * smoothstep(0.2, 1.2, vWPos.y) * (0.75 + 0.25 * nz);
         diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.84, 0.87, 0.93), clamp(snowAmt * 1.15, 0.0, 0.88));
       `);
@@ -825,7 +832,7 @@ function computeAttrs(i0, j0, i1, j1) {
     const md = Math.hypot(x - MIKAN.x, z - MIKAN.z); if (md < MIKAN.r * 0.8 && h > 5) dirt += 0.45;
     if (Math.hypot(x - VILLAGE.x, z - VILLAGE.z) < VILLAGE.r * 0.6) dirt += 0.15;
     const L = W[k];
-    if (!isNaN(L)) { if (h < L - 0.05) { sand = 0.35; dirt = 0.3; rock = 0.6; } else if (h < L + 1.2) dirt += 0.6; }
+    if (!isNaN(L)) { const f = sstep(0.3, 1.5, L); if (h < L - 0.05) { sand = lerp(1, 0.35, f); dirt = 0.3 * f; rock = 0.6 * f; } else if (h < L + 1.2) dirt += 0.6 * f; }   // f: a stony bed upstream, plain sand where the river comes down to the sea
     const edited = Math.abs(h - G.H0[k]) > 0.6; if (edited && h > 2.5 && isNaN(L)) dirt += 0.25 * sstep(0.6, 2.5, Math.abs(h - G.H0[k]));
     let grass = Math.max(0, 1 - sand - rock - dirt * 0.6);
     const s = grass + dirt + rock + sand + 1e-5; spl[k * 4] = grass / s; spl[k * 4 + 1] = dirt / s; spl[k * 4 + 2] = Math.min(1, rock) / s; spl[k * 4 + 3] = sand / s;
@@ -6060,17 +6067,20 @@ SND.play = function (n, o = {}) {
 };
 SND.var = (pre, n, o) => SND.play(pre + Math.floor(Math.random() * n), o);
 // ambience / engine loops: call loop(name, target) every frame; they fade in/out and stop when silent
+// o.src: play another sample under this loop's name (two loops can share one recording); o.lp: a low-pass cutoff in Hz that can move every frame
 SND.loop = function (n, target, o = {}) {
   if (!SND.ctx) return; let L = SND.loops[n];
-  if (!L) { if (target < 0.003) return; L = SND.loops[n] = { cur: 0, src: null, gain: SND.ctx.createGain(), pan: SND.ctx.createStereoPanner ? SND.ctx.createStereoPanner() : null, quiet: 0 }; L.gain.gain.value = 0; if (L.pan) { L.gain.connect(L.pan); L.pan.connect(SND.bus[o.bus || 'amb']); } else L.gain.connect(SND.bus[o.bus || 'amb']);
-    SND.get(n).then(b => { if (!b || !SND.loops[n] || L.src) return; const s = SND.ctx.createBufferSource(); s.buffer = b; s.loop = true; s.loopStart = 0.03; s.loopEnd = b.duration - 0.03; s.connect(L.gain); s.start(0, Math.random() * (b.duration - 0.1)); L.src = s; }); }
-  L.target = target; L.rate = o.rate || 1; L.panT = o.pan || 0;
+  if (!L) { if (target < 0.003) return; L = SND.loops[n] = { cur: 0, src: null, gain: SND.ctx.createGain(), pan: SND.ctx.createStereoPanner ? SND.ctx.createStereoPanner() : null, filt: null, quiet: 0 }; L.gain.gain.value = 0;
+    let head = L.gain; if (o.lp) { L.filt = SND.ctx.createBiquadFilter(); L.filt.type = 'lowpass'; L.filt.frequency.value = o.lp; L.filt.Q.value = 0.7; L.filt.connect(L.gain); head = L.filt; } L.head = head;
+    if (L.pan) { L.gain.connect(L.pan); L.pan.connect(SND.bus[o.bus || 'amb']); } else L.gain.connect(SND.bus[o.bus || 'amb']);
+    SND.get(o.src || n).then(b => { if (!b || SND.loops[n] !== L || L.src) return; const s = SND.ctx.createBufferSource(); s.buffer = b; s.loop = true; s.loopStart = 0.03; s.loopEnd = b.duration - 0.03; s.connect(L.head); s.start(0, Math.random() * (b.duration - 0.1)); L.src = s; }); }
+  L.target = target; L.rate = o.rate || 1; L.panT = o.pan || 0; if (o.lp) L.lpT = o.lp;
 };
 SND.tickLoops = function (dt) {
   const t = SND.ctx.currentTime;
   for (const [n, L] of Object.entries(SND.loops)) {
     const tg = L.target || 0; L.cur += (tg - L.cur) * Math.min(1, dt * (tg > L.cur ? 1.2 : 2.0)); L.target = 0; // must be re-asserted each frame
-    L.gain.gain.setTargetAtTime(L.cur, t, 0.05); if (L.src) L.src.playbackRate.setTargetAtTime(L.rate, t, 0.08); if (L.pan) L.pan.pan.setTargetAtTime(L.panT, t, 0.1);
+    L.gain.gain.setTargetAtTime(L.cur, t, 0.05); if (L.src) L.src.playbackRate.setTargetAtTime(L.rate, t, 0.08); if (L.pan) L.pan.pan.setTargetAtTime(L.panT, t, 0.1); if (L.filt && L.lpT) L.filt.frequency.setTargetAtTime(L.lpT, t, 0.1);
     if (L.cur < 0.002 && tg < 0.002) { L.quiet += dt; if (L.quiet > 4) { try { L.src && L.src.stop(); } catch (e) { } L.gain.disconnect(); delete SND.loops[n]; } } else L.quiet = 0;
   }
 };
@@ -6131,18 +6141,39 @@ SND.update = function (dt) {
   const hi = Math.floor(h); if (SND.lastHour !== null && hi !== SND.lastHour && (hi === 12 || hi === 17) && PLACED.church && !inside) for (let k = 0; k < 3; k++) SND.play('bell', { pos: PLACED.church, ref: 60, max: 450, vol: 0.9, delay: k * 4.5, bus: 'amb', rate: 0.5 }); // a deep temple-like bell SND.lastHour = hi;
   // vehicles
   const v = PL.veh;
-  if (v && !inside && (v.kind === 'truck' || v.kind === 'boat')) { const mx = (VSPEC[v.kind] && VSPEC[v.kind].max) || 16, sp = Math.min(1.3, Math.abs(v.v) / mx);
-    if (v.kind === 'truck') SND.loop('eng_truck', 0.55 + sp * 0.35, { bus: 'sfx', rate: 0.78 + sp * 1.05 }); else SND.loop('eng_boat', 0.5 + sp * 0.4, { bus: 'sfx', rate: 0.8 + sp * 0.6 }); }
+  if (v && !inside && v.kind === 'truck') { const mx = (VSPEC[v.kind] && VSPEC[v.kind].max) || 16, sp = Math.min(1.3, Math.abs(v.v) / mx); SND.loop('eng_truck', 0.55 + sp * 0.35, { bus: 'sfx', rate: 0.78 + sp * 1.05 }); }
+  if (!inside) SND.boats(dt);   // boats: engine, the hull through the water, spray, other boats (see SND.boats)
   if (typeof DV !== 'undefined' && !inside) {
     const B = DV.bus; if (B && B.x !== undefined) { const s = SND.spatial(B.x, B.z, 10, 90); const ride = PL.veh === B; SND.loop('eng_bus', ride ? 0.5 : (s ? s.g * 0.9 : 0), { bus: 'sfx', pan: ride ? 0 : s ? s.pan : 0, rate: B.wait > 0 ? 0.8 : 1.05 });
       const st = B.wait > 0; if (SND._busSt !== undefined && st !== SND._busSt) SND.play('bus_door', { pos: B, ref: 10, max: 80, vol: 0.8 }); SND._busSt = st; }
-    const F = DV.ferry; if (F && F.x !== undefined) { const s = SND.spatial(F.x, F.z, 18, 200); const ride = PL.veh === F; SND.loop('eng_ferry', ride ? 0.55 : (s ? s.g * 0.9 : 0), { bus: 'sfx', pan: ride ? 0 : s ? s.pan : 0 });
+    const F = DV.ferry; if (F && F.x !== undefined) { const s = SND.spatial(F.x, F.z, 18, 200); const ride = PL.veh === F; const fs = Math.min(1, Math.abs(F.v || 0) / 8.5); SND.loop('eng_ferry', (ride ? 0.45 + fs * 0.25 : (s ? s.g * (0.6 + fs * 0.4) : 0)), { bus: 'sfx', pan: ride ? 0 : s ? s.pan : 0, rate: 0.85 + fs * 0.3 });
       if (SND._fyDock !== undefined && F.docked !== SND._fyDock) SND.play('horn', { pos: F, ref: 60, max: 500, vol: 0.9 }); SND._fyDock = F.docked; }
   }
   if (typeof LIFE !== 'undefined' && LIFE.fish && LIFE.fish.st === 'bite') SND.loop('reel_loop', 0.0); // reel plays on the catch, not while waiting
   // money: a purchase rings the till, income jingles coins
   if (GAME.p) { const m = GAME.p.money || 0; if (SND.lastMoney !== null && m !== SND.lastMoney) { if (m < SND.lastMoney) SND.play('register', { vol: 0.7 }); else SND.play(Math.random() < 0.5 ? 'coins' : 'coins2', { vol: 0.8 }); } SND.lastMoney = m; }
   SND.tickLoops(dt);
+};
+// ---------- boats (ver.46): the engine (a fishing boat's slow diesel, a motorboat's revving outboard), the hull cutting through the water,
+// spray as the bow meets the waves, and other boats nearby. The engine samples are shared: rate and a low-pass shape each boat's voice ----------
+SND.boats = function (dt) {
+  const v = PL.veh, B = SND.bt || (SND.bt = { last: 0, slap: 0.6, thr: 0 });
+  const wash = (sp, lvl) => SND.loop('boat_wash', lvl, { src: 'amb_stream', bus: 'sfx', rate: 0.8 + sp * 0.55, lp: 700 + sp * 4200 });
+  if (v && v.kind === 'boat') {
+    const mot = v.model === 'motorboat', spec = CARSPEC[v.model] || VSPEC.boat, a = Math.abs(v.v || 0), s = Math.min(1.2, a / (spec.max || 10));
+    const acc = (a - B.last) / Math.max(dt, 1e-3); B.last = a; B.thr += (clamp(acc / 3, 0, 1) - B.thr) * Math.min(1, dt * 4);   // under load (speeding up) it works harder
+    SND.boatKick = Math.max(0, (SND.boatKick || 0) - dt * 0.6);   // revs up for a moment right after it starts
+    if (mot) SND.loop('eng_boat', 0.36 + s * 0.5 + B.thr * 0.12, { bus: 'sfx', rate: 1.05 + s * 0.95 + B.thr * 0.12 + SND.boatKick * 0.3 });
+    else SND.loop('eng_boat', 0.45 + s * 0.4 + B.thr * 0.15, { bus: 'sfx', rate: 0.7 + s * 0.48 + B.thr * 0.05 + SND.boatKick * 0.2 });
+    wash(s, s > 0.04 ? 0.12 + s * s * (mot ? 0.95 : 0.75) : 0);
+    B.slap -= dt * (0.25 + s * (mot ? 2.6 : 1.6) + Math.abs(v.steer || 0) * s * 1.5);   // spray: more often the faster you go and the harder you turn
+    if (B.slap <= 0) { B.slap = 0.6 + Math.random() * 0.9; if (s > 0.15) SND.play('splash', { vol: 0.12 + s * (mot ? 0.38 : 0.28), rate: 0.7 + Math.random() * 0.45, pan: Math.random() * 0.8 - 0.4 }); }
+  } else B.last = 0;
+  // riding the 観光船: its hull through the water too (its engine is handled with the bus above)
+  const F = typeof DV !== 'undefined' && DV.ferry; if (F && PL.veh === F) { const s = Math.min(1, Math.abs(F.v || 0) / 8.5); wash(s * 0.7, F.docked ? 0 : 0.1 + s * 0.45); }
+  // other boats out on the water: the nearest cruising motor yacht drones as it goes by
+  if (typeof RS !== 'undefined' && RS.boats && RS.boats.length) { let best = null; for (const b of RS.boats) { if (b.anchor || b.kind !== 'motor' || !b.g) continue; const s = SND.spatial(b.g.position.x, b.g.position.z, 22, 180); if (s && (!best || s.g > best.g)) best = s; }
+    SND.loop('eng_yacht', best ? best.g * 0.8 : 0, { src: 'eng_boat', bus: 'sfx', pan: best ? best.pan : 0, rate: 1.25 }); }
 };
 // ---------- footsteps ----------
 SND.surface = function (wade) {
@@ -6166,7 +6197,7 @@ SND.blip = function (base) { if (!SND.ctx || SND.prefs.mute) return; const c = S
   SND._bt = setInterval(() => { if (!UI.typing || i > text.length) return clearInterval(SND._bt); if (i % 2 === 0 && !/[\s、。！？…（）「」]/.test(text[i] || '')) SND.blip(base); i++; }, 35); }; }
 // ---------- hooks into the game ----------
 { const _tv = toggleVehicle; toggleVehicle = function () { const before = PL.veh, r = _tv.apply(this, arguments), after = PL.veh;
-  if (after && !before) { if (after.kind === 'truck') { SND.play('car_door', { vol: 0.8 }); SND.play('car_start', { vol: 0.7, delay: 0.35 }); } else SND.play('splash', { vol: 0.3 }); }
+  if (after && !before) { if (after.kind === 'truck') { SND.play('car_door', { vol: 0.8 }); SND.play('car_start', { vol: 0.7, delay: 0.35 }); } else if (after.kind === 'boat') { SND.play('step_wood' + Math.floor(Math.random() * STEP_N), { vol: 0.6 }); SND.play('splash', { vol: 0.25, rate: 1.2 }); SND.play('car_start', { vol: 0.55, rate: after.model === 'motorboat' ? 1.1 : 0.72, delay: 0.45 }); SND.boatKick = 1.0; } else SND.play('splash', { vol: 0.3 }); }
   else if (before && !after) { if (before.kind === 'truck') SND.play('car_door', { vol: 0.8 }); else SND.var('step_water', STEP_N, { vol: 0.5 }); } return r; }; }
 const sndWrap = (obj, fn, pre, post) => { const f = obj[fn]; if (typeof f !== 'function') return; obj[fn] = function () { if (pre) pre.apply(this, arguments); const r = f.apply(this, arguments); if (post) post.apply(this, [r, ...arguments]); return r; }; };
 sndWrap(GAME, 'update', null, function (r, dt) { if (!SND._ui) { SND._ui = 1; try { SND.ui(); SND.watchModal(); } catch (e) { } } try { SND.update(dt || 0.016); } catch (e) { if (!SND._err) { SND._err = 1; console.warn('snd', e); } } });
@@ -9409,7 +9440,7 @@ FSH.updatePanel = function () {
 { const _ok2 = GAME.onKey; GAME.onKey = function (e) { if (!e.repeat && e.code === 'KeyT' && this.p && !this.modal && !EDIT.on && !PL.veh && !LIFE.fish && FSH.holdKg() > 0.05) { const S = DECO.ship, H = this.LM.harbor; if ((S && Math.hypot(PL.x - S.x, PL.z - S.z) < 12) || (H && Math.hypot(PL.x - H.x, PL.z - H.z) < 60)) { FSH.openLanding(true); return true; } } return _ok2.apply(this, arguments); }; }
 { const _p2 = GAME.prompt; GAME.prompt = function () { if (this.p && !PL.veh && !this.modal && this.nearShip && this.nearShip() && FSH.holdKg() > 0.05) return `Space：出荷所　T：網の魚を水揚げ（魚倉 ${FSH.holdKg().toFixed(0)}kg）`; return _p2.apply(this, arguments); }; }
 // version label so you can tell whether the page has updated
-const GAME_VER = '45（10/27）';
+const GAME_VER = '46（10/27）';
 { const v = document.createElement('div'); v.id = 'verTag'; v.textContent = 'ver.' + GAME_VER; v.style.cssText = 'position:fixed;left:6px;bottom:4px;z-index:5;font-size:10px;color:rgba(255,255,255,.75);text-shadow:0 1px 2px rgba(0,0,0,.6);pointer-events:none;font-family:sans-serif'; document.body.appendChild(v); }
 
 // ===================== 島の収益: 建物ごとに1時間あたりの売上が入りつづける（留守のあいだも最大24時間分） =====================
@@ -9514,13 +9545,21 @@ RIV.flowAt = function (x, z) {
   const d = Math.sqrt(bd), hw = (G.river.hw && G.river.hw[bi]) || 4; if (d > hw + 12) return [0.03, 0.02]; // ponds: barely moving
   const k = 1 - clamp((d - hw * 0.6) / (hw + 10), 0, 0.85), s = RIV.sp[bi] * k; return [RIV.dir[bi * 2] * s, RIV.dir[bi * 2 + 1] * s];
 };
+RIV.mouthU = function () { const U = waterMat && waterMat.uniforms; if (!U) return; U.uMouth = U.uMouth || { value: new THREE.Vector3(0, 0, 0) };
+  const R = G.river, m = R && R.shore !== undefined && R.pts[Math.min(R.shore, R.pts.length - 1)]; if (m) U.uMouth.value.set(m[0], m[1], 1); else U.uMouth.value.set(0, 0, 0); };
 function makeRiverMat() {
   const U = waterMat.uniforms; // shared, so time / sun / sky updates reach the rivers too
+  // the river mouth: near it the river's own surface fades out into the sea (whose level moves with the tide: uTide)
+  RIV.mouthU();
   return new THREE.ShaderMaterial({
     transparent: true, depthWrite: false, fog: true, side: THREE.DoubleSide, uniforms: U,
     vertexShader: `attribute float aFoam; attribute vec2 aFlow; varying float vFoam; varying vec2 vFlow; varying vec3 vW; #include <fog_pars_vertex>
-      void main(){ vFoam = aFoam; vFlow = aFlow; vec4 wp = modelMatrix * vec4(position,1.0); vW = wp.xyz; vec4 mvPosition = viewMatrix * wp; gl_Position = projectionMatrix * mvPosition; #include <fog_vertex> }`.replace(/#include <(\w+)>/g, '\n#include <$1>\n'),
-    fragmentShader: `uniform float time, wsize, ambient; uniform vec3 sunDir, sunCol, skyCol, horCol; uniform sampler2D hTex, nTex, mTex; varying vec3 vW; varying float vFoam; varying vec2 vFlow;
+      uniform float uTide; uniform vec3 uMouth; varying float vMw;
+      void main(){ vFoam = aFoam; vFlow = aFlow; vec4 wp = modelMatrix * vec4(position,1.0);
+        // the river mouth: over its last ~30 m the surface bends onto the sea's own level, whatever the tide (no step at low tide, the sea floods in at high tide)
+        vMw = uMouth.z * (1.0 - smoothstep(2.0, 26.0, length(wp.xz - uMouth.xy))); wp.y = mix(wp.y, uTide, vMw);
+        vW = wp.xyz; vec4 mvPosition = viewMatrix * wp; gl_Position = projectionMatrix * mvPosition; #include <fog_vertex> }`.replace(/#include <(\w+)>/g, '\n#include <$1>\n'),
+    fragmentShader: `uniform float time, wsize, ambient, uTide; uniform vec3 sunDir, sunCol, skyCol, horCol, uMouth; uniform sampler2D hTex, nTex, mTex; varying vec3 vW; varying float vFoam; varying vec2 vFlow; varying float vMw;
       #include <common>
       #include <fog_pars_fragment>
       void main(){
@@ -9537,7 +9576,7 @@ function makeRiverMat() {
         vec3 N = normalize(vec3((nf.x + n2.x * 0.45) * rough, 4.0, (nf.y + n2.y * 0.45) * rough));
         vec3 V = normalize(cameraPosition - vW); float fres = 0.02 + 0.98 * pow(1.0 - max(dot(N, V), 0.0), 5.0);
         // clear fresh water: you can see the stones in the shallows, deep pools turn green-blue
-        vec3 shallow = vec3(0.22, 0.46, 0.33), mid = vec3(0.07, 0.30, 0.28), deep = vec3(0.02, 0.13, 0.14);
+        vec3 shallow = mix(vec3(0.22, 0.46, 0.33), vec3(0.2, 0.54, 0.48), vMw), mid = mix(vec3(0.07, 0.30, 0.28), vec3(0.07, 0.34, 0.39), vMw), deep = mix(vec3(0.02, 0.13, 0.14), vec3(0.03, 0.17, 0.25), vMw);   // toward the sea's colours at the mouth
         vec3 wc = mix(shallow, mid, smoothstep(0.15, 1.2, depth)); wc = mix(wc, deep, smoothstep(1.2, 4.5, depth));
         float dif = 0.62 + 0.38 * max(dot(N, sunDir), 0.0); vec3 col = wc * dif * mix(vec3(1.0), sunCol, 0.5) * ambient;
         // light ripples (caustics) dancing on the bed of the shallows
@@ -9556,6 +9595,9 @@ function makeRiverMat() {
         float alpha = smoothstep(0.0, 0.15, depth) * mix(0.5, 0.95, smoothstep(0.25, 2.5, depth)); alpha = max(alpha, foam * 0.85 * smoothstep(0.0, 0.08, depth)); alpha = mix(alpha, 1.0, fres * 0.55);
         if (fall > 0.0) { float hc = vW.x * 0.9 + vW.z * 0.9; float s1 = texture2D(mTex, vec2(hc * 0.35, vW.y * 0.12 + time * 0.9)).b; float s2 = texture2D(mTex, vec2(hc * 0.8, vW.y * 0.3 + time * 1.6)).g;
           vec3 fc = mix(vec3(0.62, 0.84, 0.92), vec3(0.97, 0.99, 1.0), smoothstep(0.35, 0.75, s1 * 0.6 + s2 * 0.6)) * ambient; col = mix(col, fc, fall); alpha = mix(alpha, 0.88 + s1 * 0.1, fall); }
+        // at the mouth the river meets the sea at the same level: its own surface fades away and the sea takes over
+        alpha *= 1.0 - smoothstep(0.35, 0.9, vMw);
+        alpha *= smoothstep(-0.03, 0.05, vW.y - uTide);   // under the sea's surface the sea is what you see (high tide backing up the mouth)
         gl_FragColor = vec4(col, alpha);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
@@ -9566,7 +9608,7 @@ function makeRiverMat() {
 // inland water chunks get a flow attribute and the river material
 { const _rw = rebuildWaterChunk; rebuildWaterChunk = function (cx, cz) {
   _rw(cx, cz); const m = TERR.wchunks.get(cx + ',' + cz); if (!m) return;
-  if (!riverMat && waterMat) riverMat = makeRiverMat(); if (!riverMat) return;
+  if (!riverMat && waterMat) riverMat = makeRiverMat(); if (!riverMat) return; RIV.mouthU();
   const pos = m.geometry.attributes.position, fl = new Float32Array(pos.count * 2), cache = new Map();
   for (let i = 0; i < pos.count; i++) { const x = pos.getX(i), z = pos.getZ(i), k = Math.round(x * 2) + ',' + Math.round(z * 2); let f = cache.get(k); if (!f) { f = RIV.flowAt(x, z); cache.set(k, f); } fl[i * 2] = f[0]; fl[i * 2 + 1] = f[1]; }
   m.geometry.setAttribute('aFlow', new THREE.BufferAttribute(fl, 2)); m.material = riverMat;
@@ -13166,6 +13208,195 @@ BUS2.finish = function () {
   } catch (e) { console.warn('bus2', e); }
   return r; }; }
 CARSPEC.bus.cam = 11.5; CARSPEC.bus.eye = BUS2.eye();
+
+// ===================== バス路線を決めやすく (ver.46) =====================
+// - 道路をクリックすると、遠回りがいちばん少ない順番に停留所が入る（いままでは必ず最後に足されたので、途中に足せなかった）
+// - 停留所はドラッグで動かせる。クリックで消す。まちがえても「↶ もどす」（Z）で戻せる
+// - カーソルの下に「ここに置くと◯番目」と、置いたあとの経路が先に見える（置けないところは赤）
+// - 一覧の▲▼で順番を入れかえ、🪄おまかせで島の名所をむすぶ路線を自動で作れる。ひとまわりの時間も出る
+const BUSE = { hist: [], last: null, press: null, gh: null, key: '', lineKey: '', MIN: 25 };
+// shortest road distance from node a to every node (the same graph BUSX.path uses)
+BUSX.distFrom = function (a) {
+  const G = BUSX.G || BUSX.graph(), n = G.N.length, dist = new Float64Array(n).fill(Infinity), H = [];
+  const push = (d, i) => { H.push([d, i]); let k = H.length - 1; while (k > 0) { const p = (k - 1) >> 1; if (H[p][0] <= H[k][0]) break; [H[p], H[k]] = [H[k], H[p]]; k = p; } };
+  const pop = () => { const top = H[0], last = H.pop(); if (H.length) { H[0] = last; let k = 0; for (;;) { const l = k * 2 + 1, r = l + 1; let m = k; if (l < H.length && H[l][0] < H[m][0]) m = l; if (r < H.length && H[r][0] < H[m][0]) m = r; if (m === k) break; [H[m], H[k]] = [H[k], H[m]]; k = m; } } return top; };
+  dist[a] = 0; push(0, a); while (H.length) { const [d, i] = pop(); if (d > dist[i]) continue; for (const [j, w] of G.N[i].e) { const nd = d + w; if (nd < dist[j]) { dist[j] = nd; push(nd, j); } } }
+  return dist;
+};
+BUSE.open = () => { const D = GAME.p && GAME.devState(); return !!(D && D.bus && D.bus.state === 'done'); };
+BUSE.snap = function (p, maxD = 8) { if (!p) return null; if (!BUSX.G) BUSX.graph(); const ni = BUSX.nearestNode(p.x, p.z, maxD); if (ni < 0) return null; const n = BUSX.G.N[ni]; return { ni, x: n.x, z: n.z, y: n.y }; };
+BUSE.hitStop = function (p, R) { if (!p) return -1; let bi = -1, bd = 6; R.stops.forEach((s, k) => { const d = Math.hypot(s.x - p.x, s.z - p.z); if (d < bd) { bd = d; bi = k; } }); return bi; };
+BUSE.nameFor = function (x, z, used) { let name = BUSX.placeName(x, z) || ''; if (name && !used.has(name)) return name; let k = 1; if (name) { const b = name.replace(/前$/, ''); while (used.has(`${b}${k}丁目`)) k++; return `${b}${k}丁目`; } while (used.has(`第${k}停留所`)) k++; return `第${k}停留所`; };
+// where a new stop on node ni fits best: the place in the order that adds the least driving (cheapest insertion)
+BUSE.bestSlot = function (R, ni, skip = -1) {
+  const S = R.stops.filter((_, k) => k !== skip), loop = R.mode === 'loop', n = S.length; if (!n) return { k: 0 };
+  const d = BUSX.distFrom(ni), ids = S.map(s => BUSX.nearestNode(s.x, s.z)); if (ids.some(i => i < 0)) return { k: n };
+  const dn = ids.map(i => d[i]); if (dn.some(v => !isFinite(v))) return { err: 'この道路はバスの路線とつながっていません' };
+  const P = BUSX.build({ stops: S, mode: R.mode }); if (P.err) return { k: n };
+  const leg = k => { const a = P.cum[P.stops[k].i], b = k + 1 < n ? P.cum[P.stops[k + 1].i] : P.cum[P.cum.length - 1]; return Math.max(0, b - a); };
+  let best = { k: n, cost: Infinity };
+  if (!loop) { const c0 = dn[0], cN = dn[n - 1]; if (c0 < best.cost) best = { k: 0, cost: c0 }; if (cN < best.cost) best = { k: n, cost: cN }; }
+  for (let k = 1; k <= (loop ? n : n - 1); k++) { const a = k - 1, b = k % n; const c = dn[a] + dn[b] - leg(a); if (c < best.cost - 0.01) best = { k, cost: c }; }
+  return best;
+};
+// what a click / drop at p would do → { kind: 'add'|'move'|'del'|'bad', ok, text, route }
+BUSE.plan = function (p, drag) {
+  const R = BUSX.route(), hit = drag ? drag.k : BUSE.hitStop(p, R);
+  if (!drag && hit >= 0) return { kind: 'del', ok: R.stops.length > 2, at: R.stops[hit], text: R.stops.length > 2 ? `× 「${R.stops[hit].name}」を消す（ドラッグで移動）` : '停留所は2つ以上必要です（ドラッグで移動）' };
+  const n = BUSE.snap(p); if (!n) return { kind: 'bad', ok: false, at: p, text: '道路の上に置けます' };
+  const near = R.stops.findIndex((s, k) => k !== hit && Math.hypot(s.x - n.x, s.z - n.z) < BUSE.MIN); if (near >= 0) return { kind: 'bad', ok: false, at: n, text: `「${R.stops[near].name}」に近すぎます（${BUSE.MIN}m 以上はなす）` };
+  const slot = BUSE.bestSlot(R, n.ni, drag ? hit : -1); if (slot.err) return { kind: 'bad', ok: false, at: n, text: slot.err };
+  const S = R.stops.map(s => ({ ...s })), used = new Set(S.filter((_, k) => k !== hit).map(s => s.name));
+  let st; if (drag) { st = S.splice(hit, 1)[0]; st.x = n.x; st.z = n.z; if (st.auto !== false && BUSX.placeName(n.x, n.z) !== st.name) st.name = BUSE.nameFor(n.x, n.z, used); } else st = { x: n.x, z: n.z, name: BUSE.nameFor(n.x, n.z, used) };
+  S.splice(slot.k, 0, st); const route = { stops: S, mode: R.mode }, P = BUSX.build(route); if (P.err) return { kind: 'bad', ok: false, at: n, text: P.err };
+  return { kind: drag ? 'move' : 'add', ok: true, at: n, route, P, k: slot.k, text: drag ? `✋ 「${st.name}」をここへ（${slot.k + 1}番目）` : `＋ 「${st.name}」（${slot.k + 1}番目に入ります）` };
+};
+// ---------- history: every change can be undone (Z or ↶) ----------
+BUSE.snapNow = () => JSON.stringify(GAME.p && GAME.p.busRoute || null);
+BUSE.mark = function () { const now = BUSE.snapNow(); if (BUSE.last !== null && now !== BUSE.last) { BUSE.hist.push(BUSE.last); if (BUSE.hist.length > 30) BUSE.hist.shift(); } BUSE.last = now; };
+BUSE.undo = function () { const s = BUSE.hist.pop(); if (s === undefined) { UI.toast('もどせる路線の操作がありません'); return; } GAME.p.busRoute = JSON.parse(s); BUSE.last = s; BUSX.apply(); UI.toast('↶ 路線をひとつもどしました'); };
+{ const _a = BUSX.apply; BUSX.apply = function () { if (BUSE.last === null) BUSE.last = BUSE.snapNow(); BUSE.mark(); BUSE.key = ''; return _a.apply(this, arguments); }; }
+{ const _e = BUSX.editRoute; BUSX.editRoute = function () { if (BUSE.last === null) BUSE.last = BUSE.snapNow(); return _e.apply(this, arguments); }; }
+{ const _u = undoEdit; undoEdit = function () { if (EDIT.on && EDIT.tool === 'busroute' && GAME.p) { BUSE.undo(); return; } return _u.apply(this, arguments); }; }
+// ---------- click / drag on the map ----------
+BUSE.commit = function (pl) {
+  if (!pl.ok) { UI.toast('🚫 ' + pl.text.replace(/^[×＋✋] /, '')); return; }
+  const R = BUSX.editRoute();
+  if (pl.kind === 'del') { const k = R.stops.indexOf(R.stops.find(s => s.x === pl.at.x && s.z === pl.at.z)); if (k < 0) return; const s = R.stops.splice(k, 1)[0]; UI.toast(`🚏 「${s.name}」を消した（Z でもどせます）`); BUSX.apply(); return; }
+  R.stops = pl.route.stops; const st = R.stops[pl.k]; UI.toast(pl.kind === 'move' ? `🚏 「${st.name}」を動かした（${pl.k + 1}番目）` : `🚏 停留所「${st.name}」をつくった（${pl.k + 1}番目・全${R.stops.length}か所）`); BUSX.apply();
+};
+{ const _d = editPointerDown; editPointerDown = function (e) {
+  if (EDIT.tool !== 'busroute' || e.button !== 0) return _d(e);
+  if (!BUSE.open()) { UI.toast('🔒 開発（P）で「島めぐりバス」を開業すると、路線を決められます'); return; }
+  const p = pickSurface(e.clientX, e.clientY); if (!p) return; const R = BUSX.route(); BUSE.press = { x: p.x, z: p.z, k: BUSE.hitStop(p, R), moved: false }; BUSE.key = ''; }; }
+{ const _up = editPointerUp; editPointerUp = function () {
+  const pr = BUSE.press; BUSE.press = null; if (!pr || EDIT.tool !== 'busroute') return _up.apply(this, arguments);
+  const p = EDIT.hover || pr; BUSE.key = '';
+  if (pr.k >= 0 && pr.moved) BUSE.commit(BUSE.plan(p, { k: pr.k })); else BUSE.commit(BUSE.plan(pr));
+  return _up.apply(this, arguments); }; }
+// ---------- what you'd get, under the cursor ----------
+BUSE.ghost = function () {
+  if (BUSE.gh) return BUSE.gh; const g = new THREE.Group();
+  const ring = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 1.1, 3.4, 20, 1, true), new THREE.MeshBasicMaterial({ color: '#3fbf6a', transparent: true, opacity: 0.6, depthWrite: false, side: THREE.DoubleSide })); ring.position.y = 1.7; ring.renderOrder = 61; g.add(ring);
+  const line = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshBasicMaterial({ color: '#2fd06a', transparent: true, opacity: 0.85, depthWrite: false })); line.renderOrder = 56; line.frustumCulled = false;
+  const tip = document.createElement('div'); tip.id = 'busTip'; tip.style.cssText = 'position:fixed;z-index:30;pointer-events:none;padding:5px 10px;border-radius:10px;background:rgba(255,255,255,.95);box-shadow:0 2px 8px rgba(0,0,0,.25);font:600 13px "M PLUS Rounded 1c",sans-serif;color:#234;border-left:5px solid #2fb85a;display:none;white-space:nowrap';
+  document.body.appendChild(tip); scene.add(g); scene.add(line); BUSE.gh = { g, ring, line, tip, text: '' }; return BUSE.gh;
+};
+BUSE.hide = function () { if (BUSE.gh) { BUSE.gh.g.visible = false; BUSE.gh.line.visible = false; BUSE.gh.tip.style.display = 'none'; } BUSE.key = ''; };
+BUSE.hover = function (p) {
+  if (!p || !BUSE.open() || !EDIT.mouse) { BUSE.hide(); return; }
+  const pr = BUSE.press; if (pr && pr.k >= 0 && !pr.moved && Math.hypot(p.x - pr.x, p.z - pr.z) > 3) pr.moved = true;
+  const drag = pr && pr.k >= 0 && pr.moved ? { k: pr.k } : null, R = BUSX.route();
+  // only re-plan when the snapped road point (or the stop under the cursor) changes: the plan runs a shortest-path search
+  const sn = BUSE.snap(p), hk = drag ? -1 : BUSE.hitStop(p, R), key = (drag ? 'd' + drag.k : 'h' + hk) + ':' + (sn ? sn.ni : 'x') + ':' + R.stops.length + R.mode;
+  const G = BUSE.ghost(); if (key !== BUSE.key) { BUSE.key = key; const pl = BUSE.plan(p, drag); BUSE.cur = pl;
+    const col = pl.ok ? (pl.kind === 'del' ? '#d9534f' : pl.kind === 'move' ? '#e08a1a' : '#2fb85a') : '#c0392b';
+    G.ring.material.color.set(col); G.tip.style.borderLeftColor = col; if (pl.text !== G.text) { G.text = pl.text; G.tip.textContent = pl.text; }
+    const at = pl.at || p; G.g.position.set(at.x, standY(at.x, at.z), at.z); G.g.visible = true;
+    G.line.geometry.dispose(); if (pl.P && !pl.P.err && pl.P.pts.length > 1) { const v = pl.P.pts.map(q => new THREE.Vector3(q[0], q[1] + 0.75, q[2])); G.line.geometry = new THREE.TubeGeometry(new THREE.CatmullRomCurve3(v), Math.min(600, v.length * 2), 0.22, 5); G.line.material.color.set(pl.kind === 'move' ? '#ffb02a' : '#2fd06a'); G.line.visible = true; } else { G.line.geometry = new THREE.BufferGeometry(); G.line.visible = false; } }
+  G.g.visible = true; G.tip.style.display = 'block'; G.tip.style.left = (EDIT.mouse.x + 16) + 'px'; G.tip.style.top = (EDIT.mouse.y + 14) + 'px';
+};
+{ const _u = updateEdit; updateEdit = function (dt) { _u(dt); if (EDIT.on && EDIT.tool === 'busroute' && GAME.p) BUSE.hover(EDIT.hover); else if (BUSE.gh && (BUSE.gh.g.visible || BUSE.gh.line.visible)) BUSE.hide(); }; }
+// ---------- おまかせ: link the island's places that a road reaches, in a sensible order ----------
+BUSE.auto = function () {
+  if (!BUSX.G) BUSX.graph(); const L = GAME.LM || {}, pri = ['harbor', 'shop', 'hall', 'home', 'ship', 'motors', 'beach', 'light', 'church', 'peak', 'mikan', 'falls'];
+  const cand = []; for (const k of pri) { const v = L[k]; if (v && isFinite(v.x)) cand.push({ x: v.x, z: v.z }); }
+  const D = GAME.devState(); for (const d of DEV) { const s = D[d.id]; if (s && s.state === 'done' && isFinite(s.x)) cand.push({ x: s.x, z: s.z }); }
+  const picked = []; for (const c of cand) { const ni = BUSX.nearestNode(c.x, c.z, 40); if (ni < 0) continue; const n = BUSX.G.N[ni]; if (picked.some(q => Math.hypot(q.x - n.x, q.z - n.z) < 60)) continue; picked.push({ ni, x: n.x, z: n.z }); if (picked.length >= 9) break; }
+  if (picked.length < 2) { UI.toast('道路ぞいの名所が足りません。道路をのばしてから試してね'); return; }
+  const dm = picked.map(q => BUSX.distFrom(q.ni)), reach = picked.map((q, i) => isFinite(dm[0][q.ni]));
+  const S = picked.filter((_, i) => reach[i]), M = S.map(a => S.map(b => dm[picked.indexOf(a)][b.ni])); if (S.length < 2) { UI.toast('つながった道路の上に、名所が2つ以上ありません'); return; }
+  const loop = BUSX.route().mode === 'loop', n = S.length;
+  const len = o => { let t = 0; for (let i = 0; i + 1 < o.length; i++) t += M[o[i]][o[i + 1]]; if (loop) t += M[o[o.length - 1]][o[0]]; return t; };
+  let best = null; for (let s0 = 0; s0 < (loop ? 1 : n); s0++) { const o = [s0], left = new Set([...Array(n).keys()].filter(i => i !== s0)); while (left.size) { const c = o[o.length - 1]; let bj = -1, bd = Infinity; for (const j of left) if (M[c][j] < bd) { bd = M[c][j]; bj = j; } o.push(bj); left.delete(bj); }
+    for (let imp = true, it = 0; imp && it < 40; it++) { imp = false; for (let i = 1; i < n - 1; i++) for (let j = i + 1; j < n; j++) { const t = o.slice(); t.splice(i, j - i + 1, ...o.slice(i, j + 1).reverse()); if (len(t) < len(o) - 0.5) { o.splice(0, n, ...t); imp = true; } } }
+    if (!best || len(o) < len(best)) best = o.slice(); }
+  const used = new Set(), stops = best.map(i => { const q = S[i], name = BUSE.nameFor(q.x, q.z, used); used.add(name); return { x: q.x, z: q.z, name }; });
+  const R = BUSX.editRoute(); R.stops = stops; const P = BUSX.build(R); if (P.err) { UI.toast('🚫 ' + P.err); BUSE.undo(); return; }
+  UI.toast(`🪄 名所をむすぶ路線を作りました（停留所${stops.length}か所・${Math.round(P.cum[P.cum.length - 1])}m）`); BUSX.apply();
+};
+// ---------- the side panel: reorder, undo, おまかせ, how long one trip takes ----------
+BUSE.tripText = function (R, P) { if (!P || P.err) return ''; const L = P.cum[P.cum.length - 1], n = R.stops.length, sec = R.mode === 'loop' ? L / 7.5 + n * 9 : 2 * L / 7.5 + (2 * n - 2) * 9; return `ひとまわり 約${Math.max(1, Math.round(sec / 60))}分`; };
+{ const _p = UI.editPanel; UI.editPanel = function () { _p.apply(this, arguments); if (!EDIT.on || EDIT.tool !== 'busroute' || !GAME.p) return; const box = document.querySelector('#editp .bussub'); if (!box) return;
+  if (BUSE.last === null) BUSE.last = BUSE.snapNow();
+  const seg = box.querySelector('.seg'); if (seg) seg.insertAdjacentHTML('beforeend', `<button data-be="auto" title="道路ぞいの名所をむすぶ路線を自動で作る">🪄 おまかせ</button><button data-be="undo" title="Z でも戻せます" ${BUSE.hist.length ? '' : 'disabled'}>↶ もどす</button>`);
+  box.querySelectorAll('.bstops li').forEach((li, k, all) => { const del = li.querySelector('[data-bdel]'); li.insertAdjacentHTML('afterbegin', `<b class="bnum">${k + 1}</b>`); if (del) del.insertAdjacentHTML('beforebegin', `<button data-bmv="${k}:-1" title="ひとつ前へ" ${k ? '' : 'disabled'}>▲</button><button data-bmv="${k}:1" title="ひとつ後へ" ${k < all.length - 1 ? '' : 'disabled'}>▼</button>`); });
+  const R = BUSX.route(), P = BUSX.build(R), info = box.querySelector(':scope > .small'); if (info && !P.err) info.insertAdjacentHTML('afterend', `<span class="small">⏱ ${BUSE.tripText(R, P).replace(/^・/, '')}（バス1台・停留所で9秒ずつ止まります）</span>`);
+  box.querySelectorAll('[data-be]').forEach(b => b.onclick = e => { e.stopPropagation(); if (b.dataset.be === 'auto') BUSE.auto(); else BUSE.undo(); });
+  box.querySelectorAll('[data-bmv]').forEach(b => b.onclick = e => { e.stopPropagation(); const [k, d] = b.dataset.bmv.split(':').map(Number), Rr = BUSX.editRoute(), j = k + d; if (j < 0 || j >= Rr.stops.length) return; [Rr.stops[k], Rr.stops[j]] = [Rr.stops[j], Rr.stops[k]]; const P2 = BUSX.build(Rr); if (P2.err) { [Rr.stops[k], Rr.stops[j]] = [Rr.stops[j], Rr.stops[k]]; UI.toast('🚫 ' + P2.err); return; } BUSX.apply(); });
+  box.querySelectorAll('[data-bn]').forEach(inp => { const _c = inp.onchange; inp.onchange = e => { const Rr = BUSX.editRoute(), s = Rr.stops[+inp.dataset.bn]; if (s) s.auto = false; return _c && _c(e); }; }); }; }
+{ const T = TOOLS.find(t => t.id === 'busroute'); if (T) T.hint = '道路をクリック：停留所を追加（遠回りしない順番に入ります）／停留所をドラッグ：移動／クリック：消す／Z：もどす'; }
+{ const st = document.createElement('style'); st.textContent = `#editp .bussub{display:flex;flex-direction:column;gap:6px;width:100%}#editp .bstops{display:flex;flex-wrap:wrap;gap:5px 14px;margin:0;padding:0;list-style:none;max-height:124px;overflow:auto}#editp .bstops li{display:flex;align-items:center;gap:2px;font-size:12px}#editp .bstops input{width:104px;font:inherit;font-size:12px;padding:3px 6px;border-radius:8px;border:1px solid #c8d4cc}#editp .bstops button{padding:2px 6px;margin-left:1px;border-radius:8px;background:#f2e2e0;font-size:11px}#editp .bstops .bnum{display:inline-block;min-width:18px;height:18px;line-height:18px;border-radius:9px;background:#1f5fb8;color:#fff;font-size:11px;text-align:center;margin-right:3px}#editp .bstops button[data-bmv]{background:#e4ecf4}#editp .bstops button:disabled,#editp .bussub .seg button:disabled{opacity:.35}`; document.head.appendChild(st); }
+{ const _b = GAME.begin; GAME.begin = function () { BUSE.hist = []; BUSE.last = null; BUSE.press = null; return _b.apply(this, arguments); }; }
+
+// ===================== 島の会議を毎日に (ver.46) =====================
+// - 会議は7日に1回 → 毎日1回（現実の日付で1日1回。決めた次の日にはまた集まれる）
+// - 工事の提案（10案）だけだと10回で議題が尽きるので、くり返し開ける「行事」の案を足した。
+//   行事は決めたその日に起きる（今夜の花火大会・星を見る会で夜は晴れ・大そうじやお茶会で住民と仲よく など）。
+//   同じ行事は数日あけないと議題に出ない。議題は「まだの工事案（最大2つ）＋行事」で3つそろえる
+const MEET_EV = [
+  { id: 'e_fireworks', who: 'v_kai', title: '今夜、港で花火大会', desc: '今夜みんなで花火を見ようよ！ 港の上にドーンって上げたら、ぜったいきれい！', effect: '今夜19時から、港の上に花火が上がる', tags: ['event', 'light', 'sea'], cd: 4, lv: 2,
+    run: g => { const D = g.devState(); D.fireworks = Object.assign({}, D.fireworks || {}, { id: 'fireworks', state: 'done', date: todayKey() }); return '今夜19時から、港の上で花火大会！'; } },
+  { id: 'e_stars', who: 'v_mio', title: '丘で星を見る会', desc: '今夜は丘のてっぺんで、みんなで星を見ようよ！ てるてる坊主もつくったから、きっと晴れるよ。', effect: '今夜は晴れて、星がよく見える', tags: ['scenery', 'quiet'], cd: 4,
+    run: g => { g.p.evDay = Object.assign(g.p.evDay || {}, { stars: todayKey() }); return '今夜は晴れの予報。見晴らしの丘で星を見よう！'; } },
+  { id: 'e_cleanup', who: 'v_hana', title: '浜の大そうじ', desc: 'みんなで浜をきれいにしましょう。ゴミ拾いのあとは、きっと海がもっときれいに見えるわ。', effect: '住民みんなと少し仲よくなる・元気度 +8', tags: ['nature', 'sea', 'community'], cd: 3,
+    run: g => { MEETF.friends(g, 1); g.addVit(8); return 'みんなで浜をぴかぴかにした！'; } },
+  { id: 'e_tea', who: 'v_hana', title: '集会所でお茶会', desc: 'おいしいお茶とお菓子を用意するわ。ゆっくりおしゃべりしましょう。', effect: '住民みんなと仲よくなる（いつもの倍）', tags: ['quiet', 'community'], cd: 3,
+    run: g => { MEETF.friends(g, 2); return 'お茶会で、みんなとたくさん話せた！'; } },
+  { id: 'e_sports', who: 'v_sora', title: '浜で島の運動会', desc: 'たまには体を動かそうぜ！ 浜でつな引きとかけっこだ！', effect: '元気度 +12', tags: ['event', 'community'], cd: 4,
+    run: g => { g.addVit(12); return '運動会でみんなへとへと。でも楽しかった！'; } },
+  { id: 'e_story', who: 'v_gen', title: '昔ばなしの会', desc: 'わしが子どものころの島の話を、みんなに聞かせたいんじゃ。', effect: '住民みんなと少し仲よくなる・元気度 +6', tags: ['tradition', 'culture', 'quiet'], cd: 4,
+    run: g => { MEETF.friends(g, 1); g.addVit(6); return 'ゲンさんの昔ばなし、島のことがもっと好きになった。'; } },
+  { id: 'e_mikan', who: 'v_gen', title: 'みかん畑の手入れの日', desc: 'みかんの木は手をかけてやると、ちゃんと応えてくれるんじゃ。みんなで手入れをせんか。', effect: '元気度 +8・島のお金 +1,500円（みかんのおすそわけ代）', tags: ['tradition', 'nature', 'shop'], cd: 4,
+    run: g => { g.addVit(8); g.p.money = (g.p.money || 0) + 1500; return 'みかん畑がぴかぴか。おすそわけのお礼に 1,500円。'; } },
+  { id: 'e_market', who: 'v_kai', title: '港で朝市の日', need: 'market', desc: '朝市を特別に大きくやろうよ！ 島の外からもお客さんが来るよ！', effect: '島のお金 +4,000円（朝市の売り上げ）', tags: ['shop', 'event', 'sea'], cd: 3,
+    run: g => { g.p.money = (g.p.money || 0) + 4000; return '朝市は大にぎわい！ 売り上げ 4,000円。'; } },
+  { id: 'e_concert', who: 'v_rin', title: '広場でミニコンサート', need: 'park', desc: '広場でみんなで歌ったり演奏したりしたいな！', effect: '住民みんなと仲よくなる・元気度 +6', tags: ['culture', 'event', 'community'], cd: 4,
+    run: g => { MEETF.friends(g, 1); g.addVit(6); return '広場に歌声がひびいた！'; } },
+  { id: 'e_photo', who: 'v_rin', title: '島の写真コンテスト', desc: 'みんなで島のすてきな場所を撮って、いちばんの1枚を決めようよ！', effect: '元気度 +6・島の自慢がふえる', tags: ['culture', 'scenery'], cd: 5,
+    run: g => { g.addVit(6); return '写真コンテスト、いい写真がいっぱい！'; } },
+].map(e => Object.assign(e, { ev: true }));
+const MEETF = { DAYS: 1 };
+MEETF.friends = (g, n) => VILLAGER_DEF.forEach(v => { g.p.friend[v.id] = (g.p.friend[v.id] || 0) + n; });
+MEETF.isEv = id => MEET_EV.some(e => e.id === id);
+// event proposals can be looked up like the building ones (renderMeeting / decide use PROPOSALS.find)
+PROPOSALS.find = function (fn) { return Array.prototype.find.call(this, fn) || MEET_EV.find(fn); };
+Object.assign(GAME, (() => {
+  const _ms = GAME.meetState, _ag = GAME.agenda, _dc = GAME.decide, _rm = GAME.renderMeeting;
+  return {
+    meetState() { const m = _ms.call(this);
+      if (m.v !== 2) { m.v = 2; m.ev = m.ev || {}; const t = todayKey(); if (m.next > t) { const last = addDays(m.next, -7); m.next = last >= t ? addDays(t, MEETF.DAYS) : t; } m.agenda = null; }   // old saves waited 7 days: from now on it is the next day
+      m.ev = m.ev || {}; return m; },
+    agenda() {
+      const m = this.meetState(), t = todayKey(); if (m.agenda && m.agenda.date === t && m.agenda.v === 2) return m.agenda.ids.map(id => PROPOSALS.find(q => q.id === id)).filter(Boolean);
+      const lv = this.level(), P = this.p.projects || {}, R = mulberry(hashStr('meet2' + t + this.p.created)), ids = [], who = new Set();
+      const build = PROPOSALS.filter(q => !m.held.includes(q.id) && (!q.needLv || q.needLv <= lv));
+      const evs = MEET_EV.filter(e => (!e.lv || e.lv <= lv) && (!e.need || (P[e.need] && P[e.need].done)) && (!m.ev[e.id] || addDays(m.ev[e.id], e.cd || 3) <= t));
+      const pick = (pool, n) => { for (let k = 0; k < 80 && pool.length && ids.length < n; k++) { const q = pool[Math.floor(R() * pool.length)]; if (ids.includes(q.id) || (who.has(q.who) && k < 40)) continue; ids.push(q.id); who.add(q.who); } };
+      pick(build, Math.min(2, build.length)); pick(evs, 3);
+      if (ids.length < 3) pick(build, 3);
+      m.agenda = { date: t, ids, v: 2 }; return ids.map(id => PROPOSALS.find(q => q.id === id));
+    },
+    decide(id) {
+      const m = this.meetState();
+      if (!MEETF.isEv(id)) { const r = _dc.call(this, id); m.next = addDays(todayKey(), MEETF.DAYS); this.renderMeeting(); this.save(); return r; }
+      const p = this.p, q = MEET_EV.find(e => e.id === id);
+      m.count++; m.next = addDays(todayKey(), MEETF.DAYS); m.agenda = null; m.ev[id] = todayKey();
+      VILLAGER_DEF.forEach(v => { if (this.stance(q, v.id).s === 'yes') p.friend[v.id] = (p.friend[v.id] || 0) + 1; });
+      let msg = ''; try { msg = q.run(this) || ''; } catch (e) { console.warn('meeting event', id, e); }
+      this.mt.evMsg = msg; this.addVit(5); p.stats.meetN = (p.stats.meetN || 0) + 1; this.mt.step = 'done'; this.dirty = true; this.check(); this.renderMeeting(); this.save();
+    },
+    renderMeeting() { _rm.apply(this, arguments); const mt = this.mt, el = this.el.meet; if (!mt || !el) return; const q = mt.sel && MEET_EV.find(e => e.id === mt.sel);
+      el.querySelectorAll('.pcard').forEach(b => { if (MEETF.isEv(b.dataset.p)) b.classList.add('evcard'); });
+      if (!q) return;
+      if (mt.step === 'detail') { const e2 = el.querySelector('.eff2'); if (e2) e2.textContent = `行事（今日）：${q.effect}`; }
+      if (mt.step === 'done') { const e2 = el.querySelector('.eff2'); if (e2) e2.textContent = `決定：「${q.title}」　${mt.evMsg || q.effect}　元気度 +5`; }
+    },
+  };
+})());
+// 星を見る会: that night stays clear (only when the weather is on おまかせ)
+{ const _w = SEASON.autoWeather; SEASON.autoWeather = function (hf) { const p = GAME.p; if (p && p.evDay && p.evDay.stars === todayKey() && hf >= 15) return 'clear'; return _w.apply(this, arguments); }; }
+{ const st = document.createElement('style'); st.textContent = `.pcard.evcard{border-color:#f0b84a !important}.pcard.evcard .who::after{content:'　🎪 行事';color:#c47a10;font-weight:700}`; document.head.appendChild(st); }
 
 // ===================== フェリー: 船内を歩ける (ver.42) =====================
 // The ship is no longer a fixed spot you are pinned to. Aboard you walk with WASD:
