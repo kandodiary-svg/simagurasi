@@ -9440,7 +9440,7 @@ FSH.updatePanel = function () {
 { const _ok2 = GAME.onKey; GAME.onKey = function (e) { if (!e.repeat && e.code === 'KeyT' && this.p && !this.modal && !EDIT.on && !PL.veh && !LIFE.fish && FSH.holdKg() > 0.05) { const S = DECO.ship, H = this.LM.harbor; if ((S && Math.hypot(PL.x - S.x, PL.z - S.z) < 12) || (H && Math.hypot(PL.x - H.x, PL.z - H.z) < 60)) { FSH.openLanding(true); return true; } } return _ok2.apply(this, arguments); }; }
 { const _p2 = GAME.prompt; GAME.prompt = function () { if (this.p && !PL.veh && !this.modal && this.nearShip && this.nearShip() && FSH.holdKg() > 0.05) return `Space：出荷所　T：網の魚を水揚げ（魚倉 ${FSH.holdKg().toFixed(0)}kg）`; return _p2.apply(this, arguments); }; }
 // version label so you can tell whether the page has updated
-const GAME_VER = '46（10/27）';
+const GAME_VER = '47（10/28）';
 { const v = document.createElement('div'); v.id = 'verTag'; v.textContent = 'ver.' + GAME_VER; v.style.cssText = 'position:fixed;left:6px;bottom:4px;z-index:5;font-size:10px;color:rgba(255,255,255,.75);text-shadow:0 1px 2px rgba(0,0,0,.6);pointer-events:none;font-family:sans-serif'; document.body.appendChild(v); }
 
 // ===================== 島の収益: 建物ごとに1時間あたりの売上が入りつづける（留守のあいだも最大24時間分） =====================
@@ -13397,6 +13397,427 @@ Object.assign(GAME, (() => {
 // 星を見る会: that night stays clear (only when the weather is on おまかせ)
 { const _w = SEASON.autoWeather; SEASON.autoWeather = function (hf) { const p = GAME.p; if (p && p.evDay && p.evDay.stars === todayKey() && hf >= 15) return 'clear'; return _w.apply(this, arguments); }; }
 { const st = document.createElement('style'); st.textContent = `.pcard.evcard{border-color:#f0b84a !important}.pcard.evcard .who::after{content:'　🎪 行事';color:#c47a10;font-weight:700}`; document.head.appendChild(st); }
+
+// ===================== 住民の物語 (ver.47): 住民10人に、それぞれ3つのお話 =====================
+// - なかよし度が 2 / 6 / 10 になると、その住民が「話したいことがある」（頭に！）。話しかけるとお話がはじまる
+// - お話のあとに「約束」がある: 時間と場所の待ち合わせ／釣り・虫とりなどの勝負／持ってきてほしいもの／写真／みんなへの声かけ
+// - 約束をはたすと、続きの場面とお礼。3つめのお話で、その人の夢や悩みにひと区切りがつく
+// - 手帳の「物語」に、住民ごとの進み具合と「もう一度見る」。左の手帳には今の約束が出る
+const BOND = { t: 0, emoT: 0 };
+// lines: [who, text, need?]  who = villager id ('v_mio'), '' for narration, '@' for you; a line whose speaker (or `need`) has not moved in yet is skipped
+BOND.EP = {
+  v_mio: [
+    { f: 2, title: '灯台と夕日', task: { k: 'place', lm: 'light', h: [16, 19.5], r: 26, text: '夕方（16時〜19時半）に、灯台へ' },
+      intro: [['v_mio', 'ねえ{P}さん、こんど夕方、灯台に来てくれない？'], ['v_mio', 'わたしのいちばん好きな景色、{P}さんにも見てほしいんだ。']],
+      outro: [['', '――夕日が、白い灯台をオレンジ色にそめていく。'], ['v_mio', '来てくれたんだ！ …ね、きれいでしょ。'], ['v_mio', 'わたしね、小さいころ、夜の船でこの島に来たの。まっくらな海がこわくて泣いてたら、この灯台の光が見えて。'], ['v_mio', '「もう大丈夫だよ」って言われてる気がしたんだ。だから、灯台が大好きなの。'], ['v_mio', '…あっ、このスケッチブックは見ちゃだめ！ まだ、へたっぴだから。']],
+      reward: { money: 1000 } },
+    { f: 6, title: 'とんでいったページ', task: { k: 'stat', stat: 'shoreN', n: 3, text: '浜で拾いものを3つひろって、ミオに話す' },
+      intro: [['v_mio', '{P}さん、たいへん！ 浜で絵をかいてたら、風でスケッチブックのページがとんでいっちゃった…。'], ['v_mio', '浜のどこかに流れついてるかも。いっしょにさがしてくれる？']],
+      outro: [['', '――貝がらや流木にまじって、しめった紙が3まい見つかった。'], ['v_mio', 'あった！ ありがとう、{P}さん！'], ['v_mio', '…見えちゃった？ これ、島のみんなの絵なんだ。ゲンじいの船、ハナさんの花、それから…これ、{P}さん。'], ['v_mio', 'わたしね、いつか島の絵本を作りたいの。島に来た子どもが、さびしくならないような絵本。'], ['v_mio', 'ナイショだよ？ {P}さんにだけ言ったんだから。']],
+      reward: { money: 500, decor: { postbox: 1 } } },
+    { f: 10, title: 'はじめての絵本', task: { k: 'place', lm: 'hall', h: [13, 17], r: 14, text: '昼すぎ（13時〜17時）に、集会所へ' },
+      intro: [['v_mio', '{P}さん！ 絵本、できたの！ 「ほしなみ島のとうだい」っていうんだ。'], ['v_mio', '昼すぎに、集会所で読み聞かせをするの。…{P}さんも来てくれる？']],
+      outro: [['', '――集会所には、子どもたちと、たくさんの大人が集まっていた。'], ['v_mio', '「むかしむかし、海のまんなかに、ひとりぼっちの灯台がありました…」'], ['v_mio', '「…灯台は、まいばん光をとどけました。帰ってくる船に、はじめて来る人に、『もう大丈夫だよ』って」'], ['v_kota', 'すげー！ 灯台、かっこいい！'], ['v_yuki', '線がやさしくて、あたたかい絵ね。ミオちゃん、ほんものの絵本作家だわ。'], ['v_mio', '{P}さん、ありがとう。…最後のページの人、だれだかわかる？ 島に来てくれた、{P}さんだよ。']],
+      reward: { money: 3000, vit: 10 } },
+  ],
+  v_sora: [
+    { f: 2, title: 'ひみつの釣り場', task: { k: 'place', lm: 'falls', h: [5, 9.5], r: 28, text: '朝（5時〜9時半）に、滝へ' },
+      intro: [['v_sora', 'なあ{P}、前に言ってた「オレのひみつの釣り場」、教えてやるよ。'], ['v_sora', '朝が勝負なんだ。早起きして、滝つぼに来いよな！']],
+      outro: [['', '――朝もやの中、滝の音だけがひびいている。'], ['v_sora', '来たな！ 見ろよ、この淵。アユがキラッキラ光ってるだろ？'], ['v_sora', 'ここ、親父が教えてくれた場所なんだ。親父は本土で働いてて、年に何回かしか帰ってこないけどさ。'], ['v_sora', '帰ってきたら、いつもここで並んで釣るんだ。…ナイショだぜ？ 島のやつらにも言ってないんだから。']],
+      reward: { money: 1000 } },
+    { f: 6, title: '港の釣り勝負', task: { k: 'stat', stat: 'fishN', n: 3, text: '魚を3匹釣って、ソラに話す' },
+      intro: [['v_sora', '{P}、釣り勝負しようぜ！ 今から先に魚を3匹釣ったほうが勝ちな！'], ['v_sora', '負けたほうは…あとで考える！ よーい、スタート！']],
+      outro: [['v_sora', 'えっ、もう3匹！？ …まいった、オレまだ2匹だ。'], ['v_sora', '……なあ{P}。オレさ、本土の運送会社から「うちで働かないか」って言われてるんだ。'], ['v_sora', '運転は好きだし、親父の近くにも行ける。でも、島を出るのは…なんかちがう気がしてさ。'], ['v_sora', '…わりい、急にこんな話。勝負はおまえの勝ちだ！ これ、賞金な！']],
+      reward: { money: 1500 } },
+    { f: 10, title: 'ハンドルの向こう', task: { k: 'stat', stat: 'busN', n: 1, text: '島めぐりバスに乗って、ソラに話す', alt: { stat: 'truckM', n: 300, text: '軽トラで300m走って、ソラに話す（バスはまだないので）', when: () => !devDone('bus') } },
+      intro: [['v_sora', '{P}、決めたぜ。オレ、島めぐりバスの運転手になる！'], ['v_sora', '島を出なくても、ハンドルはにぎれる。島のみんなを乗せて走れるんだ。'], ['v_sora', '今、運転の練習中なんだ。…乗りに来てくれよな！']],
+      outro: [['v_sora', '「次は〜、{I}島港前〜。お降りの方は、ボタンでお知らせくださ〜い」…どうだ、決まってたろ？'], ['v_sora', '親父に電話したらさ、「おまえらしい」って笑ってたよ。'], ['v_sora', '島に残るって決めたら、なんか景色まで変わって見えるんだ。…{P}、ありがとな。相棒！']],
+      reward: { money: 3000 } },
+  ],
+  v_hana: [
+    { f: 2, title: '夜に咲く花', task: { k: 'place', lm: 'church', h: [19, 22], r: 22, text: '夜（19時〜22時）に、神社へ' },
+      intro: [['v_hana', '{P}さん、月見草って知っている？ 夜になってから咲く、うす黄色のお花なの。'], ['v_hana', '神社のそばに咲いているのよ。こんど夜、見に来てくださる？']],
+      outro: [['', '――石灯籠のあかりの下で、小さな花がひらいていく。'], ['v_hana', 'ほら、今ひらいたわ。…きれいでしょう。'], ['v_hana', 'ここの椿も月見草も、夫のシゲルさんが植えたの。この島に来た年にね。'], ['v_hana', 'シゲルさんがいなくなってからも、お花の世話だけは続けているの。お花が咲くと、まだそばにいてくれる気がして。'], ['v_hana', '…ごめんなさいね、しんみりしちゃった。来てくれて、うれしかったわ。']],
+      reward: { decor: { pot: 2 } } },
+    { f: 6, title: '花のお茶', task: { k: 'bring', item: 'forage', n: 1, text: '山の幸を1つ、ハナにわたす（林でひろえます）' },
+      intro: [['v_hana', '{P}さん、お願いがあるの。林で山の幸をひとつ、とってきてくださらない？'], ['v_hana', 'お花と山の幸で、とっておきのお茶をいれたいの。']],
+      outro: [['v_hana', 'ありがとう。…はい、どうぞ。熱いから気をつけてね。'], ['v_hana', 'わたしね、むかしは大阪でお花屋さんをしていたの。毎日いそがしくて、季節を感じるひまもなかった。'], ['v_hana', 'この島に来て、はじめて「春ってこんなにゆっくり来るんだ」って知ったのよ。'], ['v_hana', '{P}さんと飲むお茶は、とびきりおいしいわ。']],
+      reward: { money: 1500 } },
+    { f: 10, title: 'みんなの花畑', task: { k: 'stat', stat: 'plant', n: 3, text: 'しまづくりで木を3本植えて、ハナに話す' },
+      intro: [['v_hana', '{P}さん。わたし、島のみんなが歩ける花畑をつくりたいの。'], ['v_hana', 'シゲルさんの花を、わたしだけのものにしておくのは、もったいないもの。'], ['v_hana', 'しまづくりで、木を3本植えてくれる？ そのまわりに、お花の種をまくわ。']],
+      outro: [['', '――植えた木のまわりに、小さな芽がいっせいに顔を出した。'], ['v_hana', '見て、{P}さん。もう芽が出てきたわ。'], ['v_hana', '子どもたちが走り回って、お年よりがベンチでひと休みして…そんな花畑になるといいわね。'], ['v_hana', 'シゲルさん、聞こえる？ 島に、新しいお花がふえたわよ。'], ['v_hana', 'これ、わたしからのお礼。お花のそばに置いてね。']],
+      reward: { decor: { fountain: 1 } } },
+  ],
+  v_gen: [
+    { f: 2, title: '朝の網', task: { k: 'place', lm: 'harbor', h: [4.5, 8], r: 30, text: '朝（4時半〜8時）に、港へ' },
+      intro: [['v_gen', '{P}、明日の朝、港に来んか。網のつくろい方を教えてやる。'], ['v_gen', '漁師の朝は早いぞ。日がのぼるころじゃ。']],
+      outro: [['', '――朝日が、港の水面を金色にそめている。'], ['v_gen', 'よう来た。ほれ、ここをこう通して、こう結ぶ。…ほう、筋がええのう。'], ['v_gen', 'わしのばあさんはの、網つくろいが島で一番うまかった。わしなんぞ、いつも笑われとった。'], ['v_gen', 'ばあさんが亡くなってから、この網はわしひとりでつくろうとる。…今朝は、ひさしぶりにふたりじゃな。']],
+      reward: { money: 1000 } },
+    { f: 6, title: '海を読む', task: { k: 'stat', stat: 'boatM', n: 300, text: '漁船で300m進んで、ゲンじいに話す' },
+      intro: [['v_gen', '{P}。漁船で、少し沖まで出てみい。'], ['v_gen', '船の上から島を見るとの、島がちがって見える。それが漁師の目じゃ。']],
+      outro: [['v_gen', 'どうじゃった。沖から見た島は、ちいさかったじゃろう。'], ['v_gen', 'あの船は「ほしなみ丸」いうてな。ばあさんが名前をつけたんじゃ。「星の波の上を走る船」じゃと。'], ['v_gen', 'わしは六十年、あの船で海に出た。海はこわい。じゃが、うそはつかん。'], ['v_gen', '…おまえさんの舵さばき、悪うなかったぞ。']],
+      reward: { money: 2000 } },
+    { f: 10, title: 'ほしなみ丸の舵', task: { k: 'stat', stat: 'shipFish', n: 3, text: '港の出荷所で魚を3匹出荷して、ゲンじいに話す' },
+      intro: [['v_gen', '{P}、ひとつ頼みがある。'], ['v_gen', 'わしの代わりに、漁協に魚を3匹おさめてきてくれんか。…島の漁師としての、最初の仕事じゃ。']],
+      outro: [['v_gen', 'ようやった。漁協の連中も「いい魚じゃ」と言うとったぞ。'], ['v_gen', 'わしもそろそろ、年じゃ。…ほしなみ丸の舵、おまえさんにあずけたい。'], ['v_gen', 'なに、まだ引退はせん。となりで、口だけは出させてもらうがの。わっはっは。'], ['v_gen', 'ばあさん、見とるか。ほしなみ丸に、ええ船長ができたぞ。']],
+      reward: { money: 5000 } },
+  ],
+  v_rin: [
+    { f: 2, title: '丘の上の星', task: { k: 'place', lm: 'peak', h: [20, 23.5], r: 24, text: '夜（20時〜23時半）に、見晴らしの丘のてっぺんへ' },
+      intro: [['v_rin', '{P}さん、今夜ひま？ 見晴らしの丘で、いっしょに星を見ない？'], ['v_rin', '夜の丘から見ると、島の灯りがぜんぶ見えるんだ。']],
+      outro: [['', '――足もとに島の灯り、頭の上には星。'], ['v_rin', 'ね、いいでしょ。ここ、おじいちゃんとよく来たの。'], ['v_rin', 'わたしが小さいころ、友だちがみんな、家族といっしょに本土に引っこしていったの。島の灯りが、ひとつずつ消えていって…。'], ['v_rin', 'だから、灯りがふえていくのを見るのが、いちばんうれしいの。…{P}さんの家の灯りも、ちゃんと見えるよ。']],
+      reward: { money: 1000 } },
+    { f: 6, title: 'ふたりの願いごと', task: { k: 'stat', stat: 'prayN', n: 1, text: '神社でお参りして、リンに話す' },
+      intro: [['v_rin', '{P}さん、こんど神社で、お参りしてくれない？'], ['v_rin', 'わたしもね、ちょっと…願いたいことがあるんだ。']],
+      outro: [['v_rin', 'お参り、してくれたんだね。ありがとう。'], ['v_rin', 'わたしね、本土の大学で「島のまちづくり」を勉強してみたいって、ずっと思ってたの。でも、島をはなれるのがこわくて。'], ['v_rin', 'でも今は、橋も船もある。行っても、すぐに帰ってこられる。'], ['v_rin', 'だから願ったの。「勉強して、もっと島の役に立てますように」って。…{P}さんは、何をお願いした？ …ナイショ？ ふふっ。']],
+      reward: { money: 1500 } },
+    { f: 10, title: '島だより 特別号', task: { k: 'photo', spot: 'vista', text: '高い所から集落を見おろして写真をとり、リンに話す（名所「島の全景」）' },
+      intro: [['v_rin', '{P}さん、「島だより」の特別号を作るの。島を出ていった人たちにも送るんだ。'], ['v_rin', '一面にのせる「島の全景」の写真、{P}さんがとってくれない？']],
+      outro: [['v_rin', 'すてきな写真！ これで一面ができたよ。'], ['', '――何週間かして、リンのもとに一通の手紙がとどいた。'], ['v_rin', 'むかし島に住んでいたおばあちゃんからだよ。「写真の島が、むかしよりにぎやかで、涙が出ました。孫をつれて、遊びに行きます」って。'], ['v_rin', '灯りって、こうやってまた、ひとつずつふえていくんだね。…{P}さん、これからもいっしょに島を作っていこうね。']],
+      reward: { money: 3000, decor: { bench: 2 } } },
+  ],
+  v_kai: [
+    { f: 2, title: 'みかんジュース計画', task: { k: 'bring', item: 'mikan', n: 3, text: 'みかんを3つ、カイにわたす' },
+      intro: [['v_kai', '{P}さん、新商品を作りたいの！ 島のみかんで、みかんジュース！'], ['v_kai', 'みかんを3つ持ってきてくれないかな？ 試作品、いちばんに飲ませてあげる！']],
+      outro: [['v_kai', 'しぼって、しぼって…できた！ はい、どうぞ！'], ['v_kai', '…どう？ すっぱい？ あまい？ …「ちょうどいい」！？ やったー！'], ['v_kai', '「{I}島みかんジュース」、お店の新しい名物にするね！ {P}さんのおかげだよ！']],
+      reward: { money: 1000 } },
+    { f: 6, title: 'はじめての仕入れ', task: { k: 'bring', item: 'dish', n: 1, text: '料理を1品、カイにわたす（家のちゃぶ台で作れます）' },
+      intro: [['v_kai', '{P}さん、こんどの朝市で、島の料理を売ってみたいんだ。'], ['v_kai', '{P}さんの手料理、ひとつ分けてくれない？ 味見して、作り方を勉強したいの！']],
+      outro: [['v_kai', 'おいしい…！ これ、ぜったい売れるよ！'], ['v_kai', 'ぼくね、ほんとうは、自分のお店を持つのが夢なんだ。海が見える小さなカフェ。'], ['v_kai', 'お父さんとお母さんのお店も大好きだけど、自分で考えたお店も、やってみたいの。'], ['v_kai', '…言っちゃった。{P}さん、だれにも言わないでね！']],
+      reward: { money: 2000 } },
+    { f: 10, title: 'カフェ・ほしなみ', task: { k: 'place', lm: 'beach', h: [10, 17], r: 34, text: '昼（10時〜17時）に、夕日の浜へ' },
+      intro: [['v_kai', '{P}さん！ お父さんたちがね、「夏のあいだ、浜で屋台カフェをやってみなさい」って！'], ['v_kai', '夕日の浜で、一日だけのカフェをひらくの。お客さん第一号になってくれる？']],
+      outro: [['', '――パラソルの下に、手書きの看板。「カフェ・ほしなみ」'], ['v_kai', 'いらっしゃいませ〜！ 第一号のお客さま、{P}さまで〜す！'], ['v_kai', 'メニューは、みかんジュースと、{P}さんの料理をまねしたランチと、ハナさんのお花のお茶！'], ['v_hana', 'お客さんがひっきりなしね。カイくん、立派な店長さんよ。'], ['v_kai', 'これ、カフェで使ったパラソル。{P}さんにあげる！ 島のどこかで、カフェごっこしてね！']],
+      reward: { money: 2000, decor: { parasol: 1 } } },
+  ],
+  v_nagi: [
+    { f: 2, title: '夜のイカ釣り', task: { k: 'place', lm: 'harbor', h: [20, 23.5], r: 30, text: '夜（20時〜23時半）に、港へ' },
+      intro: [['v_nagi', '{P}さん、夜のイカ釣りって、したことある？'], ['v_nagi', '港の防波堤でいっしょにやろうよ！ 夜になると、イカが灯りにあつまってくるんだ。']],
+      outro: [['', '――波の音と、ウキの小さな光。'], ['v_nagi', 'しーっ…来た！ …ほら、アオリイカ！'], ['v_nagi', 'わたしのおばあちゃん、この島の生まれなんだ。小さいころから、この島の話ばっかり聞いてたの。'], ['v_nagi', '「夜の港は、星が水の中にもあるのよ」って。…ほんとだね。'], ['v_nagi', 'おばあちゃんが見てた景色を、いま見てるんだなあ。']],
+      reward: { money: 1000 } },
+    { f: 6, title: 'おばあちゃんの写真', task: { k: 'photo', spot: 'harbor', text: '港の漁船といっしょに写真をとり、ナギに話す（名所「港と漁船」）' },
+      intro: [['v_nagi', '{P}さん、これ見て。おばあちゃんが若いころの写真なの。港で、漁船の前でわらってる。'], ['v_nagi', '同じ場所で写真をとって、おばあちゃんに送りたいんだ。とってくれる？']],
+      outro: [['v_nagi', 'ありがとう！ ならべてみると…ほら、灯台も船も、同じだ！'], ['v_gen', 'ん？ その写真…この娘さん、ミチコじゃないか？'], ['v_nagi', 'えっ、ゲンじい、おばあちゃんのこと知ってるの！？'], ['v_gen', '知っとるもなにも、わしの幼なじみじゃ。釣りの腕は、わしより上じゃった。…ほう、孫が島に帰ってきたか。'], ['v_nagi', 'おばあちゃんに電話しなきゃ！ {P}さん、すごいよ、ほんとにすごい！']],
+      reward: { money: 1500 } },
+    { f: 10, title: '滝つぼのぬし', task: { k: 'stat', stat: 'fishN', n: 5, text: '魚を5匹釣って、ナギに話す' },
+      intro: [['v_nagi', '{P}さん、知ってる？ 滝つぼには「ぬし」がいるんだって。おばあちゃんも、一度だけ見たことがあるって。'], ['v_nagi', 'わたし、ぬしに会いたい。…まずは腕だめし！ 魚を5匹釣って、見せにきて！']],
+      outro: [['v_nagi', 'さすが{P}さん！ …じつはね、きのうの夕方、見たんだ。滝つぼのぬし。'], ['v_nagi', '金色の、大きな大きなコイ。わたしのウキの横を、ゆうゆうと泳いでいったの。'], ['v_nagi', 'つり上げようと思えば、できたかもしれない。でも…やめた。'], ['v_nagi', 'ぬしがいるのは、この島の川がきれいなしるしなんだって、おばあちゃんが言ってたから。…{P}さんも、いつか会えるといいね。']],
+      reward: { money: 3000 } },
+  ],
+  v_takumi: [
+    { f: 2, title: '材木はこび', task: { k: 'place', lm: 'hall', h: [7, 12], r: 14, text: '午前中（7時〜12時）に、集会所へ' },
+      intro: [['v_takumi', '{P}さん、午前中、ちょっと手を貸してもらえませんか？'], ['v_takumi', '集会所の修理に使う材木を運ぶんすけど、ひとりだと重くて…。']],
+      outro: [['', '――ふたりで運ぶと、太い柱もずいぶん軽く感じた。'], ['v_takumi', '助かったっす！ …この柱、百年前の大工さんが使った木なんすよ。ほら、ここに名前が彫ってある。'], ['v_takumi', 'おれ、大阪の大きな会社で働いてたんす。毎日同じ部品をつけるだけで、だれの家を作ってるのかもわからなくて。'], ['v_takumi', 'この島の古い家を見て、思ったんす。「住む人の顔を思いうかべて作る大工になりたい」って。']],
+      reward: { money: 1000 } },
+    { f: 6, title: 'こわれたベンチ', task: { k: 'stat', stat: 'decorN', n: 1, text: 'しまづくり「かざる」で、なにか1つ置いて、タクミに話す' },
+      intro: [['v_takumi', '……{P}さん。おれ、だめっすね。'], ['v_takumi', '広場に作ったベンチ、座ったとたんに足が折れちゃって。けがした人はいなかったんすけど…。'], ['v_takumi', 'もう一回作りなおすっす。どこに置いたらみんなが喜ぶか、{P}さんがしまづくりで1つ置いてみてもらえませんか？']],
+      outro: [['v_takumi', 'あそこに置いたんすね。…たしかに、いい場所っす。'], ['v_takumi', '置く場所を考えたら、どう作ればいいかも見えてきたっす。座る人が、長くいたくなるベンチ。'], ['v_takumi', '失敗して、やっとわかったっす。…これ、作りなおした一つ目。{P}さんにもらってほしいっす。']],
+      reward: { money: 1000, decor: { bench: 1 } } },
+    { f: 10, title: '一人前の証', task: { k: 'stat', stat: 'roadM', n: 30, text: 'しまづくりで道を30m作って、タクミに話す' },
+      intro: [['v_takumi', '{P}さん、おれ、神社の古い鳥居の建てなおしをまかされたんす。'], ['v_takumi', '材木を運ぶ道がせまくて…。しまづくりで、道を30mのばしてもらえませんか？']],
+      outro: [['', '――あたらしい木の香りのする鳥居が、もとの場所にしっかりと立った。'], ['v_takumi', 'できたっす…！ 前の鳥居と同じ形、同じ寸法。でも、柱の一本一本に、島のみんなの顔を思いうかべたっす。'], ['v_takumi', '大阪の親方から手紙が来たんすよ。「写真を見た。いい仕事だ。一人前だな」って。'], ['v_takumi', '…{P}さんがいなかったら、おれ、とっくに道具を置いてたっす。ほんとに、ありがとうございました！']],
+      reward: { money: 4000 } },
+  ],
+  v_yuki: [
+    { f: 2, title: '夕日の色', task: { k: 'place', lm: 'beach', h: [16.5, 18.6], r: 34, text: '夕方（16時半〜18時半）に、夕日の浜へ' },
+      intro: [['v_yuki', '{P}さん、夕日の浜の色って、毎日ちがうのよ。'], ['v_yuki', 'こんど、いっしょに見てくれないかしら。わたし、あの色をどうしても絵にしたいの。']],
+      outro: [['', '――空が、オレンジから、うすいむらさきに変わっていく。'], ['v_yuki', '…この色。ずっとさがしていたの。'], ['v_yuki', 'わたしね、一年くらい、絵がかけなくなっていたの。何をかいても、色がにごって見えて。'], ['v_yuki', 'この島に来て、毎日空と海を見ていたら、少しずつ色がもどってきたのよ。'], ['v_yuki', '今日の空は、{P}さんといっしょに見た色。…きっと、いい絵になるわ。']],
+      reward: { money: 1000 } },
+    { f: 6, title: '滝の音をかく', task: { k: 'photo', spot: 'falls', text: '滝の写真をとって、ユキに話す（名所「滝」）' },
+      intro: [['v_yuki', '{P}さん、こんどは滝をかきたいの。でも、水って動くから、なかなかつかまえられなくて。'], ['v_yuki', '滝の写真をとってきてくださらない？ じっくり見て、かいてみたいの。']],
+      outro: [['v_yuki', 'ありがとう。…{P}さんの写真、水しぶきの音が聞こえてくるみたい。'], ['v_yuki', 'そうそう、ミオちゃんのスケッチ、見たことある？ 線にまよいがなくて、とてもすてきなの。'], ['v_yuki', 'わたし、ミオちゃんに絵を教えることになったのよ。教えるって、自分も教わることなのね。'], ['v_yuki', '島に来て、絵をかく仲間ができるなんて、思ってもみなかったわ。']],
+      reward: { money: 1500 } },
+    { f: 10, title: '島の展覧会', task: { k: 'talks', n: 8, text: '同じ日に、住民8人と話して（展覧会にさそう）、ユキに話す' },
+      intro: [['v_yuki', '{P}さん、わたし、集会所で展覧会をひらくことにしたの。「{I}島の一年」。'], ['v_yuki', '島のみんなに来てほしいの。今日のうちに、住民のみんなに声をかけてくださる？']],
+      outro: [['', '――集会所のかべいっぱいに、島の絵がならんだ。'], ['v_gen', 'ほう、こりゃほしなみ丸じゃ。…ばあさんがおったころの色じゃのう。'], ['v_kota', 'オレがいる！ 虫とりしてるとこ！'], ['v_yuki', '最後の一枚は、まだだれにも見せていないの。'], ['', '――それは、港に立つ{P}の後ろすがたと、まっすぐのびる灯台の光の絵だった。'], ['v_yuki', '題は「この島に来てくれた人」。…{P}さん、わたしにもう一度、絵をくれてありがとう。']],
+      reward: { money: 4000 } },
+  ],
+  v_kota: [
+    { f: 2, title: '虫とり名人', task: { k: 'stat', stat: 'bugN', n: 2, text: '虫を2ひきつかまえて、コタロウに話す' },
+      intro: [['v_kota', '{P}！ 虫とり勝負しよーぜ！'], ['v_kota', '先に2ひきつかまえたほうが「虫とり名人」な！ よーい、どん！']],
+      outro: [['v_kota', 'えーっ、もう2ひき！？ …しかたない、名人の座はゆずってやる！'], ['v_kota', 'オレさ、前の町では虫とりなんてしたことなかったんだ。公園には「虫とり禁止」って書いてあったし。'], ['v_kota', 'この島、最高だよな！ 次は負けないからな！']],
+      reward: { money: 800 } },
+    { f: 6, title: 'はなれ小島の探検', task: { k: 'place', lm: 'islet', h: [6, 19], r: 30, text: '昼のあいだ（6時〜19時）に、はなれ小島へ（干潮なら歩いて、満潮なら船で）' },
+      intro: [['v_kota', '{P}、はなれ小島って行ったことある？ 潮が引くと、歩いて行けるんだって！'], ['v_kota', 'オレ、ひとりで行くと母ちゃんにおこられるから…いっしょに探検してくれよ！']],
+      outro: [['', '――岩のかげに、小さな砂浜がかくれていた。'], ['v_kota', 'すげー！ ここ、ひみつきちにしよう！ {P}とオレだけのひみつな！'], ['v_kota', '…オレさ、島に来たばっかりのとき、ちょっとさびしかったんだ。同じくらいの子、ひとりもいなかったから。'], ['v_kota', 'でも{P}がいっぱい遊んでくれたから、平気になった。…へへっ、今のナイショな！']],
+      reward: { money: 1500 } },
+    { f: 10, title: 'かくれんぼ名人', task: { k: 'hide', h: [7, 18], r: 22, text: '昼のあいだ（7時〜18時）に、かくれたコタロウをさがす　ヒント：「{HINT}」' },
+      intro: [['v_kota', '{P}、かくれんぼしよう！ オレがかくれるから、さがしに来てよ！'], ['v_kota', 'ヒント出してやる。「{HINT}」…じゃ、かくれた！']],
+      outro: [['v_kota', 'あーっ、見つかった！ {P}、なんでわかったんだよー！'], ['v_kota', '…じつは、ちょっと待ちくたびれてた。来てくれて、よかった。'], ['v_kota', 'これ、オレのたからもの。浜で見つけた、青いシーグラス。…やっぱりお金のほうがいい？ じゃあ両方！'], ['v_kota', 'オレ、大きくなったら、{P}みたいに島をおもしろくする人になるんだ！']],
+      reward: { money: 2000, vit: 10 } },
+  ],
+};
+BOND.HIDE = { peak: '島でいちばん空に近いところ', falls: 'ザーザー音がして、水がおちてくるところ', light: '夜になると、海を照らすところ', church: '赤い門をくぐった先', mikan: 'オレンジ色の実がなる、だんだんのところ' };
+BOND.ITEM = { mikan: 'みかん', fish: '魚', shore: '浜の拾いもの', forage: '山の幸', dish: '料理' };
+BOND.st = function () { const p = GAME.p; p.bond = p.bond || {}; return p.bond; };
+BOND.rec = function (id) { const S = BOND.st(); return S[id] || (S[id] = { ep: 0 }); };
+BOND.npc = id => NPCS.find(n => n.def.id === id && !n.visitor);
+BOND.resident = id => !!(GAME.p && VILLAGER_DEF.some(v => v.id === id) && BOND.npc(id));
+BOND.who = w => w === '@' ? (GAME.p && GAME.p.name) || '' : w && w.startsWith('v_') ? VNAME(w) : w;
+// the episode this villager wants to talk about now (or null)
+BOND.avail = function (id) { const E = BOND.EP[id]; if (!E || !GAME.p || !GAME.p.talked[id] || !BOND.resident(id)) return null; const r = BOND.rec(id); if (r.ep >= E.length || r.task) return null; const e = E[r.ep]; return (GAME.p.friend[id] || 0) >= e.f ? e : null; };
+BOND.text = function (id, s) { const t = BOND.rec(id).task; return t && t.hint ? s.replace('{HINT}', t.hint) : s; };
+BOND.lines = function (id, L) { return L.filter(([w, , need]) => (!w || !w.startsWith('v_') || w === id || BOND.resident(w)) && (!need || BOND.resident(need))).map(([w, t]) => [BOND.who(w), BOND.text(id, t)]); };
+// ---------- what you have / what is done ----------
+BOND.have = function (item) { const b = GAME.bag(); if (item === 'mikan') return b.mikan || 0; if (item === 'fish') return (b.fish || []).length;
+  if (item === 'shore') return typeof SHORE !== 'undefined' ? SHORE.count() : 0; if (item === 'forage' || item === 'dish') { const F = FORAGE.bag()[item]; return Object.values(F || {}).reduce((s, v) => s + v, 0); } return 0; };
+BOND.take = function (item, n) { const b = GAME.bag(); if (item === 'mikan') { b.mikan -= n; return; } if (item === 'fish') { b.fish.splice(b.fish.length - n, n); return; }
+  const bag = item === 'shore' ? SHORE.bag() : FORAGE.bag()[item]; for (const k of Object.keys(bag)) { while (n > 0 && bag[k] > 0) { bag[k]--; n--; } if (!bag[k]) delete bag[k]; if (!n) break; } };
+BOND.talksToday = function () { const p = GAME.p, T = (p.daily && p.daily.talked) || {}; return VILLAGER_DEF.filter(v => T[v.id] && BOND.resident(v.id)).length; };
+BOND.need = function (t) { if (t.k === 'talks') return Math.min(t.n, Math.max(2, VILLAGER_DEF.filter(v => BOND.resident(v.id)).length - 1)); return t.n || 1; };
+BOND.prog = function (id) { const t = BOND.rec(id).task, p = GAME.p; if (!t) return 0;
+  if (t.k === 'stat') return Math.max(0, (p.stats[t.stat] || 0) - t.base); if (t.k === 'bring') return BOND.have(t.item); if (t.k === 'photo') return PHOTO.done()[t.spot] ? 1 : 0; if (t.k === 'talks') return BOND.talksToday(); return 0; };
+BOND.ready = id => { const t = BOND.rec(id).task; return !!t && t.k !== 'place' && t.k !== 'hide' && BOND.prog(id) >= BOND.need(t); };
+BOND.pos = function (lm) { const L = GAME.LM || {}; if (lm === 'hall' && PLACED.hall) return PLACED.hall.entry; if (lm === 'light' && PLACED.lighthouse) return PLACED.lighthouse; return L[lm] || null; };
+// ---------- scenes ----------
+// the villager stays put and faces you while a scene plays (and a little after)
+BOND.hold = function (n, ms) { n.bondHold = performance.now() + ms; n.asleep = false; n.mesh.visible = true; };
+{ const _lv = liveVillager; liveVillager = function (n, dt) {
+    if (n.bondHold && performance.now() < n.bondHold) { n.rot = angLerp(n.rot, Math.atan2(PL.x - n.x, PL.z - n.z), Math.min(1, dt * 6)); const ty = standY(n.x, n.z); n.y = ty; n.ph += dt * 1.8;
+      n.mesh.visible = true; n.mesh.position.set(n.x, n.y, n.z); n.mesh.rotation.y = n.rot; n.tag.visible = true; if (n.props) for (const q of Object.values(n.props)) if (q) q.visible = false;
+      if (n.emoT > 0) { n.emoT -= dt; if (n.emoT <= 0 && n.emo) n.emo.visible = false; }
+      animateBody(n.parts, n.rest, n.ph, 0, dt, { nod: STORY.scene ? performance.now() / 1000 : 0 }); return; }
+    if (n.bondHold) { n.bondHold = 0; n.place = null; }
+    return _lv(n, dt); }; }
+BOND.play = function (n, lines, done) { BOND.hold(n, 600000); STORY.play(lines, () => { BOND.hold(n, 2500); if (done) done(); }); };
+BOND.begin = function (n, e) {
+  const id = n.def.id, r = BOND.rec(id), k = r.ep; GAME.ev('talk', 1, id);
+  if (e.task && e.task.k === 'hide') { const ks = Object.keys(BOND.HIDE).filter(q => BOND.pos(q)); const lm = ks[Math.floor(Math.random() * ks.length)] || 'peak'; r.task = { k: 'hide', ep: k, lm, hint: BOND.HIDE[lm], h: e.task.h, r: e.task.r, text: e.task.text }; }
+  LIVE.emote(n, 'heart', 2.4); GAME.banner(`💞 ${n.def.name}の物語　その${k + 1}「${e.title}」`, '');
+  BOND.play(n, BOND.lines(id, e.intro), () => {
+    if (!e.task) return BOND.finish(n);
+    let t = e.task; if (t.alt && t.alt.when()) t = Object.assign({}, t, t.alt);
+    if (t.k !== 'hide') r.task = { k: t.k, ep: k, stat: t.stat, n: t.n, item: t.item, spot: t.spot, lm: t.lm, h: t.h, r: t.r, text: t.text, base: t.stat ? (GAME.p.stats[t.stat] || 0) : 0, since: todayKey() };
+    GAME.dirty = true; UI.toast(`💞 ${n.def.name}との約束：${BOND.text(id, r.task.text)}`); GAME.renderTracker(); });
+};
+BOND.finish = function (n) {
+  const id = n.def.id, r = BOND.rec(id), E = BOND.EP[id], e = E[r.ep], t = r.task, p = GAME.p; if (!e) return;
+  const pre = []; if (t && t.k === 'bring') { BOND.take(t.item, t.n); pre.push(['', `（${BOND.ITEM[t.item]}を${t.n}つ、わたした）`]); }
+  r.task = null; r.ep++; r.done = r.done || []; r.done.push(todayKey()); GAME.dirty = true;
+  BOND.play(n, pre.concat(BOND.lines(id, e.outro)), () => {
+    const w = e.reward || {}, got = []; p.friend[id] = (p.friend[id] || 0) + 2; got.push(`${n.def.name}となかよし +2`);
+    if (w.money) { GAME.addMoney ? GAME.addMoney(w.money) : (p.money += w.money); got.push(yen(w.money)); }
+    if (w.vit) { GAME.addVit(w.vit); got.push(`元気度 +${w.vit}`); }
+    if (w.decor) { const b = GAME.bag(); for (const [k, v] of Object.entries(w.decor)) { b.decor[k] = (b.decor[k] || 0) + v; const D = DECOR.find(q => q.id === k); got.push(`${D ? D.name : k}×${v}（かざるもの）`); } }
+    try { SND.play('levelup', { vol: 0.6 }); } catch (er) { }
+    GAME.banner(`💞 ${n.def.name}の物語　その${r.ep}「${e.title}」おしまい`, got.join('・')); LIVE.emote(n, 'heart', 3); GAME.dirty = true; GAME.renderTracker(); GAME.save && GAME.save();
+  });
+};
+// talking: a new episode starts, a finished promise is reported; otherwise the usual talk, with a reminder of the promise first
+{ const _st = startTalk; startTalk = function (n) {
+    const p = GAME.p, id = n.def.id;
+    if (p && !n.visitor && BOND.EP[id] && !GAME.modal && !STORY.scene) {
+      const e = BOND.avail(id); if (e) return BOND.begin(n, e);
+      if (BOND.ready(id)) { GAME.ev('talk', 1, id); return BOND.finish(n); }
+    }
+    _st(n);
+    const t = p && BOND.EP[id] && BOND.rec(id).task;
+    if (t && DIALOG.npc === n && DIALOG.pages) { const need = BOND.need(t), have = BOND.prog(id);
+      const msg = t.k === 'bring' ? `（約束：${BOND.ITEM[t.item]}を${t.n}つ　いま ${have}つ）` : t.k === 'place' || t.k === 'hide' ? `（約束：${BOND.text(id, t.text)}）` : `（約束：${t.text}　${Math.min(have, need)}/${need}）`;
+      DIALOG.pages.unshift(GAME.fill(t.k === 'hide' ? 'わっ！ …い、今のオレは、オレのそっくりさんだ！ ほんもののオレは、まだかくれてるぞ！' : BOND.REMIND[id] || '約束、楽しみにしてるね！') + '\n' + msg); DIALOG.i = 0; UI.dialog(n.def.name, DIALOG.pages[0]); } }; }
+BOND.REMIND = { v_mio: '約束、おぼえてる？ 楽しみにしてるね！', v_sora: '約束、忘れんなよ！', v_hana: '約束、楽しみにしているわね。', v_gen: '約束、忘れとらんじゃろうな？', v_rin: '約束、楽しみにしてるね！', v_kai: '約束、たのんだよ〜！', v_nagi: '約束、楽しみにしてるね！', v_takumi: '約束、よろしくたのむっす！', v_yuki: '約束、楽しみにしているわ。', v_kota: '約束だぞ！ 忘れんなよ！' };
+// a free spot near (cx,cz): on land, off trunks, walls and the other people already placed
+BOND.freeSpot = function (cx, cz, a0, r0, taken) { for (const dr of [0, 0.9, 1.8, 2.7]) for (let t = 0; t < 12; t++) { const a = a0 + (t % 2 ? 1 : -1) * Math.ceil(t / 2) * 0.35, r = r0 + dr, x = cx + Math.sin(a) * r, z = cz + Math.cos(a) * r;
+    if (groundH(x, z) < 0.1 || Math.abs(groundH(x, z) - groundH(cx, cz)) > 1.2) continue; if (taken.some(q => Math.hypot(q[0] - x, q[1] - z) < 1.1)) continue; if (collidersNear(x, z).some(c => !c.off && hitsCollider(c, x, z, 0.45))) continue; return [x, z]; } return null; };
+// meeting places: arriving in time plays the scene there (the villager comes to you)
+BOND.placeStep = function () {
+  if (!STORY.ready() || GAME.inside || PL.veh) return; const hf = currentHour();
+  for (const id of Object.keys(BOND.EP)) { const r = BOND.rec(id), t = r.task; if (!t || (t.k !== 'place' && t.k !== 'hide')) continue; const P = BOND.pos(t.lm); if (!P) continue;
+    const d = Math.hypot(PL.x - P.x, PL.z - P.z); if (d > (t.r || 24)) continue; const n = BOND.npc(id); if (!n) continue;
+    const inT = t.h ? (t.h[0] <= t.h[1] ? hf >= t.h[0] && hf < t.h[1] : hf >= t.h[0] || hf < t.h[1]) : true;
+    if (!inT) { const key = todayKey() + Math.floor(hf); if (r.warn !== key) { r.warn = key; UI.toast(`⏰ ${n.def.name}との約束は ${fmtH(t.h[0])}〜${fmtH(t.h[1])} です`); } continue; }
+    // the villager steps in beside you
+    const sp = BOND.freeSpot(PL.x, PL.z, PL.rot + 0.9, 1.7, [[PL.x, PL.z]]) || [PL.x - Math.sin(PL.rot) * 1.7, PL.z - Math.cos(PL.rot) * 1.7], x = sp[0], z = sp[1];
+    n.x = x; n.z = z; n.y = standY(x, z); BOND.hold(n, 600000); n.mesh.position.set(n.x, n.y, n.z); PL.rot = Math.atan2(n.x - PL.x, n.z - PL.z);
+    if (t.k === 'hide') LIVE.emote(n, 'bang', 2);
+    return BOND.finish(n);
+  }
+};
+const fmtH = h => `${Math.floor(h)}時${h % 1 ? Math.round(h % 1 * 60) + '分' : ''}`;
+// ---------- update: who wants to talk (!), finished promises, places ----------
+{ const _u = GAME.update; GAME.update = function (dt) { const r = _u.apply(this, arguments); try { if (GAME.p && !GAME.modal) {
+      BOND.t += dt || 0.016; BOND.emoT += dt || 0.016; if (BOND.t < 0.4) return r; BOND.t = 0; BOND.placeStep();
+      const notify = BOND.st()._n = BOND.st()._n || {};
+      for (const id of Object.keys(BOND.EP)) { const e = BOND.avail(id), n = BOND.npc(id), rr = BOND.rec(id);
+        if (e && notify[id] !== rr.ep) { notify[id] = rr.ep; GAME.dirty = true; setTimeout(() => UI.toast(`💞 ${VNAME(id)}が、{P}さんに話したいことがあるみたい`.replace('{P}', GAME.p.name)), 800); }
+        if (BOND.ready(id) && notify[id + '_r'] !== rr.ep) { notify[id + '_r'] = rr.ep; GAME.dirty = true; UI.toast(`💞 ${VNAME(id)}との約束をはたした！ 話しに行こう`); GAME.renderTracker(); }
+        if ((e || BOND.ready(id)) && n && BOND.emoT > 2.2 && !n.asleep && Math.hypot(PL.x - n.x, PL.z - n.z) < 16) LIVE.emote(n, 'bang', 1.6); }
+      if (BOND.emoT > 2.2) BOND.emoT = 0;
+    } } catch (e) { if (!BOND._e) { BOND._e = 1; console.warn('bond', e); } } return r; }; }
+// ---------- tracker: the promises you made ----------
+{ const _rt = GAME.renderTracker; GAME.renderTracker = function () { _rt.apply(this, arguments); const p = this.p, s = this.el && this.el.side; if (!p || !s) return;
+    const rows = []; for (const id of Object.keys(BOND.EP)) { const t = BOND.rec(id).task; if (!t || !BOND.resident(id)) continue; const done = BOND.ready(id), need = BOND.need(t), have = BOND.prog(id);
+      rows.push(`<div class="sg ${done ? 'ok' : ''}">💞 ${esc(VNAME(id))}：${esc(done ? 'はたした！ 話しに行こう' : BOND.text(id, t.text).replace(/、?[^、]*に話す.*$/, ''))}${!done && (t.k === 'stat' || t.k === 'bring' || t.k === 'talks') ? ` <i>${Math.min(have, need)}/${need}</i>` : ''}</div>`); }
+    const html = rows.length ? `<div class="story bondbox">${rows.join('')}</div>` : ''; let el = s.querySelector('.bondwrap'); if (!el) { el = document.createElement('div'); el.className = 'bondwrap'; const sb = s.querySelector('.storybox'); if (sb) sb.after(el); else s.prepend(el); }
+    if (el._h !== html) { el.innerHTML = html; el._h = html; } el.onclick = e => { e.stopPropagation(); this.openJournal('story'); }; }; }
+// ---------- journal: 物語 tab gets 住民の物語 ----------
+{ const _oj = GAME.openJournal; GAME.openJournal = function (tab) { _oj.apply(this, arguments); if (tab !== 'story' || !this.p) return; const mb = this.el.modal.querySelector('.mb'); if (!mb) return;
+    const ppl = VILLAGER_DEF.filter(v => BOND.EP[v.id]);
+    const html = `<h3 class="bh" style="margin-top:14px">💞 住民の物語　${ppl.reduce((s, v) => s + BOND.rec(v.id).ep, 0)} / ${ppl.length * 3}</h3><p class="small" style="margin:0 0 6px">なかよし度が上がると、住民が自分のことを話してくれます（頭に「！」）。</p><ul class="list bondlist">${ppl.map(v => { const r = BOND.rec(v.id), E = BOND.EP[v.id], f = this.p.friend[v.id] || 0, t = r.task;
+      return `<li><span class="ck">${r.ep >= E.length ? '💞' : '・'}</span><div><b>${esc(v.name)}</b>　<span class="small">${r.ep} / ${E.length}</span><div class="sub">${E.map((e, i) => i < r.ep ? `✓ ${esc(e.title)} <button class="mini" data-bre="${v.id}:${i}">もう一度見る</button>` : i === r.ep ? (t ? `▶ ${esc(e.title)}：約束「${esc(BOND.text(v.id, t.text))}」` : f >= e.f ? `！ ${esc(e.title)}：${esc(v.name)}に話しかけよう` : `🔒 なかよし度 ${e.f} で（いま ${Math.min(f, e.f)}）`) : '🔒 ？？？').join('<br>')}</div></div></li>`; }).join('')}</ul>`;
+    mb.insertAdjacentHTML('beforeend', html); const ul = mb.querySelector('.bondlist');
+    if (ul) ul.addEventListener('click', ev => { const b = ev.target.closest('[data-bre]'); if (!b) return; ev.stopPropagation(); const [id, i] = b.dataset.bre.split(':'), e = BOND.EP[id][+i]; this.closeModal(); STORY.play(BOND.lines(id, e.intro.concat(e.outro))); }); }; }
+// the folded notebook shows the promises too (one line)
+if (typeof HUD2 !== 'undefined') { const _sd = HUD2.side; HUD2.side = function () { const r = _sd.apply(this, arguments); try { const s = GAME.el && GAME.el.side, sm = s && s.querySelector('.sum'); if (!sm || sm.hidden || !GAME.p) return r;
+    const ids = Object.keys(BOND.EP).filter(id => BOND.rec(id).task && BOND.resident(id)), ok = ids.filter(BOND.ready).length, av = Object.keys(BOND.EP).filter(id => BOND.avail(id)).length;
+    const parts = []; if (ids.length) parts.push(`💞 約束 ${ids.length}${ok ? `（はたした ${ok}）` : ''}`); if (av) parts.push(`💬 話したそうな人 ${av}`); const html = parts.map(esc).join('<br>');
+    let b = sm.querySelector('.bsum'); if (!html) { if (b) b.remove(); return r; } if (!b) { b = document.createElement('div'); b.className = 'bsum'; sm.appendChild(b); } if (b._h !== html) { b.innerHTML = html; b._h = html; } } catch (e) { } return r; }; }
+
+// ===================== STORY 第三部「海のむこうの友だち」(ver.47)（終章Ⅱのあと） =====================
+// 第11章 びんの手紙 → 第12章 おもてなしの島 → 第13章 ようこそ、ミナト → 第14章 十年後の島 → 終章Ⅲ 星のかけ橋
+// - 夕日の浜に流れついたびんの手紙（遠い「あおい島」の小学生ミナト。学校は生徒ひとり、春になくなる）
+// - 写真をとって返事を出す → ミナトの家族が下見に来る → 見学 → 家を建てて、11人目の住民に
+// - タイムカプセル（住民の「十年後の夢」を集めて、見晴らしの丘にうめる）→ 島のみんなからの「ありがとう祭り」
+const STORY3 = { bottle: null, t: 0, scene: 0 };
+STORY3.st = function () { const p = GAME.p; p.s3 = p.s3 || {}; return p.s3; };
+STORY3.active = id => { const s = STORY.st(); return CHAPTERS[s.ch] && CHAPTERS[s.ch].id === id && s.intro[id]; };
+// lines by villager id; lines of residents who have not moved in are left out (ミナト is always there in this part)
+STORY3.who = w => w === 'v_minato' ? 'ミナト' : BOND.who(w);
+STORY3.lines = L => L.filter(([w]) => !w || !w.startsWith('v_') || w === 'v_minato' || BOND.resident(w)).map(([w, t]) => [STORY3.who(w), t]);
+const s3 = () => STORY3.st();
+// ---------- ミナト: the new resident (a recoloured copy of the boy's model) ----------
+NEWCOMERS.push({ id: 'v_minato', name: 'ミナト', lv: 999, style: 'modern', who: 'あおい島から来た男の子',
+  hello: 'はじめまして、ミナトです。手紙を読んでくれて、ありがとうございました。', ask: 'お父さんとお母さんも「この島ならいいね」って…。ぼく、この島に住みたいです。{P}さん、家を建ててもらえますか？', wait: '新しい家、楽しみです。コタロウくんが毎日見に来るんです。', thanks: '{P}さん、家をありがとうございます！ 今日から、ぼくも{I}島の子です！',
+  lines: ['灯台の光って、遠くの島からも見えるんですよ。', 'あおい島の海は、もっと緑っぽい色でした。', 'コタロウくん、いつも走ってるんです。', '{P}さん、星波の話、もっと聞かせてください。'],
+  opin: { like: { sea: '海のことなら、ぼくも賛成です。', community: 'みんなで集まれるの、うれしいです。', culture: '島の自慢がふえますね。' }, dislike: { light: '明るすぎると、星が見えなくなっちゃうかも…。' }, neutral: 'ぼくは、みんなが決めたことに賛成です。' } });
+OPIN.v_minato = NEWCOMERS[NEWCOMERS.length - 1].opin;
+SCHED.v_minato = [[6.5, 'plaza', 'exercise'], [7.3, 'beach', 'stroll'], [12, 'home', 'stroll'], [13, 'lighthouse', 'look'], [15, 'harbor', 'look'], [17, 'plaza', 'play'], [18.5, 'home', 'stroll'], [20, 'home', 'sleep']];
+SCARF_COL.v_minato = '#f2b632'; BEANIE.v_minato = 1;
+TALK.v_minato = { morning: ['おはようございます、{P}さん！ 朝の灯台、きれいでした。', 'コタロウくんがむかえに来るまで、待ってるんです。'], noon: ['こんにちは。きょうは、港で船を見てました。', 'この島の給食、おいしいんですよ。'], evening: ['夕方の灯台が、いちばん好きです。', '灯台の光がつく瞬間を、毎日見に行ってます。'], night: ['夜の海で、灯台の光がぐるぐる回ってます。', 'あおい島のおばあちゃんにも、この光、見せたいな。'], rain: ['雨の日は、図書室で灯台の本を読んでます。'], snow: ['雪！ あおい島では、ほとんど降らなかったんです。'],
+  look: ['あの光、何秒ごとに回ってるか、数えてるんです。', '船が帰ってくるのを見るの、好きなんです。'], play: ['コタロウくん、まってー！', 'かけっこ、また負けちゃいました。'], exercise: ['ラジオ体操、まだ覚えきれてません…。'],
+  hi: ['{P}さんがびんを拾ってくれたから、ぼくはここにいるんです。', '大きくなったら、{P}さんみたいに島の役に立ちたいです。'] };
+QUIZ.v_minato = [{ q: '{P}さん、灯台の光って、何のためにあると思いますか？', a: [['船の目じるし', 'そうです！ 帰ってくる船が、まよわないように。', 2], ['夜を明るくするため', 'それもありますね。ぼくは「おかえり」の光だと思ってます。', 1]] }];
+MILESTONE.v_minato = { decor: 'lamp', n: 1, t: 'ぼくのおこづかいで…街灯を買いました。灯台みたいに、{P}さんの好きなところを照らしてください。' };
+STORY3.makeModel = function () {
+  if (MODELS.v_minato || !MODELS.v_kota) return; const m = MODELS.v_kota.clone(true), COL = { top: '#5aa8e0', bottom: '#e6d8b8', acc: '#f2b632', hair: '#1c2028', shoe: '#2f4f7a', sole: '#e8e4dc' };
+  m.traverse(o => { if (!o.isMesh) return; const one = mt => { const c = mt && COL[mt.name]; if (!c) return mt; const q = mt.clone(); q.color.set(c); return q; }; o.material = Array.isArray(o.material) ? o.material.map(one) : one(o.material); });
+  m.name = 'v_minato'; MODELS.v_minato = m; };
+{ const _sv = spawnVillagers; spawnVillagers = function () { try { STORY3.makeModel(); } catch (e) { console.warn('minato model', e); } return _sv.apply(this, arguments); }; }
+// he comes to look round only in 第13章 (never through the usual Lv order)
+{ const _cn = GAME.checkNewcomers; GAME.checkNewcomers = function () { const r = _cn.apply(this, arguments); try { STORY3.minatoVisit(); } catch (e) { } return r; }; }
+STORY3.minatoVisit = function () {
+  const p = GAME.p; if (!p || !STORY3.active('c13')) return; const N = GAME.newc(); if (N.v_minato) return;
+  if (NEWCOMERS.some(c => N[c.id] && N[c.id].state !== 'moved')) { if (!s3().waitMsg) { s3().waitMsg = 1; UI.toast('（ほかに引っこしを待っている人がいます。その人の家ができたら、ミナトがやってきます）'); } return; }
+  STORY3.makeModel(); N.v_minato = { state: 'visit', since: todayKey() }; GAME.dirty = true; GAME.syncNewcomers(); setTimeout(() => UI.toast('👋 ミナトが島にやってきた！（港のあたり）'), 1200);
+};
+STORY3.mstate = () => { const N = GAME.p && GAME.newc ? GAME.newc() : {}; return N.v_minato || {}; };
+// school days: he goes with コタロウ
+{ const _e = LIVE.entry; LIVE.entry = function (n, hf) { const E = _e(n, hf); if (n.def.id === 'v_minato' && devDone('school') && hf >= 8 && hf < 15 && E.act !== 'sleep') return { place: 'school', act: TIME.weather === 'rain' ? 'umb' : 'play' }; return E; }; }
+// ---------- the chapters ----------
+CHAPTERS[10].outro = CHAPTERS[10].outro.map(l => l[1].indexOf('第二部') >= 0 && l[1].indexOf('おしまい') >= 0 ? ['', '～ ほしなみ島ぐらし　第二部「星波の夜」　おしまい ～　（物語は 第三部「海のむこうの友だち」へつづきます）'] : l);
+const C3 = (o, intro, outro) => Object.defineProperties(o, { intro: { get: () => STORY3.lines(intro), enumerable: true }, outro: { get: () => STORY3.lines(outro), enumerable: true } });
+CHAPTERS.push(
+  C3({ id: 'c11', no: '第11章', title: 'びんの手紙', rank: '手紙のとどく島',
+    goals: [{ t: '夕日の浜に流れついた、びんを拾う（近くで Space）', n: 1, prog: () => s3().bottle ? 1 : 0 },
+      { t: '返事にそえる写真を3まいとる（📷 写真）', n: 3, prog: () => s3().bottle && s3().ph0 !== undefined ? Math.max(0, (GAME.p.stats.photoN || 0) - s3().ph0) : 0 },
+      { t: '家の前のポストから、返事を出す', n: 1, prog: () => s3().sent ? 1 : 0 }] },
+    [['', '――第三部「海のむこうの友だち」'], ['', '――星波の夜から、しばらくたったある朝。'], ['v_kota', '{P}ー！ 夕日の浜に、なんか光るものが流れついてるよ！'], ['v_rin', '{P}さん、浜にびんが流れついてるんだって。中に、手紙みたいなものが入ってるみたい。'], ['', '🍾 夕日の浜で、びんを拾おう']],
+    [['', '――何日かして、定期船で返事がとどいた。'], ['v_rin', 'ミナトくんからだ！ 「写真、ありがとうございました。灯台も、海も、星波の話も、ぜんぶ宝ものです」'], ['v_rin', '「…ぼくも、こんな島に住んでみたいです」って。'], ['v_kota', 'じゃあ来ればいいじゃん！ そしたら学校、オレとふたりになるぞ！'], ['v_gen', '島を出たもんの気持ちも、残ったもんの気持ちも、わしにはようわかる。…来てもらえるよう、島をととのえようかの。']]),
+  C3({ id: 'c12', no: '第12章', title: 'おもてなしの島', rank: 'おもてなしの島',
+    goals: [{ t: '島めぐりバスに乗って、案内の下見をする（バスがなければ開発（P）で開業）', n: 1, prog: () => s3().b12 ? Math.max(0, (GAME.p.stats.busN || 0) - s3().b12.bus) : 0 },
+      { t: '観光船に乗って、海からの案内を下見する（船がなければ開発で）', n: 1, prog: () => s3().b12 ? Math.max(0, (GAME.p.stats.ferryN || 0) - s3().b12.ferry) : 0 },
+      { t: 'おもてなしの料理を3品つくる（家のちゃぶ台で）', n: 3, prog: () => s3().b12 ? Math.max(0, (GAME.p.stats.cookN || 0) - s3().b12.cook) : 0 }] },
+    [['v_rin', 'ミナトくんの家族が、島を見に来てくれることになったよ！ 橋ができたから、お父さんも本土の仕事に通えるんだって。'], ['v_kai', 'おもてなしだね！ 島めぐりバスと観光船で、島じゅうを案内しようよ！'], ['v_hana', 'それから、島の味でおむかえしましょう。{P}さん、お料理、手伝ってくださる？'], ['', '🚌 島めぐりバスと 🛳️ 観光船に乗って下見をして、料理を3品つくろう']],
+    [['v_sora', 'バスも船も、点検ばっちりだぜ！'], ['v_hana', 'ちらし寿司に、タイのお吸いもの…ごちそうの用意もできたわね。'], ['v_kai', 'みかんジュースも冷やしてあるよ！'], ['v_rin', 'あとは、むかえるだけだね。…なんだか、ドキドキしてきた！']]),
+  C3({ id: 'c13', no: '第13章', title: 'ようこそ、ミナト', rank: '新しい友だちの島',
+    goals: [{ t: '港のあたりにいるミナトと話す', n: 1, prog: () => STORY3.mstate().met ? 1 : 0 },
+      { t: 'ミナトの家を建てる（しまづくり「🏠 家を建てる」）', n: 1, prog: () => ['house', 'moved'].includes(STORY3.mstate().state) ? 1 : 0 },
+      { t: 'ミナトが引っこしてくる（家ができた次の日）', n: 1, prog: () => STORY3.mstate().state === 'moved' ? 1 : 0 }] },
+    [['', '――桟橋に、リュックをせおった男の子が立っていた。'], ['v_minato', 'あ…あの、はじめまして。ミナトです。手紙の…。'], ['v_kota', 'おまえがミナトか！ オレ、コタロウ！ 島を案内してやるよ！'], ['v_rin', 'ようこそ、{I}島へ！ ご家族は、もう少しあとの船で来るって。'], ['', '👋 港のあたりにいるミナトと話そう']],
+    [['v_minato', '{P}さん、家をありがとうございました。今日から、ぼくも{I}島の子です！'], ['v_kota', 'これで学校、ふたりだな！ 毎朝むかえに行くからな！'], ['v_yuki', '新しい家の窓に、灯台の光がうつっているわ。…いい絵になりそう。'], ['v_gen', 'ようきたのう、ミナト。この島は、来るもんをこばまん島じゃ。'], ['v_rin', '{P}さんがこの島に来てくれたみたいに…また、ひとり。灯りがふえたね。']]),
+  C3({ id: 'c14', no: '第14章', title: '十年後の島', rank: '未来をえがく島',
+    goals: [{ t: '住民から「十年後の夢」を聞く（話しかける）', prog: () => Math.min(STORY3.dreamNeed(), Object.keys(s3().dream || {}).length), get n() { return STORY3.dreamNeed(); } },
+      { t: '夕方（15時〜19時半）、見晴らしの丘のてっぺんでタイムカプセルをうめる', n: 1, prog: () => s3().capsule ? 1 : 0 }] },
+    [['v_minato', '{P}さん、学校で「十年後の島」っていう作文を書くことになったんです。'], ['v_kota', 'それでさ、島のみんなの夢をタイムカプセルに入れて、見晴らしの丘にうめようってことになったんだ！'], ['v_rin', '島のみんなの「十年後の夢」、聞いて回ってくれる？'], ['', '💬 住民に話しかけて、夢を集めよう。集まったら、夕方に見晴らしの丘のてっぺんへ']],
+    [['', '――丘のてっぺんに、小さな木の札が立った。「タイムカプセル　十年後にあける」'], ['v_kota', '十年後、ぜったい、ここに集合な！ やくそくだぞ！'], ['v_minato', 'はい！ ……あの、{P}さん。'], ['v_minato', 'ぼく、この島に来てから、毎日がたのしいです。びんを拾ってくれて、ありがとうございました。'], ['v_rin', 'ねえ{P}さん。…島のみんなで、{P}さんにお礼がしたいって、話してるんだ。']]),
+  C3({ id: 'c15', no: '終章Ⅲ', title: '星のかけ橋', rank: '星をつなぐ島',
+    goals: [{ t: '夜（19時〜23時半）、祭りの広場へ行く（なければ島の広場）', n: 1, prog: () => s3().fin ? 1 : 0 }] },
+    [['v_kai', '{P}さん、{P}さん！ 今夜、祭りの広場に来て！ …なにがあるかは、ナイショ！'], ['v_rin', 'ふふ。夜になったら、広場で待ってるね。'], ['', '🏮 夜（19時〜23時半）に、祭りの広場へ']],
+    [['', '――花火の光が、{I}島の海に、いくつもの星の波をえがいていた。'], ['', '――手紙で、橋で、船で。島は、海のむこうの人たちとつながっていく。'], ['', '～ ほしなみ島ぐらし　第三部「海のむこうの友だち」　おしまい ～　（島での暮らしは、これからも続きます）']]),
+);
+// ---------- 第11章: the bottle, the letter, the reply ----------
+STORY3.beachSpot = function () {
+  const B = GAME.LM && GAME.LM.beach; if (!B) return null; if (s3().bpos) return s3().bpos; let best = null, bd = 1e9;
+  const S = (typeof SHORE !== 'undefined' && (SHORE.spots || (SHORE.spots = SHORE.scan()))) || []; for (const [x, z] of S) { const g = groundH(x, z), d = Math.hypot(x - B.x, z - B.z); if (g > 0.15 && g < 1.4 && d < bd) { bd = d; best = { x, z }; } }
+  if (!best) for (let r = 0; r < 60 && !best; r += 2) for (let a = 0; a < 6.28; a += 0.3) { const x = B.x + Math.cos(a) * r, z = B.z + Math.sin(a) * r, g = groundH(x, z); if (g > 0.15 && g < 1.2) { best = { x, z }; break; } }
+  if (best) s3().bpos = best; return best;
+};
+STORY3.bottleMesh = function () {
+  const g = new THREE.Group(), glass = new THREE.MeshStandardMaterial({ color: '#7fd0c0', roughness: 0.05, metalness: 0.1, transparent: true, opacity: 0.55, emissive: new THREE.Color('#2a6a60'), emissiveIntensity: 0.25 });
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.11, 0.36, 16), glass); body.rotation.z = Math.PI / 2; g.add(body);
+  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.09, 0.14, 12), glass); neck.rotation.z = Math.PI / 2; neck.position.x = 0.24; g.add(neck);
+  const cork = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.06, 10), stdM('#a0784a', 0.9)); cork.rotation.z = Math.PI / 2; cork.position.x = 0.33; g.add(cork);
+  const paper = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.26, 10), stdM('#f4ead0', 0.9)); paper.rotation.z = Math.PI / 2; g.add(paper);
+  const tie = new THREE.Mesh(new THREE.TorusGeometry(0.062, 0.012, 6, 14), stdM('#c8323a', 0.6)); tie.rotation.y = Math.PI / 2; g.add(tie);
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: txCanvas(64, 64, x => { const gr = x.createRadialGradient(32, 32, 0, 32, 32, 30); gr.addColorStop(0, 'rgba(255,255,240,1)'); gr.addColorStop(0.25, 'rgba(255,250,210,0.6)'); gr.addColorStop(1, 'rgba(255,250,210,0)'); x.fillStyle = gr; x.fillRect(0, 0, 64, 64); }), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
+  sp.scale.set(0.9, 0.9, 1); sp.position.y = 0.25; g.add(sp); g.userData.spark = sp; g.traverse(o => { if (o.isMesh) o.castShadow = true; }); g.scale.setScalar(1.4); return g;
+};
+STORY3.bottleNear = function () { const b = STORY3.bottle; return b && b.visible && !PL.veh && !GAME.inside && Math.hypot(PL.x - b.position.x, PL.z - b.position.z) < 1.9; };
+STORY3.letter = function () {
+  const p = GAME.p; GAME.modal = 'mletter';
+  GAME.el.modal.innerHTML = `<div class="mbox journal"><div class="mh"><h2>🍾 びんの中の手紙</h2><button class="x" data-x="close" aria-label="とじる">×</button></div><div class="mb"><div style="max-width:420px;margin:4px auto 8px;background:#fbf6e8;background-image:repeating-linear-gradient(0deg,transparent 0 27px,rgba(90,120,170,.18) 27px 28px);padding:14px 22px 16px;box-shadow:0 2px 10px rgba(60,40,20,.18);font:500 15px/28px 'Klee One','M PLUS Rounded 1c',sans-serif;color:#2c2a26;transform:rotate(-0.6deg)">
+    この手紙をひろってくれた人へ<br><br>ぼくは、あおい島に住んでいる、ミナトです。小学4年生です。<br>ぼくの島の小学校は、生徒がぼくひとりです。春になったら、学校はなくなるそうです。<br>島の人はみんなやさしいけど、いっしょに遊ぶ友だちがほしいです。<br>あなたの島は、どんな島ですか。もしよかったら、教えてください。<br><br><span style="display:block;text-align:right">あおい島　ミナト</span></div><p class="small">びんの底に、あおい島の住所を書いた紙も入っていた。</p></div></div>`;
+  GAME.el.modal.hidden = false; try { SND.play('page', { vol: 0.6 }); } catch (e) { }
+  GAME.el.modal.querySelector('.journal').onclick = e => { if (!e.target.closest('[data-x="close"]')) return; GAME.closeModal();
+    setTimeout(() => STORY.play(STORY3.lines([['v_rin', 'ミナトくん…。むかしのわたしたちの島と、同じだね。'], ['v_kota', '返事、書こうぜ！ 島の写真もいっしょに送ってやろう！'], ['v_gen', '写真がええ。百の言葉より、一まいの写真じゃ。'], ['', '📷 写真を3まいとって（右上の「📷 写真」）、家の前のポストから返事を出そう']]), () => GAME.renderTracker()), 300); };
+};
+STORY3.pickBottle = function () { const S = s3(); S.bottle = 1; S.ph0 = GAME.p.stats.photoN || 0; GAME.dirty = true; if (STORY3.bottle) STORY3.bottle.visible = false; PLAY.pose = 0.75; PLAY.poseK = 'pick'; try { SND.play('glass_tap', { vol: 0.6 }); } catch (e) { } setTimeout(() => STORY3.letter(), 600); return true; };
+STORY3.mailReady = () => STORY3.active('c11') && s3().bottle && !s3().sent && (GAME.p.stats.photoN || 0) - (s3().ph0 || 0) >= 3;
+STORY3.sendReply = function () { s3().sent = 1; GAME.dirty = true; try { SND.play('mailbox', { vol: 0.7 }); } catch (e) { } UI.toast('📮 写真をそえて、ミナトへの返事をポストに入れた。とどくといいな'); GAME.check && GAME.check(); return true; };
+// photos count (the album keeps them, the story only needs how many)
+STAT_KEYS.push('photoN');
+{ const _s = PHOTO.shoot; PHOTO.shoot = async function () { const before = PHOTO.last; const r = await _s.apply(this, arguments); try { if (GAME.p && PHOTO.last && PHOTO.last !== before) { GAME.p.stats.photoN = (GAME.p.stats.photoN || 0) + 1; GAME.dirty = true; GAME.renderTracker(); } } catch (e) { } return r; }; }
+// ---------- 第14章: dreams ----------
+STORY3.DREAM = {
+  v_mio: 'わたしの夢？ 島の絵本を、何冊もつくること！ 十年後には、島の子みんなが読んでくれてたらいいな。',
+  v_sora: 'オレは、島めぐりバスの運転手で、島いちばんの安全運転！ …あと、親父と毎年、滝つぼで釣りだな。',
+  v_hana: '十年後も、島じゅうにお花が咲いていますように。それを見ながら、みんなでお茶を飲むの。',
+  v_gen: 'わしの夢か。十年後も港に船がならんで、若いもんの声がしとることじゃ。…あとは長生きじゃな。わっはっは。',
+  v_rin: '十年後のわたしは、島のまちづくりの仕事をしてると思う。島に帰ってきたい人が、帰ってこられる島にしたいな。',
+  v_kai: '海の見えるカフェの店長！ 十年後には、島の外からもお客さんが来る、有名なお店にするんだ！',
+  v_nagi: '十年後も、島の海と川がきれいなままでありますように。滝つぼのぬしが、ずっとすんでいられるように。',
+  v_takumi: '島の古い家を、ひとつずつ直していくっす。十年後には、弟子がいたりして…なんて。',
+  v_yuki: '島に、小さな美術館をつくりたいの。島の子どもたちの絵を、いっぱいかざる美術館。',
+  v_kota: 'オレは、宇宙飛行士！ 宇宙から、{I}島の灯台が見えるか、たしかめるんだ！',
+  v_minato: 'ぼくは…灯台守になりたいです。帰ってくる人に「おかえり」って光をとどける人に。',
+};
+STORY3.dreamNeed = () => Math.max(2, Math.min(8, VILLAGER_DEF.filter(v => BOND.resident(v.id)).length - 1));
+{ const _st = startTalk; startTalk = function (n) { _st(n); try { const id = n.def.id; if (!GAME.p || n.visitor || !STORY3.active('c14') || DIALOG.npc !== n || !DIALOG.pages) return; const S = s3(); S.dream = S.dream || {}; if (S.dream[id]) return;
+      S.dream[id] = 1; GAME.dirty = true; DIALOG.pages.push(GAME.fill('十年後の夢？ …' + (STORY3.DREAM[id] || '十年後も、この島で笑っていたいな。')) + '\n（タイムカプセルに入れる夢を聞いた）'); const k = Object.keys(S.dream).length, need = STORY3.dreamNeed(); setTimeout(() => UI.toast(k >= need ? '💬 夢が集まった！ 夕方、見晴らしの丘のてっぺんへ' : `💬 夢を聞いた（${k}/${need}）`), 600); GAME.renderTracker(); } catch (e) { } }; }
+// ---------- gatherings: residents step in around you for the big scenes ----------
+STORY3.freeSpot = (...a) => BOND.freeSpot(...a);
+STORY3.gather = function (ids, cx, cz, r0) { const out = [], taken = [[cx, cz]]; let k = 0; for (const n of NPCS) { if (n.visitor || (ids && !ids.includes(n.def.id))) continue; const s = STORY3.freeSpot(cx, cz, PL.rot + 0.7 + k * 0.75, r0, taken); k++; if (!s) continue; const [x, z] = s; taken.push(s);
+    n.x = x; n.z = z; n.y = standY(x, z); BOND.hold(n, 600000); n.mesh.position.set(n.x, n.y, n.z); out.push(n); } return out; };
+STORY3.release = list => list.forEach(n => BOND.hold(n, 4000));
+STORY3.capsuleStep = function () {
+  const S = s3(); if (!STORY3.active('c14') || S.capsule || STORY3.scene || !STORY.ready() || PL.veh || GAME.inside) return; if (Object.keys(S.dream || {}).length < STORY3.dreamNeed()) return;
+  const P = GAME.LM && GAME.LM.peak; if (!P || Math.hypot(PL.x - P.x, PL.z - P.z) > 22) return; const hf = currentHour();
+  if (hf < 15 || hf >= 19.5) { const key = todayKey() + Math.floor(hf); if (S.warn !== key) { S.warn = key; UI.toast('⏰ タイムカプセルをうめるのは、夕方（15時〜19時半）です'); } return; }
+  STORY3.scene = 1; const L = STORY3.gather(['v_rin', 'v_kota', 'v_minato', 'v_gen', 'v_hana', 'v_mio'], PL.x, PL.z, 2.2); GAME.banner('⛰️ タイムカプセル', '十年後の島へ');
+  STORY.play(STORY3.lines([['', '――夕日のさす丘のてっぺんに、みんなが集まった。'], ['v_rin', 'みんなの夢、ぜんぶ入れたよ。{P}さんの夢も、ちゃんと書いた？'], ['v_minato', 'ぼくの作文も入れました。…十年後に読むの、ちょっとはずかしいです。'], ['v_kota', 'オレが掘る！ …うわ、かたい！ {P}、手伝って！'], ['', '――ふたつのスコップで、土をかけていく。'], ['v_gen', '十年後か。わしも、それまでは元気でおらんとのう。'], ['v_hana', '十年後に、みんなでまた、ここで会いましょうね。'], ['v_rin', '「十年後の{I}島へ。いまの島も、とってもすてきでした」…って、ふたに書いておいたよ。']]),
+    () => { S.capsule = 1; GAME.dirty = true; STORY3.scene = 0; STORY3.release(L); try { SND.play('shovel1', { vol: 0.6 }); } catch (e) { } GAME.check && GAME.check(); });
+};
+// ---------- 終章Ⅲ: the thank-you festival ----------
+STORY3.plaza = function () { const D = GAME.p.dev || {}, M = D.matsuri; if (M && M.state === 'done' && isFinite(M.x)) return { x: M.x, z: M.z }; try { return SEASON.findPlaza(); } catch (e) { return GAME.LM.hall || null; } };
+STORY3.finaleStep = function () {
+  const S = s3(); if (!STORY3.active('c15') || S.fin || STORY3.scene || !STORY.ready() || PL.veh || GAME.inside) return; const P = STORY3.plaza(); if (!P || Math.hypot(PL.x - P.x, PL.z - P.z) > 28) return; const hf = currentHour();
+  if (hf < 19 && hf >= 4) { const key = todayKey() + Math.floor(hf); if (S.warn !== key) { S.warn = key; UI.toast('⏰ みんなが待っているのは、夜（19時〜23時半）です'); } return; }
+  STORY3.scene = 1; const D = GAME.devState(); D.fireworks = Object.assign({}, D.fireworks || {}, { id: 'fireworks', state: 'done', date: todayKey() }); STORY2.forceW = 'clear'; if (TIME.wmode !== 'auto') TIME.weather = 'clear';
+  const L = STORY3.gather(null, PL.x, PL.z, 2.6); GAME.banner('🏮 ありがとう祭り', '島のみんなから');
+  setTimeout(() => { try { RARE.startShower(90); } catch (e) { } }, 9000);
+  STORY.play(STORY3.lines([['', '――広場に着くと、ちょうちんの灯りがいっせいにともった。'], ['v_rin', '{P}さん！ これ、島のみんなからの「ありがとう祭り」だよ！'], ['v_gen', 'おまえさんが来てから、港に灯がもどり、祭りがもどり、子どもの声がもどった。'], ['v_hana', 'お花も、人も、ふえたわ。{P}さんが、たくさん水をくれたから。'], ['v_mio', '島に来た人が「もう大丈夫だよ」って思える島。{P}さんが、そういう島にしてくれたんだよ。'], ['v_sora', 'よーし、そろそろだぜ！ みんな、空を見ろ！'], ['', '――ドーン、と大きな音がして、夜空に花火が開いた。'], ['v_minato', 'すごい…！ 花火のむこうに、灯台の光と、大橋の灯りと…星も！'], ['v_kota', '海の上に、星のかけ橋ができてるみたいだ！'], ['v_yuki', '…この景色は、絵にしなくても、ずっとおぼえていられる気がするわ。'], ['v_rin', '{P}さん。これからも、ずっとこの島にいてね。…わたしたちの、島の家族として。']]),
+    () => { S.fin = 1; GAME.dirty = true; STORY3.scene = 0; STORY3.release(L); setTimeout(() => { if (STORY2.forceW === 'clear') STORY2.forceW = null; }, 120000); GAME.check && GAME.check(); });
+};
+// ---------- prompts, keys, update ----------
+{ const _pr = GAME.prompt; GAME.prompt = function () { if (GAME.p && !GAME.modal && !PL.veh && !GAME.inside) { if (STORY3.bottleNear()) return 'Space：びんを拾う'; if (STORY3.mailReady() && GAME.nearMail()) return 'Space：ミナトへの返事を出す'; } return _pr.apply(this, arguments); }; }
+{ const _it = GAME.interact; GAME.interact = function () { if (GAME.p && !PL.veh && !GAME.inside) { if (STORY3.bottleNear()) return STORY3.pickBottle(); if (STORY3.mailReady() && GAME.nearMail()) return STORY3.sendReply(); } return _it.apply(this, arguments); }; }
+{ const _u = GAME.update; GAME.update = function (dt) { const r = _u.apply(this, arguments); try { if (GAME.p) { dt = dt || 0.016; STORY3.t += dt; const S = s3();
+      // the bottle lies on the beach until you pick it up
+      const want = STORY3.active('c11') && !S.bottle; if (want && !STORY3.bottle) { const sp = STORY3.beachSpot(); if (sp) { STORY3.bottle = STORY3.bottleMesh(); STORY3.bottle.position.set(sp.x, groundH(sp.x, sp.z) + 0.1, sp.z); STORY3.bottle.rotation.y = 0.7; scene.add(STORY3.bottle); } }
+      if (STORY3.bottle) { STORY3.bottle.visible = want && !GAME.inside; if (want) { const t = performance.now() / 1000, b = STORY3.bottle; b.rotation.x = Math.sin(t * 1.3) * 0.06; b.userData.spark.material.opacity = 0.45 + Math.sin(t * 3.1) * 0.35; } }
+      if (STORY3.active('c12') && !S.b12) { S.b12 = { bus: GAME.p.stats.busN || 0, ferry: GAME.p.stats.ferryN || 0, cook: GAME.p.stats.cookN || 0 }; GAME.dirty = true; }
+      if (STORY3.t > 0.5) { STORY3.t = 0; if (STORY3.active('c13')) STORY3.minatoVisit(); STORY3.capsuleStep(); STORY3.finaleStep(); }
+    } } catch (e) { if (!STORY3._e) { STORY3._e = 1; console.warn('story3', e); } } return r; }; }
 
 // ===================== フェリー: 船内を歩ける (ver.42) =====================
 // The ship is no longer a fixed spot you are pinned to. Aboard you walk with WASD:
