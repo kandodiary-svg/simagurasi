@@ -145,6 +145,5 @@ TRF.update = function (dt) {
 CITY.trafficInit = function () { CARX.init(); return CITY.cars = { list: TRF.cars, N: CARX.N }; };
 CITY.trafficPlan = function () { TRF.plan(); CITY.cars = { list: TRF.cars, N: CARX.N }; };
 CITY.trafficUpdate = function (dt) { TRF.update(dt); };
-// your own car can't drive through other cars
-{ const _ok = vehOK; vehOK = function (v, x, z) { if (v && v.kind === 'truck' && v === PL.veh) for (const c of TRF.cars) if (c.x !== undefined && Math.hypot(c.x - x, c.z - z) < 2.3) return false; return _ok.apply(this, arguments); }; }
+// (your own car vs other cars: see carhit.js — oriented boxes instead of centre distances)
 { const _b = GAME.begin; GAME.begin = function () { const r = _b.apply(this, arguments); try { TRF.cars = []; TRF.plan(); } catch (e) { console.warn('traffic', e); } return r; }; }

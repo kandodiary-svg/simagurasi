@@ -2104,7 +2104,7 @@ function vehOK(v, x, z, rot) {
   for (const [a, b] of [[sp.len, 0], [sp.len, sp.wid], [sp.len, -sp.wid], [-sp.len, sp.wid], [-sp.len, -sp.wid], [0, 0]]) {
     const px = x + s * a + c * b, pz = z + c * a - s * b, h = groundH(px, pz);
     if (Math.abs(px) > 360 || Math.abs(pz) > 360) return v.kind !== 'boat' ? false : Math.abs(px) < 900 && Math.abs(pz) < 900;
-    if (v.kind === 'truck') { const B = typeof DV !== 'undefined' && DV.bus; if (B && Math.hypot(B.x - px, B.z - pz) < 2.6) return false; const dk = deckY(px, pz); if (dk === null && (h < -0.3 || waterDepthAt(px, pz) > 0.35)) return false; for (const cc of collidersNear(px, pz)) { const [qx, qz] = pushOut(px, pz, 0.2); if (Math.hypot(qx - px, qz - pz) > 0.01) return false; } }
+    if (v.kind === 'truck') { const dk = deckY(px, pz); if (dk === null && (h < -0.3 || waterDepthAt(px, pz) > 0.35)) return false; for (const cc of collidersNear(px, pz)) { const [qx, qz] = pushOut(px, pz, 0.2); if (Math.hypot(qx - px, qz - pz) > 0.01) return false; } }
     else { if (h > -0.55) return false; if (onPierAt(px, pz) || walkDeckY(px, pz) !== null) return false; }
   }
   return true;
@@ -2679,7 +2679,8 @@ function roadProfile(pts, w, type, fixes) {
   const terr = pts.map(([x, z], i) => { const a = pts[Math.max(0, i - 1)], b = pts[Math.min(n - 1, i + 1)]; let tx = b[0] - a[0], tz = b[1] - a[1]; const l = Math.hypot(tx, tz) || 1; const nx = -tz / l, nz = tx / l; let s = 0;
     for (const o of [-0.45, 0, 0.45]) { const px = x + nx * w * o, pz = z + nz * w * o, d = deckY(px, pz); s += d !== null ? d : groundH(px, pz); } return Math.max(0.6, s / 3); });
   // smoothed target (≈5m), pins: {i, y}
-  let tg = terr.slice(); for (let k = 0; k < 10; k++) tg = tg.map((h, i) => i === 0 || i === n - 1 ? h : (tg[i - 1] + h * 2 + tg[i + 1]) / 4);
+  // smoothed target: ~10m window, so small bumps in the ground don't make the road wavy
+  const SM = clamp(Math.round(2 * (6.5 / Math.max(0.5, sp)) ** 2), 6, 60); let tg = terr.slice(); for (let k = 0; k < SM; k++) tg = tg.map((h, i) => i === 0 || i === n - 1 ? h : (tg[i - 1] + h * 2 + tg[i + 1]) / 4);
   const pin = new Map(); for (const f of fixes) if (f && f.y !== undefined && f.y !== null) pin.set(f.i, f.y);
   // pull pinned heights into the target smoothly (±14m)
   for (const [i0, y] of pin) { const R = Math.max(3, Math.round(14 / sp)); for (let i = Math.max(0, i0 - R); i <= Math.min(n - 1, i0 + R); i++) { const k = 1 - Math.abs(i - i0) / (R + 1), wgt = k * k * (3 - 2 * k); tg[i] = lerp(tg[i], y, wgt); } }
@@ -2689,6 +2690,11 @@ function roadProfile(pts, w, type, fixes) {
   for (let i = 1; i < n; i++) if (!pin.has(i)) h[i] = clamp(h[i], h[i - 1] - g, h[i - 1] + g);
   for (let i = n - 2; i >= 0; i--) if (!pin.has(i)) h[i] = clamp(h[i], h[i + 1] - g, h[i + 1] + g);
   for (let k = 0; k < 2; k++) h = h.map((v, i) => i === 0 || i === n - 1 || pin.has(i) ? v : (h[i - 1] + v * 2 + h[i + 1]) / 4);
+  // vertical curves: the grade may change by at most ~1.5% per metre (no humps or dips)
+  const lim = 0.015 * sp * sp;
+  for (let it = 0; it < 120; it++) { let moved = false; for (let i = 1; i < n - 1; i++) { if (pin.has(i)) continue; const d2 = h[i - 1] - 2 * h[i] + h[i + 1]; if (Math.abs(d2) > lim) { h[i] += (d2 - Math.sign(d2) * lim) / 2; moved = true; } } if (!moved) break; }
+  for (let i = 1; i < n; i++) if (!pin.has(i)) h[i] = clamp(h[i], h[i - 1] - g, h[i - 1] + g);
+  for (let i = n - 2; i >= 0; i--) if (!pin.has(i)) h[i] = clamp(h[i], h[i + 1] - g, h[i + 1] + g);
   let worst = 0, wi = 0; for (let i = 0; i < n; i++) { const dd = Math.abs(h[i] - terr[i]); if (dd > worst) { worst = dd; wi = i; } }
   let steep = false; for (let i = 1; i < n; i++) if (Math.abs(h[i] - h[i - 1]) > g * 1.35) steep = true;
   return { h, worst, wi, steep, terr };
@@ -2696,8 +2702,11 @@ function roadProfile(pts, w, type, fixes) {
 // ---------- junction network ----------
 const RN = { T: [] };
 function buildNet() {
-  RN.T = []; for (const r of ROADS) { r.gaps = []; r.trim = [0, 0]; r.stop = [null, null]; r.xw = []; r.tAt = [null, null]; }
-  for (const r of ROADS) { const L = rLen(r); if (L < 2) continue;
+  RN.T = []; for (const r of ROADS) { r.gaps = []; r.trim = [0, 0]; r.stop = [null, null]; r.xw = []; r.tAt = [null, null]; r.cuts = []; }
+  // car roads: proper junctions (roadnode.js)
+  try { JN.build(); } catch (e) { console.warn('junctions', e); JN.list = []; }
+  // footpaths ending on a road or on another footpath
+  for (const r of ROADS) { const L = rLen(r); if (L < 2 || !isFoot(r)) continue;
     for (const e of [0, 1]) { const P = e ? r.pts[r.pts.length - 1] : r.pts[0]; let best = null;
       for (const q of ROADS) { if (q === r || (!isFoot(r) && isFoot(q))) continue; const bx = rBox(q); if (P[0] < bx[0] - 8 || P[0] > bx[2] + 8 || P[1] < bx[1] - 8 || P[1] > bx[3] + 8) continue;
         const pr = rProject(q, P[0], P[1]), Lq = rLen(q); if (pr.d > q.w / 2 + 0.9 || pr.s < 1.0 || pr.s > Lq - 1.0) continue; if (!best || pr.d < best.pr.d) best = { q, pr }; }
@@ -2815,18 +2824,20 @@ const CURB_M = () => RMAT.curb || (RMAT.curb = new THREE.MeshStandardMaterial({ 
 makeRoadMesh = function (r) {
   const group = new THREE.Group(), type = rType(r); r.frames = roadFrames(r); const L = rLen(r); if (!r.gaps) { r.gaps = []; r.trim = [0, 0]; r.stop = [null, null]; r.xw = []; r.tAt = [null, null]; }
   const s0 = r.trim[0], s1 = L - r.trim[1]; if (s1 - s0 < 0.3) return group;
-  const F = stripFrames(r, s0, s1, r.user || r.dev ? 1.0 : 2.0), half = r.w / 2, prio = r.user ? 3 : 2;
+  // pieces of the strip between junction plates
+  let parts = [[s0, s1]]; for (const [ca, cb] of (r.cuts || [])) { const nx = []; for (const [a, b] of parts) { if (cb <= a || ca >= b) { nx.push([a, b]); continue; } if (ca - a > 0.3) nx.push([a, ca]); if (b - cb > 0.3) nx.push([cb, b]); } parts = nx; }
+  const step = r.user || r.dev ? 1.0 : 2.0, half = r.w / 2, prio = r.user ? 3 : 2;
   const gL = r.gaps.filter(g => !g.foot && g.side < 0).map(g => [g.s0, g.s1]), gR = r.gaps.filter(g => !g.foot && g.side > 0).map(g => [g.s0, g.s1]);
   const mat = roadMat2(type, { prio, lines: r.lines, center: r.lines && type === 'asphalt', gapsL: gL, gapsR: gR, xw: r.xw, stop0: r.stop[0] ? { d: s0 + 0.15, lane: r.stop[0].lane } : null, stop1: r.stop[1] ? { d: s1 - 0.15, lane: r.stop[1].lane } : null });
   const yl = type === 'dirt' || type === 'trail' || type === 'gravel' ? 0.03 : 0.04;
+  for (const [pa, pb] of parts) { const F = stripFrames(r, pa, pb, step);
   group.add(ribbonMesh(F, -half, half, yl, yl, r.w, mat, [0, 1]));
   // rounded caps at free ends
   const ragged = type === 'dirt' || type === 'trail' || type === 'gravel';
-  if (!ragged) { const capM = roadMat2(type, { fill: true, prio: prio - 1 });
-    if (!r.tAt[0]) { const p = rAt(r, 0); group.add(capDisc(p.x, p.z, p.y + yl - 0.004, half, capM, r.w)); }
-    if (!r.tAt[1] && !(r === ROADS[0] && !r.user)) { const p = rAt(r, L); group.add(capDisc(p.x, p.z, p.y + yl - 0.004, half, capM, r.w)); } }
-  // fillets where this road joins another
-  for (const T of RN.T) if (T.r === r && !T.foot) { const fm = filletMesh(T); if (fm) group.add(fm); }
+  if (!ragged && pa === parts[0][0]) { const capM = roadMat2(type, { fill: true, prio: prio - 1 });
+    if (!r.tAt[0] && pa <= s0 + 0.01) { const p = rAt(r, 0); group.add(capDisc(p.x, p.z, p.y + yl - 0.004, half, capM, r.w)); }
+    if (!r.tAt[1] && !(r === ROADS[0] && !r.user) && parts[parts.length - 1][1] >= s1 - 0.01) { const p = rAt(r, L); group.add(capDisc(p.x, p.z, p.y + yl - 0.004, half, capM, r.w)); } }
+  // (corners where roads meet: junction plates, roadnode.js)
   // sidewalks: paver strip + curb face + outer face, broken where other roads join
   if (r.side) { const sm = roadMat2('path', { side: true, prio }), H = 0.16;
     for (const sd of [-1, 1]) { const gaps = r.gaps.filter(g => !g.foot && g.side === sd); const inGap = f => gaps.some(g => f.dist > g.s0 - 0.6 && f.dist < g.s1 + 0.6);
@@ -2837,10 +2848,11 @@ makeRoadMesh = function (r) {
     for (const sd of [-1, 1]) { const gaps = r.gaps.filter(g => g.side === sd); const skip = (f, i) => gaps.some(g => f.dist > g.s0 && f.dist < g.s1) || (r.bridge && r.bridge[rAt(r, f.dist).i]);
       for (const run of runs(F, skip)) { run.forEach((f, k) => { const ox = f.nx * (half + 0.05) * sd, oz = f.nz * (half + 0.05) * sd; cp.push(f.x + ox, f.y + 0.02, f.z + oz, f.x + ox + f.nx * 0.18 * sd, f.y + 0.16, f.z + oz + f.nz * 0.18 * sd); if (k) { const b = vi + (k - 1) * 2; ci.push(b, b + 2, b + 1, b + 1, b + 2, b + 3); } }); vi += run.length * 2; } }
     const cg = new THREE.BufferGeometry(); cg.setAttribute('position', new THREE.Float32BufferAttribute(cp, 3)); cg.setIndex(ci); cg.computeVertexNormals(); const cm = new THREE.Mesh(cg, CURB_M()); cm.receiveShadow = true; group.add(cm); }
+  }
   if (r.bridge && r.bridge.some(Boolean)) group.add(makeBridge(r, r.frames));
   return group;
 };
-function rebuildRoadMeshes() { buildNet(); for (const r of ROADS) { if (r.mesh) { TERR.roadGroup.remove(r.mesh); r.mesh.traverse(o => { if (o.geometry) o.geometry.dispose(); }); } r.mesh = makeRoadMesh(r); TERR.roadGroup.add(r.mesh); } }
+function rebuildRoadMeshes() { buildNet(); for (const r of ROADS) { if (r.mesh) { TERR.roadGroup.remove(r.mesh); r.mesh.traverse(o => { if (o.geometry) o.geometry.dispose(); }); } r.mesh = makeRoadMesh(r); TERR.roadGroup.add(r.mesh); } try { JN.meshes(); } catch (e) { console.warn('junction meshes', e); } }
 buildRoadMeshes = function (scene) { TERR.roadGroup = new THREE.Group(); scene.add(TERR.roadGroup); rebuildRoadMeshes(); rebuildDecks(); return TERR.roadGroup; };
 // roadDist stores the distance to the road's outer edge as if it were a standard road (centreline distance minus any extra width)
 rasterizeRoadDist = function () {
@@ -2937,7 +2949,7 @@ finishRoad = function () {
   pushUndo(); const nodes = EDIT.nodes, r = plan.r, foot = isFoot(r);
   // 1) the new road gives way at crossings: split it there (a road crossing a footpath splits the footpath instead)
   let pieces = [r]; const others = ROADS.slice();
-  for (const q of others) { const next = []; for (const pc of pieces) { const cs = rCross(pc, q).filter(c => c.s > 1.2 && c.s < rLen(pc) - 1.2);
+  for (const q of others) { const next = []; for (const pc of pieces) { const Lq = rLen(q), cs = rCross(pc, q).filter(c => c.s > 1.2 && c.s < rLen(pc) - 1.2 && (isFoot(q) || (c.sq > 2.6 && c.sq < Lq - 2.6)));
       if (!cs.length) { next.push(pc); continue; }
       if (!foot && isFoot(q) && q.user) { // split the footpath
         let qs = [q]; for (const c of rCross(q, pc)) { const tgt = qs.find(x => rProject(x, c.x, c.z).d < 0.5); if (!tgt) continue; const pr = rProject(tgt, c.x, c.z), L = rLen(tgt); if (pr.s < 1 || pr.s > L - 1) continue; const A = rSlice(tgt, 0, pr.s), B = rSlice(tgt, pr.s, L); const y = rAt(pc, rProject(pc, c.x, c.z).s).y; blendEnd(A, true, y, 7); blendEnd(B, false, y, 7); qs.splice(qs.indexOf(tgt), 1, A, B); }
@@ -2951,6 +2963,7 @@ finishRoad = function () {
   let i0 = 1e9, j0 = 1e9, i1 = -1e9, j1 = -1e9;
   for (const pc of pieces) { const box = carveSingleRoad(pc); i0 = Math.min(i0, box[0]); j0 = Math.min(j0, box[1]); i1 = Math.max(i1, box[2]); j1 = Math.max(j1, box[3]); ROADS.push(pc); }
   rasterizeRoadDist(); rebuildDecks(); rebuildRoadMeshes();
+  try { const jb = JN.carve(); if (jb) { i0 = Math.min(i0, jb[0]); j0 = Math.min(j0, jb[1]); i1 = Math.max(i1, jb[2]); j1 = Math.max(j1, jb[3]); } } catch (e) { console.warn('junction carve', e); }
   if (i1 >= i0) refreshRegion(i0 - 2, j0 - 2, i1 + 2, j1 + 2);
   EDIT.nodes = []; updateRoadPreview(null); UI.toast(foot ? '歩道ができました！' : `${RTYPES[r.type].name}の道ができました！`); scheduleSave(); UI.editHint();
   let len = 0; for (let k = 1; k < r.pts.length; k++) len += Math.hypot(r.pts[k][0] - r.pts[k - 1][0], r.pts[k][1] - r.pts[k - 1][1]); GAME.ev('roadN', 1); GAME.ev('roadM', Math.round(len));
@@ -3011,6 +3024,266 @@ const RCOL = { asphalt: '#eef0f2', stone: '#d8d2c4', gravel: '#e2d8c0', dirt: '#
 { const _st = setTool; setTool = function (id) { if (id !== 'road') EDIT.roadMode = 'draw'; return _st(id); }; }
 
 queueMicrotask(() => { const _dr = GAME.devRoad; GAME.devRoad = function () { const r = _dr.apply(this, arguments); try { rebuildRoadMeshes(); } catch (e) { console.warn(e); } return r; }; });
+
+// ===================== ver.43: road junctions done properly =====================
+// Every place where car roads meet becomes one junction: a T (a road ending on another road's side),
+// a node (several road ends at one point: corners, width changes, Y / crossroads), or a crossroads (two T's facing each other).
+// Each junction: the roads are cut back, one paved "plate" fills the middle with rounded kerbs (curb returns),
+// and the sidewalks wrap round the corners instead of running across the mouths of other roads.
+const JN = { list: [], walk: [], group: null };
+JN.R = { asphalt: 3.0, stone: 2.6, gravel: 1.8, dirt: 1.6 };   // kerb radius at corners
+JN.H = 0.16;                                                     // sidewalk height
+const jnYl = r => { const t = rType(r); return t === 'dirt' || t === 'trail' || t === 'gravel' ? 0.03 : 0.04; };
+// what runs along the road edge: a sidewalk, the small kerb of the island's original roads, or nothing
+const jnEdge = r => r.side ? SIDEW : (!r.user && !r.dev && !isFoot(r) && rType(r) === 'asphalt' ? 0.25 : 0);
+const jnWrap = a => { while (a > Math.PI) a -= 2 * Math.PI; while (a <= -Math.PI) a += 2 * Math.PI; return a; };
+// 2 lines A + dA·t = B + dB·u → { t, u } (null when parallel)
+function jnCross(A, dA, B, dB) { const det = -dA[0] * dB[1] + dA[1] * dB[0]; if (Math.abs(det) < 1e-4) return null; const ex = B[0] - A[0], ez = B[1] - A[1]; return { t: (-ex * dB[1] + ez * dB[0]) / det, u: (dA[0] * ez - dA[1] * ex) / det }; }
+
+// ---------- finding the junctions ----------
+JN.find = function () {
+  const car = ROADS.filter(r => !isFoot(r) && rLen(r) >= 2), ends = [], J = [];
+  for (const r of car) { const n = r.pts.length; ends.push({ r, e: 0, x: r.pts[0][0], z: r.pts[0][1], y: r.h[0] }, { r, e: 1, x: r.pts[n - 1][0], z: r.pts[n - 1][1], y: r.h[n - 1] }); }
+  // road ends at (almost) the same point
+  const used = new Set(), groups = [];
+  for (let a = 0; a < ends.length; a++) { if (used.has(a)) continue; const g = [ends[a]]; used.add(a);
+    for (let grow = true; grow;) { grow = false; for (let b = 0; b < ends.length; b++) if (!used.has(b) && g.some(o => Math.hypot(o.x - ends[b].x, o.z - ends[b].z) < 2.6)) { g.push(ends[b]); used.add(b); grow = true; } }
+    groups.push(g); }
+  for (const g of groups) {
+    const cx = g.reduce((s, o) => s + o.x, 0) / g.length, cz = g.reduce((s, o) => s + o.z, 0) / g.length;
+    // ... lying on the side of another road?
+    let body = null; for (const q of car) { if (g.some(o => o.r === q)) continue; const bx = rBox(q); if (cx < bx[0] - 8 || cx > bx[2] + 8 || cz < bx[1] - 8 || cz > bx[3] + 8) continue;
+      const pr = rProject(q, cx, cz), Lq = rLen(q); if (pr.d > q.w / 2 + 0.9 || pr.s < 1.0 || pr.s > Lq - 1.0) continue; if (!body || pr.d < body.pr.d) body = { q, pr }; }
+    if (g.length < 2 && !body) continue;
+    J.push({ ends: g, body, x: body ? body.pr.x : cx, z: body ? body.pr.z : cz });
+  }
+  // two T's on opposite sides of one road, close together → one crossroads
+  for (let i = 0; i < J.length; i++) for (let k = i + 1; k < J.length; k++) { const a = J[i], b = J[k]; if (!a || !b || !a.body || !b.body || a.body.q !== b.body.q) continue;
+    const ha = Math.max(...a.ends.map(o => o.r.w / 2)), hb = Math.max(...b.ends.map(o => o.r.w / 2)); if (Math.abs(a.body.pr.s - b.body.pr.s) > ha + hb + 1.5) continue;
+    const q = a.body.q, [tx, tz] = rTan(q, a.body.pr.s), side = o => Math.sign((o.x - a.body.pr.x) * -tz + (o.z - a.body.pr.z) * tx) || 1;
+    if (a.ends.some(o => b.ends.some(p => side(o) === side(p)))) continue;
+    const s = (a.body.pr.s + b.body.pr.s) / 2, p = rAt(q, s); J[i] = { ends: a.ends.concat(b.ends), body: { q, pr: { s, x: p.x, z: p.z, y: p.y, d: 0 } }, x: p.x, z: p.z }; J[k] = null; }
+  return J.filter(Boolean);
+};
+// ---------- arms, cut-backs, plate & kerb outline ----------
+JN.arms = function (j) {
+  const A = [];
+  const mk = (r, sgn, s0, O, end) => { const L = rLen(r), sa = clamp(s0 + sgn * 3, 0, L), [tx, tz] = rTan(r, sa), d = [tx * sgn, tz * sgn]; return { r, sgn, s0, O, end, d, th: Math.atan2(d[0], d[1]), h: r.w / 2, sw: jnEdge(r), type: rType(r), need: 0.6, L }; };
+  for (const o of j.ends) A.push(mk(o.r, o.e ? -1 : 1, o.e ? rLen(o.r) : 0, [o.x, o.z], o.e));
+  if (j.body) { const { q, pr } = j.body; A.push(mk(q, 1, pr.s, [pr.x, pr.z], null), mk(q, -1, pr.s, [pr.x, pr.z], null)); }
+  A.sort((a, b) => a.th - b.th); return A;
+};
+JN.layout = function (j) {
+  const A = j.arms = JN.arms(j), m = A.length, P = [j.x, j.z]; if (m < 2) return false;
+  // arms must leave the centre in clearly different directions
+  for (let k = 0; k < m; k++) { const a = A[k], b = A[(k + 1) % m]; let ph = b.th - a.th; if (k === m - 1) ph += 2 * Math.PI; if (ph < 0.33) return false; }
+  // an arm's own start: road ends that stop short of the centre count from where they are
+  // cut-backs are measured along each arm from its own origin O (the road end, or the centre for a road passing through)
+  // hard = what the corners need without their kerb radius; need = with it
+  for (const a of A) { a.off = (a.O[0] - P[0]) * a.d[0] + (a.O[1] - P[1]) * a.d[1]; a.need = a.hard = a.end === null ? 0.6 : Math.max(0, -a.off) + 0.6; }
+  j.corners = [];
+  for (let k = 0; k < m; k++) {
+    const a = A[k], b = A[(k + 1) % m]; let ph = b.th - a.th; if (k === m - 1) ph += 2 * Math.PI;
+    const na = [a.d[1], -a.d[0]], nb = [b.d[1], -b.d[0]];   // toward increasing angle
+    const EA = [a.O[0] + na[0] * a.h, a.O[1] + na[1] * a.h], EB = [b.O[0] - nb[0] * b.h, b.O[1] - nb[1] * b.h];
+    const c = { a, b, ph, kind: 'straight' };
+    if (ph < Math.PI - 0.3) { const X = jnCross(EA, a.d, EB, b.d);
+      if (X) { let R = Math.min(JN.R[a.type] || 2.6, JN.R[b.type] || 2.6), lam = R / Math.tan(ph / 2); if (lam > 9) { lam = 9; R = lam * Math.tan(ph / 2); }
+        const K = [EA[0] + a.d[0] * X.t, EA[1] + a.d[1] * X.t];
+        Object.assign(c, { kind: 'in', R, lam, lam0: lam, K, xt: X.t, xu: X.u, tA: X.t + lam, tB: X.u + lam });
+        a.hard = Math.max(a.hard, X.t + 0.15); b.hard = Math.max(b.hard, X.u + 0.15); a.need = Math.max(a.need, X.t + lam); b.need = Math.max(b.need, X.u + lam); } }
+    else if (ph > Math.PI + 0.3) c.kind = 'out';
+    else { const taper = Math.max(1.0, 2.6 * Math.abs(a.h - b.h) + 1.2 * Math.abs(a.sw - b.sw)); a.need = Math.max(a.need, taper - a.off); b.need = Math.max(b.need, taper - b.off); }
+    j.corners.push(c);
+  }
+  return true;
+};
+// where each arm's road strip now starts/ends (station on its road)
+JN.cutStation = (a, t) => a.s0 + a.sgn * Math.max(0, t);
+// a point on an arm's edge at distance t from its origin; side +1 = toward the next arm (increasing angle), -1 = toward the previous one
+JN.edge = function (a, side, t) {
+  const s = JN.cutStation(a, t), p = rAt(a.r, s), [tx, tz] = rTan(a.r, s), d = [tx * a.sgn, tz * a.sgn], n = [d[1] * side, -d[0] * side];
+  return { p: [p.x + n[0] * a.h, p.z + n[1] * a.h], N: n, y: p.y, c: [p.x, p.z], d, h: a.h };
+};
+JN.edgeRun = function (a, side, t0, t1) { if (Math.abs(t1 - t0) < 0.05) return [JN.edge(a, side, t0)]; const n = Math.max(1, Math.ceil(Math.abs(t1 - t0) / 0.9)), out = []; for (let i = 0; i <= n; i++) out.push(JN.edge(a, side, t0 + (t1 - t0) * i / n)); return out; };
+// a smooth curve between two edge points (pts get an outward normal pointing away from the centre)
+JN.curve = function (A, B, P, ctrl) {
+  const out = [], N = ctrl.length === 2 ? 10 : 8;
+  for (let i = 1; i < N; i++) { const t = i / N, u = 1 - t; let x, z;
+    if (ctrl.length === 2) { const [C1, C2] = ctrl; x = u * u * u * A.p[0] + 3 * u * u * t * C1[0] + 3 * u * t * t * C2[0] + t * t * t * B.p[0]; z = u * u * u * A.p[1] + 3 * u * u * t * C1[1] + 3 * u * t * t * C2[1] + t * t * t * B.p[1]; }
+    else if (ctrl.length === 1) { const C = ctrl[0]; x = u * u * A.p[0] + 2 * u * t * C[0] + t * t * B.p[0]; z = u * u * A.p[1] + 2 * u * t * C[1] + t * t * B.p[1]; }
+    else { x = lerp(A.p[0], B.p[0], t); z = lerp(A.p[1], B.p[1], t); }
+    out.push({ p: [x, z], y: lerp(A.y, B.y, t), N: null }); }
+  return out;
+};
+// the outline of a junction: per corner a kerb path from one arm's mouth to the next arm's mouth, following the real road edges
+JN.outline = function (j) {
+  const P = [j.x, j.z];
+  for (const a of j.arms) { a.s = JN.cutStation(a, a.cut); const L = JN.edge(a, 1, a.cut), R = JN.edge(a, -1, a.cut); a.Lm = L.p; a.Rm = R.p; a.y = L.y; a.nn = L.N; a.c = L.c; }
+  for (const c of j.corners) {
+    const a = c.a, b = c.b; let path;
+    if (c.kind === 'in') {
+      const tA = clamp(c.tA, 0, a.cut), tB = clamp(c.tB, 0, b.cut), r1 = JN.edgeRun(a, 1, a.cut, tA), r2 = JN.edgeRun(b, -1, tB, b.cut), A = r1[r1.length - 1], B = r2[0];
+      const turn = Math.PI - c.ph, k = 4 / 3 * Math.tan(turn / 4) * c.R;
+      path = r1.concat(JN.curve(A, B, P, [[A.p[0] - A.d[0] * k, A.p[1] - A.d[1] * k], [B.p[0] - B.d[0] * k, B.p[1] - B.d[1] * k]]), r2);
+    } else if (c.kind === 'straight') {
+      const r1 = JN.edgeRun(a, 1, a.cut, 0), r2 = JN.edgeRun(b, -1, 0, b.cut).slice(a.r === b.r ? 1 : 0); path = r1.concat(r2);
+      if (Math.abs(a.h - b.h) > 0.05) { // width change: taper smoothly from one road's edge to the other's
+        const cum = [0]; for (let i = 1; i < path.length; i++) cum.push(cum[i - 1] + Math.hypot(path[i].c[0] - path[i - 1].c[0], path[i].c[1] - path[i - 1].c[1])); const T = cum[cum.length - 1] || 1;
+        path.forEach((q, i) => { const u = cum[i] / T, sm = u * u * (3 - 2 * u), h = lerp(a.h, b.h, sm); q.p = [q.c[0] + q.N[0] * h, q.c[1] + q.N[1] * h]; }); }
+    } else {
+      const tA = Math.min(a.cut, 0.5), tB = Math.min(b.cut, 0.5), r1 = JN.edgeRun(a, 1, a.cut, tA), r2 = JN.edgeRun(b, -1, tB, b.cut), A = r1[r1.length - 1], B = r2[0];
+      const X = jnCross(A.p, [-A.d[0], -A.d[1]], B.p, [-B.d[0], -B.d[1]]), mh = Math.max(a.h, b.h); let ctrl = [];
+      if (X && X.t > 0 && X.u > 0) { const Kb = [A.p[0] - A.d[0] * X.t, A.p[1] - A.d[1] * X.t]; if (Math.hypot(Kb[0] - P[0], Kb[1] - P[1]) < 2.5 * mh + 2) ctrl = [Kb]; }
+      path = r1.concat(JN.curve(A, B, P, ctrl), r2);
+    }
+    // outward normals for the curve points (away from the plate)
+    for (let i = 0; i < path.length; i++) { const q = path[i]; if (q.N) continue; const q0 = path[Math.max(0, i - 1)].p, q1 = path[Math.min(path.length - 1, i + 1)].p; let nx = q1[1] - q0[1], nz = -(q1[0] - q0[0]); const l = Math.hypot(nx, nz) || 1; nx /= l; nz /= l; if ((q.p[0] - P[0]) * nx + (q.p[1] - P[1]) * nz < 0) { nx = -nx; nz = -nz; } q.N = [nx, nz]; }
+    c.path = path; c.pts = path.map(q => q.p);
+  }
+  // plate outline: each arm's mouth (right → left), then the corner path to the next arm
+  const out = []; for (let k = 0; k < j.arms.length; k++) { const a = j.arms[k], c = j.corners[k]; out.push({ p: a.Rm, y: a.y }, { p: a.Lm, y: a.y }); for (let i = 1; i < c.path.length - 1; i++) out.push(c.path[i]); }
+  j.poly = out.map(q => q.p); j.polyY = out.map(q => q.y);
+  j.y = j.arms.reduce((s, a) => s + rAt(a.r, a.s0).y, 0) / j.arms.length;
+};
+// ---------- building the network (replaces the old T-only buildNet for car roads) ----------
+JN.build = function () {
+  JN.list = [];
+  for (const j of JN.find()) {
+    try {
+      if (!JN.layout(j)) continue;
+      for (const a of j.arms) a.cut = a.need;
+      JN.list.push(j);
+    } catch (e) { console.warn('junction', e); }
+  }
+  // cut-backs must fit on each road: two junctions facing each other along a short stretch share it
+  // (the kerb radius shrinks first; only then the junction itself)
+  const fit = (as, avail) => { const hard = as.reduce((s, a) => s + a.hard, 0), need = as.reduce((s, a) => s + a.cut, 0); if (need <= avail) return;
+    if (hard < avail) { const k = (avail - hard) / Math.max(1e-6, need - hard); for (const a of as) a.cut = a.hard + Math.max(0, a.cut - a.hard) * k; }
+    else { const k = Math.max(0.05, avail / Math.max(1e-6, need)); for (const a of as) a.cut *= k; } };
+  for (const r of ROADS) { const L = rLen(r), its = []; for (const j of JN.list) for (const a of j.arms) if (a.r === r) its.push(a); if (!its.length) continue;
+    its.sort((x, y) => x.s0 - y.s0 || x.sgn - y.sgn);
+    for (let i = 0; i < its.length; i++) { const a = its[i];
+      if (a.sgn > 0) { const b = its.slice(i + 1).find(o => o.s0 > a.s0 + 1e-6 || o.sgn < 0 && o !== a); if (b && b.sgn < 0) fit([a, b], b.s0 - a.s0 - 0.6); else fit([a], (b ? b.s0 : L) - a.s0 - 0.5); }
+      else { const b = its.slice(0, i).reverse().find(o => o.s0 < a.s0 - 1e-6); if (!b) fit([a], a.s0 - 0.5); } } }
+  for (const j of JN.list) {
+    // kerb radius that fits the final cut-backs
+    for (const c of j.corners) if (c.kind === 'in') { const lam = Math.max(0.05, Math.min(c.lam0, c.a.cut - c.xt, c.b.cut - c.xu)); c.lam = lam; c.R = lam * Math.tan(c.ph / 2); c.tA = c.xt + lam; c.tB = c.xu + lam; }
+    JN.outline(j);
+    for (const a of j.arms) { if (a.end !== null) { a.r.trim[a.end] = a.cut; a.r.tAt[a.end] = j; } }
+    if (j.body) { const q = j.body.q, as = j.arms.filter(a => a.end === null), lo = Math.min(...as.map(a => a.s)), hi = Math.max(...as.map(a => a.s)); q.cuts.push([lo, hi]); }
+    // which arms give way: everything except the straightest pair of the widest roads
+    j.minor = [];
+    if (j.arms.length >= 3) { let best = null;
+      if (j.body) best = j.arms.filter(a => a.end === null);
+      else for (let i = 0; i < j.arms.length; i++) for (let k = i + 1; k < j.arms.length; k++) { const a = j.arms[i], b = j.arms[k], dot = a.d[0] * b.d[0] + a.d[1] * b.d[1]; if (dot > -0.6) continue; const sc = -dot + (a.h + b.h) * 0.4; if (!best || sc > best.sc) best = Object.assign([a, b], { sc }); }
+      j.minor = j.arms.filter(a => !best || !best.includes(a));
+      for (const a of j.minor) if (a.end !== null && rType(a.r) === 'asphalt') a.r.stop[a.end] = { lane: a.r.lines ? (a.end ? 1 : 2) : 0 }; }
+  }
+};
+// ---------- meshes ----------
+JN.meshes = function () {
+  if (JN.group) { TERR.roadGroup.remove(JN.group); JN.group.traverse(o => { if (o.geometry) o.geometry.dispose(); }); }
+  const g = JN.group = new THREE.Group(); TERR.roadGroup.add(g); JN.walk = [];
+  for (const j of JN.list) { try { JN.meshOne(j, g); } catch (e) { console.warn('junction mesh', e); } }
+  for (const r of ROADS) for (const e of [0, 1]) if (!r.tAt[e] && r.side && !isFoot(r) && !(r === ROADS[0] && !r.user && e === 1)) { try { JN.cul(r, e, g); } catch (e2) { } }
+};
+JN.tri = function (pos, idx, mat, g) { const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.Float32BufferAttribute(pos.p, 3)); if (pos.i) geo.setAttribute('rinfo', new THREE.Float32BufferAttribute(pos.i, 3)); geo.setIndex(idx); geo.computeVertexNormals();
+  let up = 0; if (pos.up) { const P = pos.p, I = idx; for (let i = 0; i < I.length; i += 3) { const a = I[i] * 3, b = I[i + 1] * 3, c = I[i + 2] * 3; up += (P[b + 2] - P[a + 2]) * (P[c] - P[a]) - (P[b] - P[a]) * (P[c + 2] - P[a + 2]); } }
+  if (pos.up && up < 0) { const ix = geo.index.array; for (let i = 0; i < ix.length; i += 3) { const t = ix[i + 1]; ix[i + 1] = ix[i + 2]; ix[i + 2] = t; } geo.computeVertexNormals(); }
+  const m = new THREE.Mesh(geo, mat); m.receiveShadow = true; g.add(m); return m; };
+JN.meshOne = function (j, g) {
+  const P = j.poly, Y = j.polyY, type = j.arms.some(a => a.type === 'asphalt') ? 'asphalt' : j.arms.slice().sort((a, b) => b.h - a.h)[0].type;
+  const yl = Math.min(...j.arms.map(a => jnYl(a.r))), prio = j.arms.some(a => a.r.user) ? 3 : 2;
+  // plate: a fan from the centre (the centre sits at the roads' meeting height)
+  const pos = [j.x, j.y + yl, j.z], info = [0.5, 0, 6], idx = [], n = P.length; P.forEach((p, i) => { pos.push(p[0], Y[i] + yl, p[1]); info.push(0.5, 0, 6); });
+  // winding: make the fan face up
+  let area = 0; for (let i = 0; i < n; i++) { const a = P[i], b = P[(i + 1) % n]; area += a[0] * b[1] - b[0] * a[1]; }
+  for (let i = 0; i < n; i++) { const a = 1 + i, b = 1 + (i + 1) % n; if (area > 0) idx.push(0, b, a); else idx.push(0, a, b); }
+  const pm = JN.tri({ p: pos, i: info, up: true }, idx, roadMat2(type, { fill: true, prio }), g), nm = pm.geometry.attributes.normal; for (let i = 0; i < nm.count; i++) nm.setXYZ(i, 0, 1, 0); // even shading across the long fan triangles
+  const T = []; for (let i = 0; i < idx.length; i += 3) T.push([idx[i], idx[i + 1], idx[i + 2]].map(v => [pos[v * 3], pos[v * 3 + 1], pos[v * 3 + 2]])); JN.addWalk(T);
+  j.tris = T.map(t => ({ t, dy: 0.12 })); for (const c of j.corners) JN.kerb(j, c, g, yl, prio);
+};
+// a sidewalk band (or the small kerb) along a corner's kerb path, widths blending from one arm to the next
+JN.kerb = function (j, c, g, yl, prio) {
+  const a = c.a, b = c.b, wa = a.sw, wb = b.sw; if (wa <= 0 && wb <= 0) return;
+  const path = c.path, n = path.length, H = JN.H; if (n < 2) return;
+  const cum = [0]; for (let i = 1; i < n; i++) cum.push(cum[i - 1] + Math.hypot(path[i].p[0] - path[i - 1].p[0], path[i].p[1] - path[i - 1].p[1])); const Lt = cum[n - 1] || 1;
+  const W = cum.map(s => lerp(wa, wb, s / Lt)), pts = path.map(q => q.p), Yc = path.map(q => q.y); let O = path.map((q, i) => [q.p[0] + q.N[0] * W[i], q.p[1] + q.N[1] * W[i]]);
+  // a sharp corner (kerb radius smaller than the sidewalk): the sidewalk fills the gore up to where the two outer edges meet
+  if (c.kind === 'in' && c.R < Math.max(wa, wb) * 1.1 && path[0].d && path[n - 1].d) {
+    const A = path[0], B = path[n - 1], Oa = [A.p[0] + A.N[0] * wa, A.p[1] + A.N[1] * wa], Ob = [B.p[0] + B.N[0] * wb, B.p[1] + B.N[1] * wb], X = jnCross(Oa, [-A.d[0], -A.d[1]], Ob, [-B.d[0], -B.d[1]]);
+    if (X && X.t > 0 && X.u > 0) { const Q = [Oa[0] - A.d[0] * X.t, Oa[1] - A.d[1] * X.t], l1 = X.t, l2 = X.u, LL = l1 + l2;
+      O = cum.map(s => { const f = s / Lt * LL; if (f <= l1) { const t = f / l1; return [lerp(Oa[0], Q[0], t), lerp(Oa[1], Q[1], t)]; } const t = (f - l1) / l2; return [lerp(Q[0], Ob[0], t), lerp(Q[1], Ob[1], t)]; }); }
+    else O = path.map((q, i) => { const w = Math.min(W[i], c.R * 0.9); return [q.p[0] + q.N[0] * w, q.p[1] + q.N[1] * w]; }); }
+  const side = Math.max(wa, wb) > 0.5, pos = [], info = [], idx = [];
+  for (let i = 0; i < n; i++) { pos.push(pts[i][0], Yc[i] + H, pts[i][1], O[i][0], Yc[i] + H, O[i][1]); const wi = Math.max(0.2, Math.hypot(O[i][0] - pts[i][0], O[i][1] - pts[i][1])); info.push(0, cum[i], wi, 1, cum[i], wi); if (i) { const k = (i - 1) * 2; idx.push(k, k + 2, k + 1, k + 1, k + 2, k + 3); } }
+  JN.tri({ p: pos, i: info, up: true }, idx, side ? roadMat2('path', { side: true, prio }) : CURB_M(), g);
+  const T = []; for (let i = 0; i < idx.length; i += 3) T.push([idx[i], idx[i + 1], idx[i + 2]].map(v => [pos[v * 3], pos[v * 3 + 1], pos[v * 3 + 2]])); JN.addWalk(T);
+  if (j.tris) for (const t of T) j.tris.push({ t, dy: H - 0.03 });
+  const face = (L, y0, y1) => { const ps = [], ix = []; for (let i = 0; i < n; i++) { ps.push(L[i][0], Yc[i] + y0, L[i][1], L[i][0], Yc[i] + y1, L[i][1]); if (i) { const k = (i - 1) * 2; ix.push(k, k + 2, k + 1, k + 1, k + 2, k + 3); } } JN.tri({ p: ps }, ix, CURB_M(), g); };
+  face(pts, yl - 0.01, H); face(O, H, -0.12);
+};
+// the sidewalk wraps round a dead end (cul-de-sac)
+JN.cul = function (r, e, g) {
+  const L = rLen(r), p = rAt(r, e ? L : 0), [tx, tz] = rTan(r, e ? L - 0.5 : 0.5), d = e ? [tx, tz] : [-tx, -tz], h = r.w / 2, H = JN.H, yl = jnYl(r), prio = r.user ? 3 : 2;
+  const a0 = Math.atan2(d[1], d[0]), N = 18, inner = [], outer = [];
+  for (let i = 0; i <= N; i++) { const t = a0 - Math.PI / 2 + Math.PI * i / N; inner.push([p.x + Math.cos(t) * h, p.z + Math.sin(t) * h]); outer.push([p.x + Math.cos(t) * (h + SIDEW), p.z + Math.sin(t) * (h + SIDEW)]); }
+  const pos = [], info = [], idx = []; let s = 0; for (let i = 0; i <= N; i++) { if (i) s += Math.hypot(inner[i][0] - inner[i - 1][0], inner[i][1] - inner[i - 1][1]); pos.push(inner[i][0], p.y + H, inner[i][1], outer[i][0], p.y + H, outer[i][1]); info.push(0, s, SIDEW, 1, s, SIDEW); if (i) { const k = (i - 1) * 2; idx.push(k, k + 2, k + 1, k + 1, k + 2, k + 3); } }
+  const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); geo.setAttribute('rinfo', new THREE.Float32BufferAttribute(info, 3)); geo.setIndex(idx); geo.computeVertexNormals();
+  if (geo.attributes.normal.getY(0) < 0) { const ix = geo.index.array; for (let i = 0; i < ix.length; i += 3) { const t = ix[i + 1]; ix[i + 1] = ix[i + 2]; ix[i + 2] = t; } geo.computeVertexNormals(); }
+  const m = new THREE.Mesh(geo, roadMat2('path', { side: true, prio })); m.receiveShadow = true; g.add(m);
+  const T = []; for (let i = 0; i < idx.length; i += 3) T.push([idx[i], idx[i + 1], idx[i + 2]].map(v => [pos[v * 3], pos[v * 3 + 1], pos[v * 3 + 2]])); JN.addWalk(T);
+  const face = (Lp, y0, y1) => { const ps = [], ix = []; for (let i = 0; i <= N; i++) { ps.push(Lp[i][0], p.y + y0, Lp[i][1], Lp[i][0], p.y + y1, Lp[i][1]); if (i) { const k = (i - 1) * 2; ix.push(k, k + 2, k + 1, k + 1, k + 2, k + 3); } } const gg = new THREE.BufferGeometry(); gg.setAttribute('position', new THREE.Float32BufferAttribute(ps, 3)); gg.setIndex(ix); gg.computeVertexNormals(); const mm = new THREE.Mesh(gg, CURB_M()); mm.receiveShadow = true; g.add(mm); };
+  face(inner, yl - 0.01, H); face(outer, H, -0.12);
+};
+// ---------- walking on plates & corner sidewalks ----------
+JN.addWalk = function (T) { if (!T.length) return; let x0 = 1e9, z0 = 1e9, x1 = -1e9, z1 = -1e9; for (const t of T) for (const v of t) { x0 = Math.min(x0, v[0]); x1 = Math.max(x1, v[0]); z0 = Math.min(z0, v[2]); z1 = Math.max(z1, v[2]); } JN.walk.push({ bb: [x0, z0, x1, z1], T }); };
+JN.walkY = function (x, z) {
+  let out = null;
+  for (const W of JN.walk) { if (x < W.bb[0] || x > W.bb[2] || z < W.bb[1] || z > W.bb[3]) continue;
+    for (const [A, B, C] of W.T) { const d = (B[2] - C[2]) * (A[0] - C[0]) + (C[0] - B[0]) * (A[2] - C[2]); if (Math.abs(d) < 1e-9) continue; const l1 = ((B[2] - C[2]) * (x - C[0]) + (C[0] - B[0]) * (z - C[2])) / d, l2 = ((C[2] - A[2]) * (x - C[0]) + (A[0] - C[0]) * (z - C[2])) / d, l3 = 1 - l1 - l2;
+      if (l1 < -1e-4 || l2 < -1e-4 || l3 < -1e-4) continue; const y = l1 * A[1] + l2 * B[1] + l3 * C[1]; if (out === null || y > out) out = y; } }
+  return out;
+};
+// is (x,z) on any paved road surface (strips or junction plates)? — for placing signs, poles, trees
+JN.onRoad = function (x, z, m = 0.3) {
+  for (const r of ROADS) { const bx = rBox(r), R = r.w / 2 + m + (r.side ? SIDEW : 0); if (x < bx[0] - R || x > bx[2] + R || z < bx[1] - R || z > bx[3] + R) continue; const pr = rProject(r, x, z); if (pr && pr.d < r.w / 2 + m) return true; }
+  for (const j of JN.list) { const P = j.poly; if (!P) continue; let inside = false; for (let i = 0, k = P.length - 1; i < P.length; k = i++) { const a = P[i], b = P[k]; if ((a[1] > z) !== (b[1] > z) && x < (b[0] - a[0]) * (z - a[1]) / (b[1] - a[1]) + a[0]) inside = !inside; } if (inside) return true; }
+  return false;
+};
+
+// ---------- terrain under junctions: flat under the plate and the corner sidewalks, a soft slope around ----------
+JN.triY = function (T, x, z) { for (const o of T) { const [A, B, C] = o.t, d = (B[2] - C[2]) * (A[0] - C[0]) + (C[0] - B[0]) * (A[2] - C[2]); if (Math.abs(d) < 1e-9) continue; const l1 = ((B[2] - C[2]) * (x - C[0]) + (C[0] - B[0]) * (z - C[2])) / d, l2 = ((C[2] - A[2]) * (x - C[0]) + (A[0] - C[0]) * (z - C[2])) / d, l3 = 1 - l1 - l2; if (l1 < -1e-3 || l2 < -1e-3 || l3 < -1e-3) continue; return l1 * A[1] + l2 * B[1] + l3 * C[1] - o.dy; } return null; };
+JN.carve = function () {
+  const { n, size } = WORLD, cell = size / (n - 1), h0 = -size / 2, RING = 3.0; let i0 = n, j0 = n, i1 = -1, j1 = -1;
+  const set = (ii, jj, k, nh) => { if (Math.abs(nh - G.H[k]) < 0.02) return; G.H[k] = nh; i0 = Math.min(i0, ii); j0 = Math.min(j0, jj); i1 = Math.max(i1, ii); j1 = Math.max(j1, jj); };
+  const box = J => { let x0 = 1e9, z0 = 1e9, x1 = -1e9, z1 = -1e9; for (const o of J.tris) for (const v of o.t) { x0 = Math.min(x0, v[0]); x1 = Math.max(x1, v[0]); z0 = Math.min(z0, v[2]); z1 = Math.max(z1, v[2]); } return [Math.max(0, Math.floor((x0 - RING - h0) / cell)), Math.max(0, Math.floor((z0 - RING - h0) / cell)), Math.min(n - 1, Math.ceil((x1 + RING - h0) / cell)), Math.min(n - 1, Math.ceil((z1 + RING - h0) / cell))]; };
+  const Js = JN.list.filter(J => J.tris && J.tris.length), covered = new Set();
+  // 0) nothing may stick up through a road or its sidewalks (later edits such as building pads can raise a road's bed) — only ever lowers
+  for (const r of ROADS) { const L = rLen(r), half = r.w / 2, fw = footW(r) / 2, W = Math.ceil((fw + 1) / cell); if (L < 1) continue;
+    for (let s = 0; s <= L; s += 1.0) { const p = rAt(r, s); if (r.bridge && (r.bridge[p.i] || r.bridge[p.i + 1])) continue; const [tx, tz] = rTan(r, s), ci = Math.round((p.x - h0) / cell), cj = Math.round((p.z - h0) / cell);
+      for (let jj = Math.max(0, cj - W); jj <= Math.min(n - 1, cj + W); jj++) for (let ii = Math.max(0, ci - W); ii <= Math.min(n - 1, ci + W); ii++) {
+        const x = h0 + ii * cell, z = h0 + jj * cell, a = (x - p.x) * tx + (z - p.z) * tz, o = Math.abs((x - p.x) * -tz + (z - p.z) * tx); if (Math.abs(a) > 0.5 || o > fw) continue;
+        const k = jj * n + ii; if (G.prot[k] || !isNaN(G.Wl[k])) continue; const top = o <= half ? p.y - 0.05 : p.y + 0.12; if (G.H[k] > top) set(ii, jj, k, o <= half ? p.y - 0.08 : p.y + 0.03); } } }
+  // 1) flat under every plate and corner sidewalk
+  for (const J of Js) { const [a, b, c, d] = box(J); for (let jj = b; jj <= d; jj++) for (let ii = a; ii <= c; ii++) { const k = jj * n + ii; if (G.prot[k] || !isNaN(G.Wl[k])) continue; const y = JN.triY(J.tris, h0 + ii * cell, h0 + jj * cell); if (y === null) continue; covered.add(k); set(ii, jj, k, y); } }
+  // 2) a soft slope around them (never under a road or another junction)
+  for (const J of Js) { const [a, b, c, d] = box(J), V = []; for (const o of J.tris) for (const v of o.t) V.push([v[0], v[1] - o.dy, v[2]]);
+    for (let jj = b; jj <= d; jj++) for (let ii = a; ii <= c; ii++) { const k = jj * n + ii; if (covered.has(k) || G.prot[k] || !isNaN(G.Wl[k])) continue; const x = h0 + ii * cell, z = h0 + jj * cell, bed = G.roadBed && G.roadBed[k];
+      let bd = 1e9, by = 0; for (const v of V) { const dd = Math.hypot(v[0] - x, v[2] - z); if (dd < bd) { bd = dd; by = v[1]; } } if (bd > RING + 0.5) continue; const t = clamp((bd - 0.5) / RING, 0, 1), nh = lerp(by, G.H[k], t * t * (3 - 2 * t));
+      if (!bed || nh < G.H[k]) set(ii, jj, k, nh); } } // under another road only ever lower
+  return i1 >= i0 ? [i0, j0, i1, j1] : null;
+};
+
+// run the clean-up after development roads and when an island is opened (older saves had no junction plates)
+queueMicrotask(() => {
+  const refresh = b => { if (b) refreshRegion(b[0] - 2, b[1] - 2, b[2] + 2, b[3] + 2); };
+  const _dr = GAME.devRoad; if (_dr) GAME.devRoad = function () { const r = _dr.apply(this, arguments); try { refresh(JN.carve()); } catch (e) { console.warn('junction carve', e); } return r; };
+  const _b = GAME.begin; GAME.begin = function () { const r = _b.apply(this, arguments); try { if (!DEMO2.building) refresh(JN.carve()); } catch (e) { console.warn('junction carve', e); } return r; };
+});
+// junction plates and corner sidewalks count as road for everything that keeps off roads (grass, flowers, trees, buildings…)
+{ const _rd = roadDistAt; roadDistAt = function (x, z) { const d = _rd(x, z); if (d > 1 && JN.walk.length && JN.walkY(x, z) !== null) return 0; return d; }; }
 
 // ===================== PROGRESS: 名前・セーブ・おねがい・島の目標・元気度・解放 =====================
 const PROFILE_KEY = 'hoshinami2-profile', PROFILE_VER = 1;
@@ -8363,7 +8636,7 @@ DEMO2.PLAN = /*PLAN*/{
   {"n": "スタジアム通り", "t": "A", "tree": "momiji0", "p": [[100,-137],[100,-110],[100,-60],[104,-25],[110,5]]},
   {"n": "みかん台南通り", "t": "n", "tree": "sakura0", "p": [[-188,-50],[-145,-50],[-95,-50],[-82,-50]]},
   {"n": "みかん台北通り", "t": "n", "p": [[-160,-104],[-145,-104],[-95,-104],[-82,-104]]},
-  {"n": "みかん台西通り", "t": "n", "p": [[-145,-50],[-145,-104],[-145,-117]]},
+  {"n": "みかん台西通り", "t": "n", "p": [[-145,-50],[-145,-104]]},
   {"n": "みかん台東通り", "t": "n", "tree": "sakura0", "p": [[-95,-50],[-95,-104],[-95,-148]]},
   {"n": "みかん台の小径", "t": "s", "tree": "sakura0", "p": [[-82,-50],[-82,-104]]},
   {"n": "神社の参道", "t": "s", "tree": "momiji0", "p": [[74,58],[84,58]]},
@@ -8548,7 +8821,8 @@ DEMO2.fill = async function (say) {
 };
 // ---------- street trees: an avenue of trees along the main roads (pines by the sea, palms by the beach, cherries in the lanes) ----------
 DEMO2.trees = function () {
-  let n = 0; const add = (x, z, key) => { if (groundH(x, z) < 0.6 || waterDepthAt(x, z) > 0 || roadDistAt(x, z) < 3.4 || deckY(x, z) !== null) return; const [i, j] = toIdx(x, z); if (G.prot[j * WORLD.n + i] || CITY.at({ x, z }, 0.8)) return;
+  let n = 0; const add = (x, z, key) => { if (groundH(x, z) < 0.6 || waterDepthAt(x, z) > 0 || roadDistAt(x, z) < 3.4 || deckY(x, z) !== null) return;
+    if ([[0, 0], [1.2, 0], [-1.2, 0], [0, 1.2], [0, -1.2]].some(([a, b]) => JN.walkY(x + a, z + b) !== null) || JN.onRoad(x, z, 1.2)) return; // not on a junction or its corner sidewalk const [i, j] = toIdx(x, z); if (G.prot[j * WORLD.n + i] || CITY.at({ x, z }, 0.8)) return;
     if (collidersNear(x, z).some(c => !c.off && (c.kind === 'bld' || c.kind === 'pole') && hitsCollider(c, x, z, 1.2))) return; if (VEG.userTrees.some(t => Math.hypot(t.x - x, t.z - z) < 5)) return;
     VEG.userTrees.push({ x, z, r: Math.random(), kind: key.replace(/\d+$/, ''), key }); n++; };
   for (const spec of DEMO2.PLAN.roads) { if (!spec.tree) continue; const [type, wd, sw] = DEMO2.TYPES[spec.t], off = RTYPES[type].w[wd] / 2 + (sw ? SIDEW : 0) + 0.9, pts = roadPathFrom(spec.p.map(([x, z]) => ({ x, z }))); if (!pts) continue;
@@ -8583,6 +8857,7 @@ GAME.startDemo = function () {
       await DEMO2.fill(DEMO.say);
       DEMO.say('並木を植えています…'); await tick(); DEMO2.treeN = DEMO2.trees();
       DEMO.say('仕上げています…'); await tick();
+      try { JN.carve(); } catch (e) { DEMO2.log.push('carve ' + e); }
       refreshAll(); VEG.refresh(-400, -400, 400, 400); CITY.rebuildAll(); this.refreshDev(); this.refreshProjects(); this.syncNewcomers(); this.applyTruck && this.applyTruck(); this.mapDirty = true; MINI.builtAt = -99; this.renderTracker();
     } catch (e) { console.warn('demo2', e); DEMO2.log.push('error ' + e); }
     finally { DEMO2.building = false; UI.toast = toast; EDIT.nodes = []; EDIT.undo = []; EDIT.rtype = 'asphalt'; EDIT.roadW = 'narrow'; EDIT.rside = false; }
@@ -9075,7 +9350,7 @@ FSH.updatePanel = function () {
 { const _ok2 = GAME.onKey; GAME.onKey = function (e) { if (!e.repeat && e.code === 'KeyT' && this.p && !this.modal && !EDIT.on && !PL.veh && !LIFE.fish && FSH.holdKg() > 0.05) { const S = DECO.ship, H = this.LM.harbor; if ((S && Math.hypot(PL.x - S.x, PL.z - S.z) < 12) || (H && Math.hypot(PL.x - H.x, PL.z - H.z) < 60)) { FSH.openLanding(true); return true; } } return _ok2.apply(this, arguments); }; }
 { const _p2 = GAME.prompt; GAME.prompt = function () { if (this.p && !PL.veh && !this.modal && this.nearShip && this.nearShip() && FSH.holdKg() > 0.05) return `Space：出荷所　T：網の魚を水揚げ（魚倉 ${FSH.holdKg().toFixed(0)}kg）`; return _p2.apply(this, arguments); }; }
 // version label so you can tell whether the page has updated
-const GAME_VER = '42（10/27）';
+const GAME_VER = '43（10/27）';
 { const v = document.createElement('div'); v.id = 'verTag'; v.textContent = 'ver.' + GAME_VER; v.style.cssText = 'position:fixed;left:6px;bottom:4px;z-index:5;font-size:10px;color:rgba(255,255,255,.75);text-shadow:0 1px 2px rgba(0,0,0,.6);pointer-events:none;font-family:sans-serif'; document.body.appendChild(v); }
 
 // ===================== 島の収益: 建物ごとに1時間あたりの売上が入りつづける（留守のあいだも最大24時間分） =====================
@@ -9154,6 +9429,7 @@ function sidewalkY(x, z) {
     for (let i = 0; i < F.length; i++) { const f = F[i], d = (x - f.x) * (x - f.x) + (z - f.z) * (z - f.z); if (d < bd) { bd = d; best = i; } }
     const rr = half + (r.side ? SIDEW : 0) + 1; if (best < 0 || bd > rr * rr + 4) continue;
     const f = F[best], lat = (x - f.x) * f.nx + (z - f.z) * f.nz, al = Math.abs(lat);
+    if ((r.cuts || []).some(([a, b]) => f.dist > a - 0.3 && f.dist < b + 0.3)) continue; // a junction plate (JN.walkY)
     if (best === 0 || best === F.length - 1) { const tx = -f.nz, tz = f.nx, along = (x - f.x) * tx + (z - f.z) * tz; if (Math.abs(along) > 0.9) continue; }
     if (al <= half) { const ty = rType(r), yl = ty === 'dirt' || ty === 'trail' || ty === 'gravel' ? 0.03 : 0.04; top(f.y + yl); continue; }
     if (!r.side || al > half + SIDEW + 0.02) continue;
@@ -9162,7 +9438,7 @@ function sidewalkY(x, z) {
   }
   return out;
 }
-{ const _sy = standY; standY = function (x, z) { const b = _sy(x, z), s = sidewalkY(x, z); return s !== null && s > b - 0.3 && s < b + 0.5 ? Math.max(b, s) : b; }; }
+{ const _sy = standY; standY = function (x, z) { const b = _sy(x, z); let s = sidewalkY(x, z); const j = typeof JN !== 'undefined' && JN.walk.length ? JN.walkY(x, z) : null; if (j !== null && (s === null || j > s)) s = j; return s !== null && s > b - 0.3 && s < b + 0.5 ? Math.max(b, s) : b; }; }
 
 // ===================== 川の表現: 流れる向き・速さのある水面（フローマップ）、白波・岸の泡、澄んだ浅瀬、川岸のヨシと石 =====================
 let riverMat = null;
@@ -9585,8 +9861,7 @@ TRF.update = function (dt) {
 CITY.trafficInit = function () { CARX.init(); return CITY.cars = { list: TRF.cars, N: CARX.N }; };
 CITY.trafficPlan = function () { TRF.plan(); CITY.cars = { list: TRF.cars, N: CARX.N }; };
 CITY.trafficUpdate = function (dt) { TRF.update(dt); };
-// your own car can't drive through other cars
-{ const _ok = vehOK; vehOK = function (v, x, z) { if (v && v.kind === 'truck' && v === PL.veh) for (const c of TRF.cars) if (c.x !== undefined && Math.hypot(c.x - x, c.z - z) < 2.3) return false; return _ok.apply(this, arguments); }; }
+// (your own car vs other cars: see carhit.js — oriented boxes instead of centre distances)
 { const _b = GAME.begin; GAME.begin = function () { const r = _b.apply(this, arguments); try { TRF.cars = []; TRF.plan(); } catch (e) { console.warn('traffic', e); } return r; }; }
 
 // ===================== 路線バス: 本物らしい中型バス、バス停（標識・時刻表・待合小屋）、しまづくりで停留所と経路を自分で決める =====================
@@ -9829,17 +10104,23 @@ CTRY.vending = function (g, x, z, ry) { const v = sub(g, x, groundH(x, z), z, ry
 CTRY.roadside = function (g) {
   const free = (x, z, r = 0.8) => { if (groundH(x, z) < 0.4 || !isNaN(waterLevelAt(G, x, z)) || waterDepthAt(x, z) > 0 || deckY(x, z) !== null) return false; const [px, pz] = pushOut(x, z, r); return Math.hypot(px - x, pz - z) < 0.01; };
   const RS = ROADS.filter(r => !isFoot(r) && r.w >= 3.4 && rLen(r) > 20); let tom = 0, mir = 0;
-  // where a road ends on another road: stop sign + white line on the side road, a curve mirror across the junction
-  for (const r of RS) { const L = rLen(r); for (const [s0, d] of [[0, 1], [L, -1]]) { const p = rAt(r, s0); let main = null; for (const q of RS) { if (q === r) continue; const pr = rProject(q, p.x, p.z); if (pr && pr.d < q.w / 2 + r.w / 2 + 2) { main = { q, pr }; break; } } if (!main) continue;
-    const sb = clamp(s0 + d * (main.q.w / 2 + 3.5), 1, L - 1), a = rAt(r, sb), t = rTan(r, sb), fx = t[0] * -d, fz = t[1] * -d; // direction toward the junction
-    const lx = fz, lz = -fx, off = r.w / 2 + 0.7, sx = a.x + lx * off, sz = a.z + lz * off; if (free(sx, sz, 0.4)) { CTRY.signPost(g, sx, sz, Math.atan2(-fx, -fz), 'tomare'); tom++; }
-    const lineM = CTRY.lineM || (CTRY.lineM = stdM('#f2f2ee', 0.6)); const ln = new THREE.Mesh(new THREE.BoxGeometry(r.w / 2 - 0.2, 0.02, 0.3), lineM); ln.position.set(a.x + lx * r.w / 4, a.y + 0.06, a.z + lz * r.w / 4); ln.rotation.y = Math.atan2(fx, fz); g.add(ln);
-    // mirror on the far side of the main road, facing back down the side road
-    const [tx, tz] = rTan(main.q, main.pr.s), side = (p.x - main.pr.x) * -tz + (p.z - main.pr.z) * tx > 0 ? -1 : 1, moff = main.q.w / 2 + 1.0, mx = main.pr.x - tz * moff * side, mz = main.pr.z + tx * moff * side; if (free(mx, mz, 0.4)) { CTRY.mirror(g, mx, mz, Math.atan2(p.x - mx, p.z - mz)); mir++; } } }
+  // junctions (roadnode.js): 止まれ on every side road that gives way (its stop line is painted by the road itself),
+  // a curve mirror on the kerb corner across the junction, turned to look back down the side road
+  const clear = (x, z, r) => free(x, z, r) && !JN.onRoad(x, z, 0.25);
+  for (const j of (JN.list || [])) for (const a of (j.minor || [])) { const r = a.r; if (isFoot(r) || r.w < 3.4 || rLen(r) < 20) continue;
+    const s = JN.cutStation(a, a.cut + 1.3), p = rAt(r, s), [tx, tz] = rTan(r, s), fx = -a.sgn * tx, fz = -a.sgn * tz; // toward the junction
+    const lx = fz, lz = -fx, off = r.w / 2 + (r.side ? 0.45 : 0.7), sx = p.x + lx * off, sz = p.z + lz * off;
+    if (clear(sx, sz, 0.3)) { CTRY.signPost(g, sx, sz, Math.atan2(-fx, -fz), 'tomare'); tom++; }
+    let best = null; for (const c of j.corners) { if (c.a === a || c.b === a || !c.pts || c.pts.length < 2) continue; const k = Math.floor((c.pts.length - 1) / 2), m0 = c.pts[k], m1 = c.pts[k + 1] || c.pts[k - 1], mx = (m0[0] + m1[0]) / 2, mz = (m0[1] + m1[1]) / 2;
+      let nx = m1[1] - m0[1], nz = -(m1[0] - m0[0]); const nl = Math.hypot(nx, nz) || 1; nx /= nl; nz /= nl; if ((mx - j.x) * nx + (mz - j.z) * nz < 0) { nx = -nx; nz = -nz; }
+      const sw = Math.max(c.a.sw, c.b.sw), qx = mx + nx * (sw + 0.45), qz = mz + nz * (sw + 0.45), dl = Math.hypot(qx - j.x, qz - j.z) || 1, sc = -((qx - j.x) * a.d[0] + (qz - j.z) * a.d[1]) / dl;
+      if (!best || sc > best.sc) best = { sc, x: qx, z: qz }; }
+    // (mirrors only where narrow country roads meet; town streets with sidewalks don't get them)
+    if (!r.side && best && best.sc > 0.2 && clear(best.x, best.z, 0.4)) { const tp = rAt(r, JN.cutStation(a, a.cut + 7)); CTRY.mirror(g, best.x, best.z, Math.atan2(tp.x - best.x, tp.z - best.z)); mir++; } }
   // speed limit signs every ~160 m along the main road, on alternating sides
-  const M0 = RS[0]; let spd = 0; if (M0) { const L = rLen(M0); for (let s = 40, k = 0; s < L - 20; s += 160, k++) { const a = rAt(M0, s), t = rTan(M0, s), sd = k % 2 ? 1 : -1, off = M0.w / 2 + 0.9, x = a.x + t[1] * off * sd, z = a.z - t[0] * off * sd; if (!free(x, z, 0.4)) continue; CTRY.signPost(g, x, z, Math.atan2(-t[0] * sd, -t[1] * sd), 'speed'); spd++; } }
+  const M0 = RS[0]; let spd = 0; if (M0) { const L = rLen(M0); for (let s = 40, k = 0; s < L - 20; s += 160, k++) { const a = rAt(M0, s), t = rTan(M0, s), sd = k % 2 ? 1 : -1, off = M0.w / 2 + 0.9, x = a.x + t[1] * off * sd, z = a.z - t[0] * off * sd; if (!clear(x, z, 0.4)) continue; CTRY.signPost(g, x, z, Math.atan2(-t[0] * sd, -t[1] * sd), 'speed'); spd++; } }
   // お地蔵さん at a couple of quiet roadside spots near the village, a vending machine by the harbour
-  let jz = 0; for (const r of RS) { if (jz >= 2) break; const L = rLen(r); for (let s = 30; s < L - 30 && jz < 2; s += 37) { const a = rAt(r, s); if (Math.hypot(a.x - VILLAGE.x, a.z - VILLAGE.z) > 140 || Math.hypot(a.x - VILLAGE.x, a.z - VILLAGE.z) < 40) continue; const t = rTan(r, s), off = r.w / 2 + 2.2, x = a.x - t[1] * off, z = a.z + t[0] * off; if (!free(x, z, 1.0) || CTRY.paddies.some(p => Math.hypot(p.x - x, p.z - z) < 14)) continue; CTRY.jizo(g, x, z, Math.atan2(a.x - x, a.z - z)); addCollider({ x, z, r: 0.6, kind: 'pole' }); jz++; s += 120; } }
+  let jz = 0; for (const r of RS) { if (jz >= 2) break; const L = rLen(r); for (let s = 30; s < L - 30 && jz < 2; s += 37) { const a = rAt(r, s); if (Math.hypot(a.x - VILLAGE.x, a.z - VILLAGE.z) > 140 || Math.hypot(a.x - VILLAGE.x, a.z - VILLAGE.z) < 40) continue; const t = rTan(r, s), off = r.w / 2 + 2.2, x = a.x - t[1] * off, z = a.z + t[0] * off; if (!clear(x, z, 1.0) || CTRY.paddies.some(p => Math.hypot(p.x - x, p.z - z) < 14)) continue; CTRY.jizo(g, x, z, Math.atan2(a.x - x, a.z - z)); addCollider({ x, z, r: 0.6, kind: 'pole' }); jz++; s += 120; } }
   if (DECO.ship && DECO.ship.at) { const at = DECO.ship.at, [x, z] = toWorld(at, -3.7, 1.2); if (free(x, z, 0.6)) { CTRY.vending(g, x, z, at.rot); addCollider({ x, z, hw: 0.5, hd: 0.4, rot: at.rot, kind: 'pole' }); } }
   CTRY.n = { tom, mir, spd, jz };
 };
@@ -12982,6 +13263,120 @@ FW.camIn = function (Fy) {
   if (!was && Fy && PL.veh === Fy && Fy.mesh === FERRY.made) { FW.board(Fy); UI.toast('🛳️ 乗船しました。WASD で船内を歩けます（客室・うしろの階段から上の展望デッキへ）'); }
   if (!PL.veh) FW.on = false; return r; }; }
 { const _p = GAME.prompt; GAME.prompt = function () { const v = PL.veh; if (this.p && v && v.kind === 'ferry' && FW.on && !v.docked) return FW.inCabin(FW.lx, FW.lz) ? '🛳️ 客室　WASD で歩く・うしろの扉から甲板へ' : '🛳️ 島めぐり中…　WASD で船内を歩く・V で目線'; return _p.apply(this, arguments); }; }
+
+// ===== ver.43: cars never sink into each other =====
+// Your car, the island bus, traffic and parked cars are oriented boxes (separating-axis test).
+// - your car may not make an overlap deeper (so it can always back out / drive away)
+// - anything still overlapping is pushed apart every frame
+// - the bus and traffic brake for your car and never push into it
+const CARHIT = { pad: 0.04 };
+CARHIT.box = (x, z, rot, hl, hw) => ({ x, z, s: Math.sin(rot), c: Math.cos(rot), hl, hw });
+// smallest push that moves A out of B → { d, nx, nz } (n points from B towards A), or null when apart
+CARHIT.sat = function (A, B) {
+  const dx = A.x - B.x, dz = A.z - B.z; let best = null;
+  for (const [ax, az] of [[A.s, A.c], [A.c, -A.s], [B.s, B.c], [B.c, -B.s]]) {
+    const ra = A.hl * Math.abs(A.s * ax + A.c * az) + A.hw * Math.abs(A.c * ax - A.s * az);
+    const rb = B.hl * Math.abs(B.s * ax + B.c * az) + B.hw * Math.abs(B.c * ax - B.s * az);
+    const p = dx * ax + dz * az, o = ra + rb - Math.abs(p);
+    if (o <= 0) return null;
+    if (!best || o < best.d) { const g = p >= 0 ? 1 : -1; best = { d: o, nx: ax * g, nz: az * g }; }
+  }
+  return best;
+};
+CARHIT.mine = (v, x, z, rot) => CARHIT.box(x, z, rot, (VSPEC.truck.len || 1.65) + CARHIT.pad, (VSPEC.truck.wid || 0.74) + CARHIT.pad);
+CARHIT.BUS = [4.62, 1.2];
+// every other car-like thing near (x,z)
+CARHIT.others = function (self, x, z, y) {
+  const O = [], add = (o, ox, oz, oy, rot, hl, hw) => {
+    if (o === self || !isFinite(ox) || !isFinite(oz)) return; if (Math.hypot(ox - x, oz - z) > hl + 4) return;
+    if (isFinite(y) && isFinite(oy) && Math.abs(oy - y) > 2.6) return; // under / over a bridge
+    O.push({ o, b: CARHIT.box(ox, oz, rot || 0, hl, hw) });
+  };
+  if (typeof DV !== 'undefined' && DV.bus) add(DV.bus, DV.bus.x, DV.bus.z, DV.bus.y, DV.bus.rot, CARHIT.BUS[0], CARHIT.BUS[1]);
+  if (typeof BUSX !== 'undefined' && BUSX.extra) for (const b of BUSX.extra) add(b, b.x, b.z, b.y, b.rot, CARHIT.BUS[0], CARHIT.BUS[1]);
+  if (typeof TRF !== 'undefined') for (const c of (TRF.cars || []).concat(TRF.parked || [])) { const T = CAR_TYPES[c.type] || CAR_TYPES.kei; add(c, c.x, c.z, c.y, c.rot, T.L / 2 + 0.02, T.W / 2 + 0.02); }
+  for (const v of VEH) if (v.kind === 'truck' && v !== self) add(v, v.x, v.z, v.y, v.rot, VSPEC.truck.len, VSPEC.truck.wid);
+  return O;
+};
+// how deep your car would be inside other cars at this pose (sum of overlaps)
+CARHIT.pen = function (v, x, z, rot) {
+  if (!isFinite(x) || !isFinite(z)) return 0; const A = CARHIT.mine(v, x, z, rot); let d = 0;
+  for (const q of CARHIT.others(v, x, z, v.y)) { const h = CARHIT.sat(A, q.b); if (h) d += h.d; }
+  return d;
+};
+// replaces the old "2.6 m from the bus centre / 2.3 m from a traffic car centre" checks
+{ const _ok = vehOK; CARHIT.ground = _ok; vehOK = function (v, x, z, rot) {
+  if (!v || v.kind !== 'truck') return _ok.apply(this, arguments);
+  if (!_ok.apply(this, arguments)) return false;
+  if (rot === undefined) rot = v.rot;
+  const pn = CARHIT.pen(v, x, z, rot); if (pn <= 0.002) return true;
+  const cur = isFinite(v.x) ? CARHIT.pen(v, v.x, v.z, v.rot) : 0;
+  return pn < cur - 0.002; // already touching: only moves that get you out
+}; }
+// push your car out of anything it is still inside (spawned on top of it, the bus turned into it, …)
+CARHIT.resolve = function (v) {
+  if (!v || v.kind !== 'truck' || !isFinite(v.x)) return;
+  for (let it = 0; it < 4; it++) {
+    const A = CARHIT.mine(v, v.x, v.z, v.rot); let hit = null;
+    for (const q of CARHIT.others(v, v.x, v.z, v.y)) { const h = CARHIT.sat(A, q.b); if (h && (!hit || h.d > hit.d)) hit = h; }
+    if (!hit) return;
+    const k = hit.d + 0.03; let moved = false;
+    for (const f of [1, 0.5]) { const nx = v.x + hit.nx * k * f, nz = v.z + hit.nz * k * f; if (CARHIT.ground(v, nx, nz, v.rot)) { v.x = nx; v.z = nz; moved = true; break; } }
+    const fx = Math.sin(v.rot), fz = Math.cos(v.rot); if ((fx * hit.nx + fz * hit.nz) * v.v < 0) v.v = 0; // no speed into the obstacle
+    if (!moved) return;
+    if (PL.veh === v) { PL.x = v.x; PL.z = v.z; }
+  }
+};
+{ const _pv = placeVehicle; placeVehicle = function (v, dt) { try { CARHIT.resolve(v); } catch (e) { } return _pv.apply(this, arguments); }; }
+
+// ---- the others give way ----
+// your car(s) as boxes
+CARHIT.mineAll = function () { const R = []; for (const v of VEH) if (v.kind === 'truck' && isFinite(v.x)) R.push({ v, b: CARHIT.mine(v, v.x, v.z, v.rot) }); return R; };
+// overlap of a box with your car(s)
+CARHIT.vsMine = function (B, y, M) { let d = 0; for (const m of M) { if (isFinite(y) && isFinite(m.v.y) && Math.abs(m.v.y - y) > 2.6) continue; const h = CARHIT.sat(B, m.b); if (h) d += h.d; } return d; };
+// a box stretched ahead of a vehicle by `ahead` metres
+CARHIT.ahead = function (x, z, rot, hl, hw, ahead, dir) { const g = dir < 0 ? -1 : 1, s = Math.sin(rot), c = Math.cos(rot), h = ahead / 2; return CARHIT.box(x + s * h * g, z + c * h * g, rot, hl + h, hw + 0.15); };
+
+// island bus: brake when your car is in its path, never drive deeper into it
+{ const _ub = GAME.updateBus; GAME.updateBus = function (dt) {
+  const B = DV.bus; if (!B || B.x === undefined || !B.mesh) return _ub.apply(this, arguments);
+  const M = CARHIT.mineAll().filter(m => PL.veh !== B || m.v !== PL.veh); if (!M.length) return _ub.apply(this, arguments);
+  const d = dt || 0.016, [hl, hw] = CARHIT.BUS;
+  if (!(B.wait > 0)) { const look = 1.2 + (B.v || 0) * (B.v || 0) / 9; if (CARHIT.vsMine(CARHIT.ahead(B.x, B.z, B.rot, hl, hw, look, 1), B.y, M) > 0) B.v = Math.max(0, (B.v || 0) - 7 * d); }
+  const before = CARHIT.vsMine(CARHIT.box(B.x, B.z, B.rot, hl, hw), B.y, M);
+  const sv = { s: B.s, v: B.v, dir: B.dir, at: B.at, wait: B.wait, stop: B.stop, x: B.x, z: B.z, y: B.y, rot: B.rot };
+  const r = _ub.apply(this, arguments);
+  const after = CARHIT.vsMine(CARHIT.box(B.x, B.z, B.rot, hl, hw), B.y, M);
+  if (after > before + 0.002) { // would push into your car: stay put
+    Object.assign(B, sv); B.v = 0; B.mesh.position.set(B.x, B.y, B.z); B.mesh.rotation.set(0, B.rot, 0);
+    if (PL.veh === B) { PL.x = B.x; PL.z = B.z; PL.rot = B.rot; }
+    B._yieldT = (B._yieldT || 0) + d; if (B._yieldT > 4 && !B._honk) { B._honk = 1; try { SND.play('ui_confirmation2', { vol: 0.3, rate: 0.6 }); } catch (e) { } }
+  } else { B._yieldT = 0; B._honk = 0; }
+  return r;
+}; }
+
+// traffic: same rule
+{ const _tu = TRF.update; TRF.update = function (dt) {
+  const M = CARHIT.mineAll(); if (!M.length || !TRF.cars || !TRF.cars.length || !CARX.ok || !GAME.p) return _tu.apply(this, arguments);
+  const d = dt || 0.016, near = TRF.cars.filter(c => c.x !== undefined && M.some(m => Math.hypot(m.v.x - c.x, m.v.z - c.z) < 14)), sv = new Map();
+  for (const c of near) {
+    const T = CAR_TYPES[c.type] || CAR_TYPES.kei, look = 1.0 + (c.v || 0) * (c.v || 0) / 12;
+    if (CARHIT.vsMine(CARHIT.ahead(c.x, c.z, c.rot, T.L / 2, T.W / 2, look, 1), c.y, M) > 0) c.v = Math.max(0, (c.v || 0) - 9 * d);
+    sv.set(c, { s: c.s, r: c.r, L: c.L, dir: c.dir, v: c.v, block: c.block, pre: CARHIT.vsMine(CARHIT.box(c.x, c.z, c.rot, T.L / 2, T.W / 2), c.y, M) });
+  }
+  const r = _tu.apply(this, arguments);
+  for (const [c, o] of sv) {
+    if (!ROADS.includes(c.r)) continue; TRF.pose(c); const T = CAR_TYPES[c.type] || CAR_TYPES.kei;
+    if (CARHIT.vsMine(CARHIT.box(c.x, c.z, c.rot, T.L / 2, T.W / 2), c.y, M) > o.pre + 0.002) {
+      Object.assign(c, { s: o.s, r: o.r, L: o.L, dir: o.dir, v: 0 }); TRF.pose(c);
+      c._yieldT = (c._yieldT || 0) + d;
+      if (c._yieldT > 6) { c._yieldT = 0; // waited long enough: turn round (if that lane is clear of your car)
+        if (Math.hypot(c.x - PL.x, c.z - PL.z) > 70) TRF.spawn(c, true);
+        else { const s0 = c.s; c.dir = -c.dir; c.s = clamp(c.s, 2.2, c.L - 2.2); TRF.pose(c); if (CARHIT.vsMine(CARHIT.box(c.x, c.z, c.rot, T.L / 2, T.W / 2), c.y, M) > o.pre + 0.002) { c.dir = -c.dir; c.s = s0; TRF.pose(c); } } }
+    } else c._yieldT = 0;
+  }
+  return r;
+}; }
 
 // ===================== MAIN =====================
 let renderer, scene, camera;

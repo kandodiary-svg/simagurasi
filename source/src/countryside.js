@@ -55,17 +55,23 @@ CTRY.vending = function (g, x, z, ry) { const v = sub(g, x, groundH(x, z), z, ry
 CTRY.roadside = function (g) {
   const free = (x, z, r = 0.8) => { if (groundH(x, z) < 0.4 || !isNaN(waterLevelAt(G, x, z)) || waterDepthAt(x, z) > 0 || deckY(x, z) !== null) return false; const [px, pz] = pushOut(x, z, r); return Math.hypot(px - x, pz - z) < 0.01; };
   const RS = ROADS.filter(r => !isFoot(r) && r.w >= 3.4 && rLen(r) > 20); let tom = 0, mir = 0;
-  // where a road ends on another road: stop sign + white line on the side road, a curve mirror across the junction
-  for (const r of RS) { const L = rLen(r); for (const [s0, d] of [[0, 1], [L, -1]]) { const p = rAt(r, s0); let main = null; for (const q of RS) { if (q === r) continue; const pr = rProject(q, p.x, p.z); if (pr && pr.d < q.w / 2 + r.w / 2 + 2) { main = { q, pr }; break; } } if (!main) continue;
-    const sb = clamp(s0 + d * (main.q.w / 2 + 3.5), 1, L - 1), a = rAt(r, sb), t = rTan(r, sb), fx = t[0] * -d, fz = t[1] * -d; // direction toward the junction
-    const lx = fz, lz = -fx, off = r.w / 2 + 0.7, sx = a.x + lx * off, sz = a.z + lz * off; if (free(sx, sz, 0.4)) { CTRY.signPost(g, sx, sz, Math.atan2(-fx, -fz), 'tomare'); tom++; }
-    const lineM = CTRY.lineM || (CTRY.lineM = stdM('#f2f2ee', 0.6)); const ln = new THREE.Mesh(new THREE.BoxGeometry(r.w / 2 - 0.2, 0.02, 0.3), lineM); ln.position.set(a.x + lx * r.w / 4, a.y + 0.06, a.z + lz * r.w / 4); ln.rotation.y = Math.atan2(fx, fz); g.add(ln);
-    // mirror on the far side of the main road, facing back down the side road
-    const [tx, tz] = rTan(main.q, main.pr.s), side = (p.x - main.pr.x) * -tz + (p.z - main.pr.z) * tx > 0 ? -1 : 1, moff = main.q.w / 2 + 1.0, mx = main.pr.x - tz * moff * side, mz = main.pr.z + tx * moff * side; if (free(mx, mz, 0.4)) { CTRY.mirror(g, mx, mz, Math.atan2(p.x - mx, p.z - mz)); mir++; } } }
+  // junctions (roadnode.js): 止まれ on every side road that gives way (its stop line is painted by the road itself),
+  // a curve mirror on the kerb corner across the junction, turned to look back down the side road
+  const clear = (x, z, r) => free(x, z, r) && !JN.onRoad(x, z, 0.25);
+  for (const j of (JN.list || [])) for (const a of (j.minor || [])) { const r = a.r; if (isFoot(r) || r.w < 3.4 || rLen(r) < 20) continue;
+    const s = JN.cutStation(a, a.cut + 1.3), p = rAt(r, s), [tx, tz] = rTan(r, s), fx = -a.sgn * tx, fz = -a.sgn * tz; // toward the junction
+    const lx = fz, lz = -fx, off = r.w / 2 + (r.side ? 0.45 : 0.7), sx = p.x + lx * off, sz = p.z + lz * off;
+    if (clear(sx, sz, 0.3)) { CTRY.signPost(g, sx, sz, Math.atan2(-fx, -fz), 'tomare'); tom++; }
+    let best = null; for (const c of j.corners) { if (c.a === a || c.b === a || !c.pts || c.pts.length < 2) continue; const k = Math.floor((c.pts.length - 1) / 2), m0 = c.pts[k], m1 = c.pts[k + 1] || c.pts[k - 1], mx = (m0[0] + m1[0]) / 2, mz = (m0[1] + m1[1]) / 2;
+      let nx = m1[1] - m0[1], nz = -(m1[0] - m0[0]); const nl = Math.hypot(nx, nz) || 1; nx /= nl; nz /= nl; if ((mx - j.x) * nx + (mz - j.z) * nz < 0) { nx = -nx; nz = -nz; }
+      const sw = Math.max(c.a.sw, c.b.sw), qx = mx + nx * (sw + 0.45), qz = mz + nz * (sw + 0.45), dl = Math.hypot(qx - j.x, qz - j.z) || 1, sc = -((qx - j.x) * a.d[0] + (qz - j.z) * a.d[1]) / dl;
+      if (!best || sc > best.sc) best = { sc, x: qx, z: qz }; }
+    // (mirrors only where narrow country roads meet; town streets with sidewalks don't get them)
+    if (!r.side && best && best.sc > 0.2 && clear(best.x, best.z, 0.4)) { const tp = rAt(r, JN.cutStation(a, a.cut + 7)); CTRY.mirror(g, best.x, best.z, Math.atan2(tp.x - best.x, tp.z - best.z)); mir++; } }
   // speed limit signs every ~160 m along the main road, on alternating sides
-  const M0 = RS[0]; let spd = 0; if (M0) { const L = rLen(M0); for (let s = 40, k = 0; s < L - 20; s += 160, k++) { const a = rAt(M0, s), t = rTan(M0, s), sd = k % 2 ? 1 : -1, off = M0.w / 2 + 0.9, x = a.x + t[1] * off * sd, z = a.z - t[0] * off * sd; if (!free(x, z, 0.4)) continue; CTRY.signPost(g, x, z, Math.atan2(-t[0] * sd, -t[1] * sd), 'speed'); spd++; } }
+  const M0 = RS[0]; let spd = 0; if (M0) { const L = rLen(M0); for (let s = 40, k = 0; s < L - 20; s += 160, k++) { const a = rAt(M0, s), t = rTan(M0, s), sd = k % 2 ? 1 : -1, off = M0.w / 2 + 0.9, x = a.x + t[1] * off * sd, z = a.z - t[0] * off * sd; if (!clear(x, z, 0.4)) continue; CTRY.signPost(g, x, z, Math.atan2(-t[0] * sd, -t[1] * sd), 'speed'); spd++; } }
   // お地蔵さん at a couple of quiet roadside spots near the village, a vending machine by the harbour
-  let jz = 0; for (const r of RS) { if (jz >= 2) break; const L = rLen(r); for (let s = 30; s < L - 30 && jz < 2; s += 37) { const a = rAt(r, s); if (Math.hypot(a.x - VILLAGE.x, a.z - VILLAGE.z) > 140 || Math.hypot(a.x - VILLAGE.x, a.z - VILLAGE.z) < 40) continue; const t = rTan(r, s), off = r.w / 2 + 2.2, x = a.x - t[1] * off, z = a.z + t[0] * off; if (!free(x, z, 1.0) || CTRY.paddies.some(p => Math.hypot(p.x - x, p.z - z) < 14)) continue; CTRY.jizo(g, x, z, Math.atan2(a.x - x, a.z - z)); addCollider({ x, z, r: 0.6, kind: 'pole' }); jz++; s += 120; } }
+  let jz = 0; for (const r of RS) { if (jz >= 2) break; const L = rLen(r); for (let s = 30; s < L - 30 && jz < 2; s += 37) { const a = rAt(r, s); if (Math.hypot(a.x - VILLAGE.x, a.z - VILLAGE.z) > 140 || Math.hypot(a.x - VILLAGE.x, a.z - VILLAGE.z) < 40) continue; const t = rTan(r, s), off = r.w / 2 + 2.2, x = a.x - t[1] * off, z = a.z + t[0] * off; if (!clear(x, z, 1.0) || CTRY.paddies.some(p => Math.hypot(p.x - x, p.z - z) < 14)) continue; CTRY.jizo(g, x, z, Math.atan2(a.x - x, a.z - z)); addCollider({ x, z, r: 0.6, kind: 'pole' }); jz++; s += 120; } }
   if (DECO.ship && DECO.ship.at) { const at = DECO.ship.at, [x, z] = toWorld(at, -3.7, 1.2); if (free(x, z, 0.6)) { CTRY.vending(g, x, z, at.rot); addCollider({ x, z, hw: 0.5, hd: 0.4, rot: at.rot, kind: 'pole' }); } }
   CTRY.n = { tom, mir, spd, jz };
 };

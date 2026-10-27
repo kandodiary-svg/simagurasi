@@ -36,7 +36,8 @@ function roadProfile(pts, w, type, fixes) {
   const terr = pts.map(([x, z], i) => { const a = pts[Math.max(0, i - 1)], b = pts[Math.min(n - 1, i + 1)]; let tx = b[0] - a[0], tz = b[1] - a[1]; const l = Math.hypot(tx, tz) || 1; const nx = -tz / l, nz = tx / l; let s = 0;
     for (const o of [-0.45, 0, 0.45]) { const px = x + nx * w * o, pz = z + nz * w * o, d = deckY(px, pz); s += d !== null ? d : groundH(px, pz); } return Math.max(0.6, s / 3); });
   // smoothed target (≈5m), pins: {i, y}
-  let tg = terr.slice(); for (let k = 0; k < 10; k++) tg = tg.map((h, i) => i === 0 || i === n - 1 ? h : (tg[i - 1] + h * 2 + tg[i + 1]) / 4);
+  // smoothed target: ~10m window, so small bumps in the ground don't make the road wavy
+  const SM = clamp(Math.round(2 * (6.5 / Math.max(0.5, sp)) ** 2), 6, 60); let tg = terr.slice(); for (let k = 0; k < SM; k++) tg = tg.map((h, i) => i === 0 || i === n - 1 ? h : (tg[i - 1] + h * 2 + tg[i + 1]) / 4);
   const pin = new Map(); for (const f of fixes) if (f && f.y !== undefined && f.y !== null) pin.set(f.i, f.y);
   // pull pinned heights into the target smoothly (±14m)
   for (const [i0, y] of pin) { const R = Math.max(3, Math.round(14 / sp)); for (let i = Math.max(0, i0 - R); i <= Math.min(n - 1, i0 + R); i++) { const k = 1 - Math.abs(i - i0) / (R + 1), wgt = k * k * (3 - 2 * k); tg[i] = lerp(tg[i], y, wgt); } }
@@ -46,6 +47,11 @@ function roadProfile(pts, w, type, fixes) {
   for (let i = 1; i < n; i++) if (!pin.has(i)) h[i] = clamp(h[i], h[i - 1] - g, h[i - 1] + g);
   for (let i = n - 2; i >= 0; i--) if (!pin.has(i)) h[i] = clamp(h[i], h[i + 1] - g, h[i + 1] + g);
   for (let k = 0; k < 2; k++) h = h.map((v, i) => i === 0 || i === n - 1 || pin.has(i) ? v : (h[i - 1] + v * 2 + h[i + 1]) / 4);
+  // vertical curves: the grade may change by at most ~1.5% per metre (no humps or dips)
+  const lim = 0.015 * sp * sp;
+  for (let it = 0; it < 120; it++) { let moved = false; for (let i = 1; i < n - 1; i++) { if (pin.has(i)) continue; const d2 = h[i - 1] - 2 * h[i] + h[i + 1]; if (Math.abs(d2) > lim) { h[i] += (d2 - Math.sign(d2) * lim) / 2; moved = true; } } if (!moved) break; }
+  for (let i = 1; i < n; i++) if (!pin.has(i)) h[i] = clamp(h[i], h[i - 1] - g, h[i - 1] + g);
+  for (let i = n - 2; i >= 0; i--) if (!pin.has(i)) h[i] = clamp(h[i], h[i + 1] - g, h[i + 1] + g);
   let worst = 0, wi = 0; for (let i = 0; i < n; i++) { const dd = Math.abs(h[i] - terr[i]); if (dd > worst) { worst = dd; wi = i; } }
   let steep = false; for (let i = 1; i < n; i++) if (Math.abs(h[i] - h[i - 1]) > g * 1.35) steep = true;
   return { h, worst, wi, steep, terr };
@@ -53,8 +59,11 @@ function roadProfile(pts, w, type, fixes) {
 // ---------- junction network ----------
 const RN = { T: [] };
 function buildNet() {
-  RN.T = []; for (const r of ROADS) { r.gaps = []; r.trim = [0, 0]; r.stop = [null, null]; r.xw = []; r.tAt = [null, null]; }
-  for (const r of ROADS) { const L = rLen(r); if (L < 2) continue;
+  RN.T = []; for (const r of ROADS) { r.gaps = []; r.trim = [0, 0]; r.stop = [null, null]; r.xw = []; r.tAt = [null, null]; r.cuts = []; }
+  // car roads: proper junctions (roadnode.js)
+  try { JN.build(); } catch (e) { console.warn('junctions', e); JN.list = []; }
+  // footpaths ending on a road or on another footpath
+  for (const r of ROADS) { const L = rLen(r); if (L < 2 || !isFoot(r)) continue;
     for (const e of [0, 1]) { const P = e ? r.pts[r.pts.length - 1] : r.pts[0]; let best = null;
       for (const q of ROADS) { if (q === r || (!isFoot(r) && isFoot(q))) continue; const bx = rBox(q); if (P[0] < bx[0] - 8 || P[0] > bx[2] + 8 || P[1] < bx[1] - 8 || P[1] > bx[3] + 8) continue;
         const pr = rProject(q, P[0], P[1]), Lq = rLen(q); if (pr.d > q.w / 2 + 0.9 || pr.s < 1.0 || pr.s > Lq - 1.0) continue; if (!best || pr.d < best.pr.d) best = { q, pr }; }
@@ -172,18 +181,20 @@ const CURB_M = () => RMAT.curb || (RMAT.curb = new THREE.MeshStandardMaterial({ 
 makeRoadMesh = function (r) {
   const group = new THREE.Group(), type = rType(r); r.frames = roadFrames(r); const L = rLen(r); if (!r.gaps) { r.gaps = []; r.trim = [0, 0]; r.stop = [null, null]; r.xw = []; r.tAt = [null, null]; }
   const s0 = r.trim[0], s1 = L - r.trim[1]; if (s1 - s0 < 0.3) return group;
-  const F = stripFrames(r, s0, s1, r.user || r.dev ? 1.0 : 2.0), half = r.w / 2, prio = r.user ? 3 : 2;
+  // pieces of the strip between junction plates
+  let parts = [[s0, s1]]; for (const [ca, cb] of (r.cuts || [])) { const nx = []; for (const [a, b] of parts) { if (cb <= a || ca >= b) { nx.push([a, b]); continue; } if (ca - a > 0.3) nx.push([a, ca]); if (b - cb > 0.3) nx.push([cb, b]); } parts = nx; }
+  const step = r.user || r.dev ? 1.0 : 2.0, half = r.w / 2, prio = r.user ? 3 : 2;
   const gL = r.gaps.filter(g => !g.foot && g.side < 0).map(g => [g.s0, g.s1]), gR = r.gaps.filter(g => !g.foot && g.side > 0).map(g => [g.s0, g.s1]);
   const mat = roadMat2(type, { prio, lines: r.lines, center: r.lines && type === 'asphalt', gapsL: gL, gapsR: gR, xw: r.xw, stop0: r.stop[0] ? { d: s0 + 0.15, lane: r.stop[0].lane } : null, stop1: r.stop[1] ? { d: s1 - 0.15, lane: r.stop[1].lane } : null });
   const yl = type === 'dirt' || type === 'trail' || type === 'gravel' ? 0.03 : 0.04;
+  for (const [pa, pb] of parts) { const F = stripFrames(r, pa, pb, step);
   group.add(ribbonMesh(F, -half, half, yl, yl, r.w, mat, [0, 1]));
   // rounded caps at free ends
   const ragged = type === 'dirt' || type === 'trail' || type === 'gravel';
-  if (!ragged) { const capM = roadMat2(type, { fill: true, prio: prio - 1 });
-    if (!r.tAt[0]) { const p = rAt(r, 0); group.add(capDisc(p.x, p.z, p.y + yl - 0.004, half, capM, r.w)); }
-    if (!r.tAt[1] && !(r === ROADS[0] && !r.user)) { const p = rAt(r, L); group.add(capDisc(p.x, p.z, p.y + yl - 0.004, half, capM, r.w)); } }
-  // fillets where this road joins another
-  for (const T of RN.T) if (T.r === r && !T.foot) { const fm = filletMesh(T); if (fm) group.add(fm); }
+  if (!ragged && pa === parts[0][0]) { const capM = roadMat2(type, { fill: true, prio: prio - 1 });
+    if (!r.tAt[0] && pa <= s0 + 0.01) { const p = rAt(r, 0); group.add(capDisc(p.x, p.z, p.y + yl - 0.004, half, capM, r.w)); }
+    if (!r.tAt[1] && !(r === ROADS[0] && !r.user) && parts[parts.length - 1][1] >= s1 - 0.01) { const p = rAt(r, L); group.add(capDisc(p.x, p.z, p.y + yl - 0.004, half, capM, r.w)); } }
+  // (corners where roads meet: junction plates, roadnode.js)
   // sidewalks: paver strip + curb face + outer face, broken where other roads join
   if (r.side) { const sm = roadMat2('path', { side: true, prio }), H = 0.16;
     for (const sd of [-1, 1]) { const gaps = r.gaps.filter(g => !g.foot && g.side === sd); const inGap = f => gaps.some(g => f.dist > g.s0 - 0.6 && f.dist < g.s1 + 0.6);
@@ -194,10 +205,11 @@ makeRoadMesh = function (r) {
     for (const sd of [-1, 1]) { const gaps = r.gaps.filter(g => g.side === sd); const skip = (f, i) => gaps.some(g => f.dist > g.s0 && f.dist < g.s1) || (r.bridge && r.bridge[rAt(r, f.dist).i]);
       for (const run of runs(F, skip)) { run.forEach((f, k) => { const ox = f.nx * (half + 0.05) * sd, oz = f.nz * (half + 0.05) * sd; cp.push(f.x + ox, f.y + 0.02, f.z + oz, f.x + ox + f.nx * 0.18 * sd, f.y + 0.16, f.z + oz + f.nz * 0.18 * sd); if (k) { const b = vi + (k - 1) * 2; ci.push(b, b + 2, b + 1, b + 1, b + 2, b + 3); } }); vi += run.length * 2; } }
     const cg = new THREE.BufferGeometry(); cg.setAttribute('position', new THREE.Float32BufferAttribute(cp, 3)); cg.setIndex(ci); cg.computeVertexNormals(); const cm = new THREE.Mesh(cg, CURB_M()); cm.receiveShadow = true; group.add(cm); }
+  }
   if (r.bridge && r.bridge.some(Boolean)) group.add(makeBridge(r, r.frames));
   return group;
 };
-function rebuildRoadMeshes() { buildNet(); for (const r of ROADS) { if (r.mesh) { TERR.roadGroup.remove(r.mesh); r.mesh.traverse(o => { if (o.geometry) o.geometry.dispose(); }); } r.mesh = makeRoadMesh(r); TERR.roadGroup.add(r.mesh); } }
+function rebuildRoadMeshes() { buildNet(); for (const r of ROADS) { if (r.mesh) { TERR.roadGroup.remove(r.mesh); r.mesh.traverse(o => { if (o.geometry) o.geometry.dispose(); }); } r.mesh = makeRoadMesh(r); TERR.roadGroup.add(r.mesh); } try { JN.meshes(); } catch (e) { console.warn('junction meshes', e); } }
 buildRoadMeshes = function (scene) { TERR.roadGroup = new THREE.Group(); scene.add(TERR.roadGroup); rebuildRoadMeshes(); rebuildDecks(); return TERR.roadGroup; };
 // roadDist stores the distance to the road's outer edge as if it were a standard road (centreline distance minus any extra width)
 rasterizeRoadDist = function () {
@@ -294,7 +306,7 @@ finishRoad = function () {
   pushUndo(); const nodes = EDIT.nodes, r = plan.r, foot = isFoot(r);
   // 1) the new road gives way at crossings: split it there (a road crossing a footpath splits the footpath instead)
   let pieces = [r]; const others = ROADS.slice();
-  for (const q of others) { const next = []; for (const pc of pieces) { const cs = rCross(pc, q).filter(c => c.s > 1.2 && c.s < rLen(pc) - 1.2);
+  for (const q of others) { const next = []; for (const pc of pieces) { const Lq = rLen(q), cs = rCross(pc, q).filter(c => c.s > 1.2 && c.s < rLen(pc) - 1.2 && (isFoot(q) || (c.sq > 2.6 && c.sq < Lq - 2.6)));
       if (!cs.length) { next.push(pc); continue; }
       if (!foot && isFoot(q) && q.user) { // split the footpath
         let qs = [q]; for (const c of rCross(q, pc)) { const tgt = qs.find(x => rProject(x, c.x, c.z).d < 0.5); if (!tgt) continue; const pr = rProject(tgt, c.x, c.z), L = rLen(tgt); if (pr.s < 1 || pr.s > L - 1) continue; const A = rSlice(tgt, 0, pr.s), B = rSlice(tgt, pr.s, L); const y = rAt(pc, rProject(pc, c.x, c.z).s).y; blendEnd(A, true, y, 7); blendEnd(B, false, y, 7); qs.splice(qs.indexOf(tgt), 1, A, B); }
@@ -308,6 +320,7 @@ finishRoad = function () {
   let i0 = 1e9, j0 = 1e9, i1 = -1e9, j1 = -1e9;
   for (const pc of pieces) { const box = carveSingleRoad(pc); i0 = Math.min(i0, box[0]); j0 = Math.min(j0, box[1]); i1 = Math.max(i1, box[2]); j1 = Math.max(j1, box[3]); ROADS.push(pc); }
   rasterizeRoadDist(); rebuildDecks(); rebuildRoadMeshes();
+  try { const jb = JN.carve(); if (jb) { i0 = Math.min(i0, jb[0]); j0 = Math.min(j0, jb[1]); i1 = Math.max(i1, jb[2]); j1 = Math.max(j1, jb[3]); } } catch (e) { console.warn('junction carve', e); }
   if (i1 >= i0) refreshRegion(i0 - 2, j0 - 2, i1 + 2, j1 + 2);
   EDIT.nodes = []; updateRoadPreview(null); UI.toast(foot ? '歩道ができました！' : `${RTYPES[r.type].name}の道ができました！`); scheduleSave(); UI.editHint();
   let len = 0; for (let k = 1; k < r.pts.length; k++) len += Math.hypot(r.pts[k][0] - r.pts[k - 1][0], r.pts[k][1] - r.pts[k - 1][1]); GAME.ev('roadN', 1); GAME.ev('roadM', Math.round(len));

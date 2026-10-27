@@ -14,6 +14,7 @@ function sidewalkY(x, z) {
     for (let i = 0; i < F.length; i++) { const f = F[i], d = (x - f.x) * (x - f.x) + (z - f.z) * (z - f.z); if (d < bd) { bd = d; best = i; } }
     const rr = half + (r.side ? SIDEW : 0) + 1; if (best < 0 || bd > rr * rr + 4) continue;
     const f = F[best], lat = (x - f.x) * f.nx + (z - f.z) * f.nz, al = Math.abs(lat);
+    if ((r.cuts || []).some(([a, b]) => f.dist > a - 0.3 && f.dist < b + 0.3)) continue; // a junction plate (JN.walkY)
     if (best === 0 || best === F.length - 1) { const tx = -f.nz, tz = f.nx, along = (x - f.x) * tx + (z - f.z) * tz; if (Math.abs(along) > 0.9) continue; }
     if (al <= half) { const ty = rType(r), yl = ty === 'dirt' || ty === 'trail' || ty === 'gravel' ? 0.03 : 0.04; top(f.y + yl); continue; }
     if (!r.side || al > half + SIDEW + 0.02) continue;
@@ -22,4 +23,4 @@ function sidewalkY(x, z) {
   }
   return out;
 }
-{ const _sy = standY; standY = function (x, z) { const b = _sy(x, z), s = sidewalkY(x, z); return s !== null && s > b - 0.3 && s < b + 0.5 ? Math.max(b, s) : b; }; }
+{ const _sy = standY; standY = function (x, z) { const b = _sy(x, z); let s = sidewalkY(x, z); const j = typeof JN !== 'undefined' && JN.walk.length ? JN.walkY(x, z) : null; if (j !== null && (s === null || j > s)) s = j; return s !== null && s > b - 0.3 && s < b + 0.5 ? Math.max(b, s) : b; }; }

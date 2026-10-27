@@ -119,7 +119,7 @@ function vehOK(v, x, z, rot) {
   for (const [a, b] of [[sp.len, 0], [sp.len, sp.wid], [sp.len, -sp.wid], [-sp.len, sp.wid], [-sp.len, -sp.wid], [0, 0]]) {
     const px = x + s * a + c * b, pz = z + c * a - s * b, h = groundH(px, pz);
     if (Math.abs(px) > 360 || Math.abs(pz) > 360) return v.kind !== 'boat' ? false : Math.abs(px) < 900 && Math.abs(pz) < 900;
-    if (v.kind === 'truck') { const B = typeof DV !== 'undefined' && DV.bus; if (B && Math.hypot(B.x - px, B.z - pz) < 2.6) return false; const dk = deckY(px, pz); if (dk === null && (h < -0.3 || waterDepthAt(px, pz) > 0.35)) return false; for (const cc of collidersNear(px, pz)) { const [qx, qz] = pushOut(px, pz, 0.2); if (Math.hypot(qx - px, qz - pz) > 0.01) return false; } }
+    if (v.kind === 'truck') { const dk = deckY(px, pz); if (dk === null && (h < -0.3 || waterDepthAt(px, pz) > 0.35)) return false; for (const cc of collidersNear(px, pz)) { const [qx, qz] = pushOut(px, pz, 0.2); if (Math.hypot(qx - px, qz - pz) > 0.01) return false; } }
     else { if (h > -0.55) return false; if (onPierAt(px, pz) || walkDeckY(px, pz) !== null) return false; }
   }
   return true;

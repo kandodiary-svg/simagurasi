@@ -23,7 +23,7 @@ DEMO2.PLAN = /*PLAN*/{
   {"n": "スタジアム通り", "t": "A", "tree": "momiji0", "p": [[100,-137],[100,-110],[100,-60],[104,-25],[110,5]]},
   {"n": "みかん台南通り", "t": "n", "tree": "sakura0", "p": [[-188,-50],[-145,-50],[-95,-50],[-82,-50]]},
   {"n": "みかん台北通り", "t": "n", "p": [[-160,-104],[-145,-104],[-95,-104],[-82,-104]]},
-  {"n": "みかん台西通り", "t": "n", "p": [[-145,-50],[-145,-104],[-145,-117]]},
+  {"n": "みかん台西通り", "t": "n", "p": [[-145,-50],[-145,-104]]},
   {"n": "みかん台東通り", "t": "n", "tree": "sakura0", "p": [[-95,-50],[-95,-104],[-95,-148]]},
   {"n": "みかん台の小径", "t": "s", "tree": "sakura0", "p": [[-82,-50],[-82,-104]]},
   {"n": "神社の参道", "t": "s", "tree": "momiji0", "p": [[74,58],[84,58]]},
@@ -208,7 +208,8 @@ DEMO2.fill = async function (say) {
 };
 // ---------- street trees: an avenue of trees along the main roads (pines by the sea, palms by the beach, cherries in the lanes) ----------
 DEMO2.trees = function () {
-  let n = 0; const add = (x, z, key) => { if (groundH(x, z) < 0.6 || waterDepthAt(x, z) > 0 || roadDistAt(x, z) < 3.4 || deckY(x, z) !== null) return; const [i, j] = toIdx(x, z); if (G.prot[j * WORLD.n + i] || CITY.at({ x, z }, 0.8)) return;
+  let n = 0; const add = (x, z, key) => { if (groundH(x, z) < 0.6 || waterDepthAt(x, z) > 0 || roadDistAt(x, z) < 3.4 || deckY(x, z) !== null) return;
+    if ([[0, 0], [1.2, 0], [-1.2, 0], [0, 1.2], [0, -1.2]].some(([a, b]) => JN.walkY(x + a, z + b) !== null) || JN.onRoad(x, z, 1.2)) return; // not on a junction or its corner sidewalk const [i, j] = toIdx(x, z); if (G.prot[j * WORLD.n + i] || CITY.at({ x, z }, 0.8)) return;
     if (collidersNear(x, z).some(c => !c.off && (c.kind === 'bld' || c.kind === 'pole') && hitsCollider(c, x, z, 1.2))) return; if (VEG.userTrees.some(t => Math.hypot(t.x - x, t.z - z) < 5)) return;
     VEG.userTrees.push({ x, z, r: Math.random(), kind: key.replace(/\d+$/, ''), key }); n++; };
   for (const spec of DEMO2.PLAN.roads) { if (!spec.tree) continue; const [type, wd, sw] = DEMO2.TYPES[spec.t], off = RTYPES[type].w[wd] / 2 + (sw ? SIDEW : 0) + 0.9, pts = roadPathFrom(spec.p.map(([x, z]) => ({ x, z }))); if (!pts) continue;
@@ -243,6 +244,7 @@ GAME.startDemo = function () {
       await DEMO2.fill(DEMO.say);
       DEMO.say('並木を植えています…'); await tick(); DEMO2.treeN = DEMO2.trees();
       DEMO.say('仕上げています…'); await tick();
+      try { JN.carve(); } catch (e) { DEMO2.log.push('carve ' + e); }
       refreshAll(); VEG.refresh(-400, -400, 400, 400); CITY.rebuildAll(); this.refreshDev(); this.refreshProjects(); this.syncNewcomers(); this.applyTruck && this.applyTruck(); this.mapDirty = true; MINI.builtAt = -99; this.renderTracker();
     } catch (e) { console.warn('demo2', e); DEMO2.log.push('error ' + e); }
     finally { DEMO2.building = false; UI.toast = toast; EDIT.nodes = []; EDIT.undo = []; EDIT.rtype = 'asphalt'; EDIT.roadW = 'narrow'; EDIT.rside = false; }
