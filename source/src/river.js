@@ -13,13 +13,21 @@ RIV.flowAt = function (x, z) {
   const d = Math.sqrt(bd), hw = (G.river.hw && G.river.hw[bi]) || 4; if (d > hw + 12) return [0.03, 0.02]; // ponds: barely moving
   const k = 1 - clamp((d - hw * 0.6) / (hw + 10), 0, 0.85), s = RIV.sp[bi] * k; return [RIV.dir[bi * 2] * s, RIV.dir[bi * 2 + 1] * s];
 };
+RIV.mouthU = function () { const U = waterMat && waterMat.uniforms; if (!U) return; U.uMouth = U.uMouth || { value: new THREE.Vector3(0, 0, 0) };
+  const R = G.river, m = R && R.shore !== undefined && R.pts[Math.min(R.shore, R.pts.length - 1)]; if (m) U.uMouth.value.set(m[0], m[1], 1); else U.uMouth.value.set(0, 0, 0); };
 function makeRiverMat() {
   const U = waterMat.uniforms; // shared, so time / sun / sky updates reach the rivers too
+  // the river mouth: near it the river's own surface fades out into the sea (whose level moves with the tide: uTide)
+  RIV.mouthU();
   return new THREE.ShaderMaterial({
     transparent: true, depthWrite: false, fog: true, side: THREE.DoubleSide, uniforms: U,
     vertexShader: `attribute float aFoam; attribute vec2 aFlow; varying float vFoam; varying vec2 vFlow; varying vec3 vW; #include <fog_pars_vertex>
-      void main(){ vFoam = aFoam; vFlow = aFlow; vec4 wp = modelMatrix * vec4(position,1.0); vW = wp.xyz; vec4 mvPosition = viewMatrix * wp; gl_Position = projectionMatrix * mvPosition; #include <fog_vertex> }`.replace(/#include <(\w+)>/g, '\n#include <$1>\n'),
-    fragmentShader: `uniform float time, wsize, ambient; uniform vec3 sunDir, sunCol, skyCol, horCol; uniform sampler2D hTex, nTex, mTex; varying vec3 vW; varying float vFoam; varying vec2 vFlow;
+      uniform float uTide; uniform vec3 uMouth; varying float vMw;
+      void main(){ vFoam = aFoam; vFlow = aFlow; vec4 wp = modelMatrix * vec4(position,1.0);
+        // the river mouth: over its last ~30 m the surface bends onto the sea's own level, whatever the tide (no step at low tide, the sea floods in at high tide)
+        vMw = uMouth.z * (1.0 - smoothstep(2.0, 26.0, length(wp.xz - uMouth.xy))); wp.y = mix(wp.y, uTide, vMw);
+        vW = wp.xyz; vec4 mvPosition = viewMatrix * wp; gl_Position = projectionMatrix * mvPosition; #include <fog_vertex> }`.replace(/#include <(\w+)>/g, '\n#include <$1>\n'),
+    fragmentShader: `uniform float time, wsize, ambient, uTide; uniform vec3 sunDir, sunCol, skyCol, horCol, uMouth; uniform sampler2D hTex, nTex, mTex; varying vec3 vW; varying float vFoam; varying vec2 vFlow; varying float vMw;
       #include <common>
       #include <fog_pars_fragment>
       void main(){
@@ -36,7 +44,7 @@ function makeRiverMat() {
         vec3 N = normalize(vec3((nf.x + n2.x * 0.45) * rough, 4.0, (nf.y + n2.y * 0.45) * rough));
         vec3 V = normalize(cameraPosition - vW); float fres = 0.02 + 0.98 * pow(1.0 - max(dot(N, V), 0.0), 5.0);
         // clear fresh water: you can see the stones in the shallows, deep pools turn green-blue
-        vec3 shallow = vec3(0.22, 0.46, 0.33), mid = vec3(0.07, 0.30, 0.28), deep = vec3(0.02, 0.13, 0.14);
+        vec3 shallow = mix(vec3(0.22, 0.46, 0.33), vec3(0.2, 0.54, 0.48), vMw), mid = mix(vec3(0.07, 0.30, 0.28), vec3(0.07, 0.34, 0.39), vMw), deep = mix(vec3(0.02, 0.13, 0.14), vec3(0.03, 0.17, 0.25), vMw);   // toward the sea's colours at the mouth
         vec3 wc = mix(shallow, mid, smoothstep(0.15, 1.2, depth)); wc = mix(wc, deep, smoothstep(1.2, 4.5, depth));
         float dif = 0.62 + 0.38 * max(dot(N, sunDir), 0.0); vec3 col = wc * dif * mix(vec3(1.0), sunCol, 0.5) * ambient;
         // light ripples (caustics) dancing on the bed of the shallows
@@ -55,6 +63,9 @@ function makeRiverMat() {
         float alpha = smoothstep(0.0, 0.15, depth) * mix(0.5, 0.95, smoothstep(0.25, 2.5, depth)); alpha = max(alpha, foam * 0.85 * smoothstep(0.0, 0.08, depth)); alpha = mix(alpha, 1.0, fres * 0.55);
         if (fall > 0.0) { float hc = vW.x * 0.9 + vW.z * 0.9; float s1 = texture2D(mTex, vec2(hc * 0.35, vW.y * 0.12 + time * 0.9)).b; float s2 = texture2D(mTex, vec2(hc * 0.8, vW.y * 0.3 + time * 1.6)).g;
           vec3 fc = mix(vec3(0.62, 0.84, 0.92), vec3(0.97, 0.99, 1.0), smoothstep(0.35, 0.75, s1 * 0.6 + s2 * 0.6)) * ambient; col = mix(col, fc, fall); alpha = mix(alpha, 0.88 + s1 * 0.1, fall); }
+        // at the mouth the river meets the sea at the same level: its own surface fades away and the sea takes over
+        alpha *= 1.0 - smoothstep(0.35, 0.9, vMw);
+        alpha *= smoothstep(-0.03, 0.05, vW.y - uTide);   // under the sea's surface the sea is what you see (high tide backing up the mouth)
         gl_FragColor = vec4(col, alpha);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
@@ -65,7 +76,7 @@ function makeRiverMat() {
 // inland water chunks get a flow attribute and the river material
 { const _rw = rebuildWaterChunk; rebuildWaterChunk = function (cx, cz) {
   _rw(cx, cz); const m = TERR.wchunks.get(cx + ',' + cz); if (!m) return;
-  if (!riverMat && waterMat) riverMat = makeRiverMat(); if (!riverMat) return;
+  if (!riverMat && waterMat) riverMat = makeRiverMat(); if (!riverMat) return; RIV.mouthU();
   const pos = m.geometry.attributes.position, fl = new Float32Array(pos.count * 2), cache = new Map();
   for (let i = 0; i < pos.count; i++) { const x = pos.getX(i), z = pos.getZ(i), k = Math.round(x * 2) + ',' + Math.round(z * 2); let f = cache.get(k); if (!f) { f = RIV.flowAt(x, z); cache.set(k, f); } fl[i * 2] = f[0]; fl[i * 2 + 1] = f[1]; }
   m.geometry.setAttribute('aFlow', new THREE.BufferAttribute(fl, 2)); m.material = riverMat;

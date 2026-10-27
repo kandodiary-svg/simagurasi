@@ -40,17 +40,20 @@ SND.play = function (n, o = {}) {
 };
 SND.var = (pre, n, o) => SND.play(pre + Math.floor(Math.random() * n), o);
 // ambience / engine loops: call loop(name, target) every frame; they fade in/out and stop when silent
+// o.src: play another sample under this loop's name (two loops can share one recording); o.lp: a low-pass cutoff in Hz that can move every frame
 SND.loop = function (n, target, o = {}) {
   if (!SND.ctx) return; let L = SND.loops[n];
-  if (!L) { if (target < 0.003) return; L = SND.loops[n] = { cur: 0, src: null, gain: SND.ctx.createGain(), pan: SND.ctx.createStereoPanner ? SND.ctx.createStereoPanner() : null, quiet: 0 }; L.gain.gain.value = 0; if (L.pan) { L.gain.connect(L.pan); L.pan.connect(SND.bus[o.bus || 'amb']); } else L.gain.connect(SND.bus[o.bus || 'amb']);
-    SND.get(n).then(b => { if (!b || !SND.loops[n] || L.src) return; const s = SND.ctx.createBufferSource(); s.buffer = b; s.loop = true; s.loopStart = 0.03; s.loopEnd = b.duration - 0.03; s.connect(L.gain); s.start(0, Math.random() * (b.duration - 0.1)); L.src = s; }); }
-  L.target = target; L.rate = o.rate || 1; L.panT = o.pan || 0;
+  if (!L) { if (target < 0.003) return; L = SND.loops[n] = { cur: 0, src: null, gain: SND.ctx.createGain(), pan: SND.ctx.createStereoPanner ? SND.ctx.createStereoPanner() : null, filt: null, quiet: 0 }; L.gain.gain.value = 0;
+    let head = L.gain; if (o.lp) { L.filt = SND.ctx.createBiquadFilter(); L.filt.type = 'lowpass'; L.filt.frequency.value = o.lp; L.filt.Q.value = 0.7; L.filt.connect(L.gain); head = L.filt; } L.head = head;
+    if (L.pan) { L.gain.connect(L.pan); L.pan.connect(SND.bus[o.bus || 'amb']); } else L.gain.connect(SND.bus[o.bus || 'amb']);
+    SND.get(o.src || n).then(b => { if (!b || SND.loops[n] !== L || L.src) return; const s = SND.ctx.createBufferSource(); s.buffer = b; s.loop = true; s.loopStart = 0.03; s.loopEnd = b.duration - 0.03; s.connect(L.head); s.start(0, Math.random() * (b.duration - 0.1)); L.src = s; }); }
+  L.target = target; L.rate = o.rate || 1; L.panT = o.pan || 0; if (o.lp) L.lpT = o.lp;
 };
 SND.tickLoops = function (dt) {
   const t = SND.ctx.currentTime;
   for (const [n, L] of Object.entries(SND.loops)) {
     const tg = L.target || 0; L.cur += (tg - L.cur) * Math.min(1, dt * (tg > L.cur ? 1.2 : 2.0)); L.target = 0; // must be re-asserted each frame
-    L.gain.gain.setTargetAtTime(L.cur, t, 0.05); if (L.src) L.src.playbackRate.setTargetAtTime(L.rate, t, 0.08); if (L.pan) L.pan.pan.setTargetAtTime(L.panT, t, 0.1);
+    L.gain.gain.setTargetAtTime(L.cur, t, 0.05); if (L.src) L.src.playbackRate.setTargetAtTime(L.rate, t, 0.08); if (L.pan) L.pan.pan.setTargetAtTime(L.panT, t, 0.1); if (L.filt && L.lpT) L.filt.frequency.setTargetAtTime(L.lpT, t, 0.1);
     if (L.cur < 0.002 && tg < 0.002) { L.quiet += dt; if (L.quiet > 4) { try { L.src && L.src.stop(); } catch (e) { } L.gain.disconnect(); delete SND.loops[n]; } } else L.quiet = 0;
   }
 };
@@ -111,18 +114,39 @@ SND.update = function (dt) {
   const hi = Math.floor(h); if (SND.lastHour !== null && hi !== SND.lastHour && (hi === 12 || hi === 17) && PLACED.church && !inside) for (let k = 0; k < 3; k++) SND.play('bell', { pos: PLACED.church, ref: 60, max: 450, vol: 0.9, delay: k * 4.5, bus: 'amb', rate: 0.5 }); // a deep temple-like bell SND.lastHour = hi;
   // vehicles
   const v = PL.veh;
-  if (v && !inside && (v.kind === 'truck' || v.kind === 'boat')) { const mx = (VSPEC[v.kind] && VSPEC[v.kind].max) || 16, sp = Math.min(1.3, Math.abs(v.v) / mx);
-    if (v.kind === 'truck') SND.loop('eng_truck', 0.55 + sp * 0.35, { bus: 'sfx', rate: 0.78 + sp * 1.05 }); else SND.loop('eng_boat', 0.5 + sp * 0.4, { bus: 'sfx', rate: 0.8 + sp * 0.6 }); }
+  if (v && !inside && v.kind === 'truck') { const mx = (VSPEC[v.kind] && VSPEC[v.kind].max) || 16, sp = Math.min(1.3, Math.abs(v.v) / mx); SND.loop('eng_truck', 0.55 + sp * 0.35, { bus: 'sfx', rate: 0.78 + sp * 1.05 }); }
+  if (!inside) SND.boats(dt);   // boats: engine, the hull through the water, spray, other boats (see SND.boats)
   if (typeof DV !== 'undefined' && !inside) {
     const B = DV.bus; if (B && B.x !== undefined) { const s = SND.spatial(B.x, B.z, 10, 90); const ride = PL.veh === B; SND.loop('eng_bus', ride ? 0.5 : (s ? s.g * 0.9 : 0), { bus: 'sfx', pan: ride ? 0 : s ? s.pan : 0, rate: B.wait > 0 ? 0.8 : 1.05 });
       const st = B.wait > 0; if (SND._busSt !== undefined && st !== SND._busSt) SND.play('bus_door', { pos: B, ref: 10, max: 80, vol: 0.8 }); SND._busSt = st; }
-    const F = DV.ferry; if (F && F.x !== undefined) { const s = SND.spatial(F.x, F.z, 18, 200); const ride = PL.veh === F; SND.loop('eng_ferry', ride ? 0.55 : (s ? s.g * 0.9 : 0), { bus: 'sfx', pan: ride ? 0 : s ? s.pan : 0 });
+    const F = DV.ferry; if (F && F.x !== undefined) { const s = SND.spatial(F.x, F.z, 18, 200); const ride = PL.veh === F; const fs = Math.min(1, Math.abs(F.v || 0) / 8.5); SND.loop('eng_ferry', (ride ? 0.45 + fs * 0.25 : (s ? s.g * (0.6 + fs * 0.4) : 0)), { bus: 'sfx', pan: ride ? 0 : s ? s.pan : 0, rate: 0.85 + fs * 0.3 });
       if (SND._fyDock !== undefined && F.docked !== SND._fyDock) SND.play('horn', { pos: F, ref: 60, max: 500, vol: 0.9 }); SND._fyDock = F.docked; }
   }
   if (typeof LIFE !== 'undefined' && LIFE.fish && LIFE.fish.st === 'bite') SND.loop('reel_loop', 0.0); // reel plays on the catch, not while waiting
   // money: a purchase rings the till, income jingles coins
   if (GAME.p) { const m = GAME.p.money || 0; if (SND.lastMoney !== null && m !== SND.lastMoney) { if (m < SND.lastMoney) SND.play('register', { vol: 0.7 }); else SND.play(Math.random() < 0.5 ? 'coins' : 'coins2', { vol: 0.8 }); } SND.lastMoney = m; }
   SND.tickLoops(dt);
+};
+// ---------- boats (ver.46): the engine (a fishing boat's slow diesel, a motorboat's revving outboard), the hull cutting through the water,
+// spray as the bow meets the waves, and other boats nearby. The engine samples are shared: rate and a low-pass shape each boat's voice ----------
+SND.boats = function (dt) {
+  const v = PL.veh, B = SND.bt || (SND.bt = { last: 0, slap: 0.6, thr: 0 });
+  const wash = (sp, lvl) => SND.loop('boat_wash', lvl, { src: 'amb_stream', bus: 'sfx', rate: 0.8 + sp * 0.55, lp: 700 + sp * 4200 });
+  if (v && v.kind === 'boat') {
+    const mot = v.model === 'motorboat', spec = CARSPEC[v.model] || VSPEC.boat, a = Math.abs(v.v || 0), s = Math.min(1.2, a / (spec.max || 10));
+    const acc = (a - B.last) / Math.max(dt, 1e-3); B.last = a; B.thr += (clamp(acc / 3, 0, 1) - B.thr) * Math.min(1, dt * 4);   // under load (speeding up) it works harder
+    SND.boatKick = Math.max(0, (SND.boatKick || 0) - dt * 0.6);   // revs up for a moment right after it starts
+    if (mot) SND.loop('eng_boat', 0.36 + s * 0.5 + B.thr * 0.12, { bus: 'sfx', rate: 1.05 + s * 0.95 + B.thr * 0.12 + SND.boatKick * 0.3 });
+    else SND.loop('eng_boat', 0.45 + s * 0.4 + B.thr * 0.15, { bus: 'sfx', rate: 0.7 + s * 0.48 + B.thr * 0.05 + SND.boatKick * 0.2 });
+    wash(s, s > 0.04 ? 0.12 + s * s * (mot ? 0.95 : 0.75) : 0);
+    B.slap -= dt * (0.25 + s * (mot ? 2.6 : 1.6) + Math.abs(v.steer || 0) * s * 1.5);   // spray: more often the faster you go and the harder you turn
+    if (B.slap <= 0) { B.slap = 0.6 + Math.random() * 0.9; if (s > 0.15) SND.play('splash', { vol: 0.12 + s * (mot ? 0.38 : 0.28), rate: 0.7 + Math.random() * 0.45, pan: Math.random() * 0.8 - 0.4 }); }
+  } else B.last = 0;
+  // riding the 観光船: its hull through the water too (its engine is handled with the bus above)
+  const F = typeof DV !== 'undefined' && DV.ferry; if (F && PL.veh === F) { const s = Math.min(1, Math.abs(F.v || 0) / 8.5); wash(s * 0.7, F.docked ? 0 : 0.1 + s * 0.45); }
+  // other boats out on the water: the nearest cruising motor yacht drones as it goes by
+  if (typeof RS !== 'undefined' && RS.boats && RS.boats.length) { let best = null; for (const b of RS.boats) { if (b.anchor || b.kind !== 'motor' || !b.g) continue; const s = SND.spatial(b.g.position.x, b.g.position.z, 22, 180); if (s && (!best || s.g > best.g)) best = s; }
+    SND.loop('eng_yacht', best ? best.g * 0.8 : 0, { src: 'eng_boat', bus: 'sfx', pan: best ? best.pan : 0, rate: 1.25 }); }
 };
 // ---------- footsteps ----------
 SND.surface = function (wade) {
@@ -146,7 +170,7 @@ SND.blip = function (base) { if (!SND.ctx || SND.prefs.mute) return; const c = S
   SND._bt = setInterval(() => { if (!UI.typing || i > text.length) return clearInterval(SND._bt); if (i % 2 === 0 && !/[\s、。！？…（）「」]/.test(text[i] || '')) SND.blip(base); i++; }, 35); }; }
 // ---------- hooks into the game ----------
 { const _tv = toggleVehicle; toggleVehicle = function () { const before = PL.veh, r = _tv.apply(this, arguments), after = PL.veh;
-  if (after && !before) { if (after.kind === 'truck') { SND.play('car_door', { vol: 0.8 }); SND.play('car_start', { vol: 0.7, delay: 0.35 }); } else SND.play('splash', { vol: 0.3 }); }
+  if (after && !before) { if (after.kind === 'truck') { SND.play('car_door', { vol: 0.8 }); SND.play('car_start', { vol: 0.7, delay: 0.35 }); } else if (after.kind === 'boat') { SND.play('step_wood' + Math.floor(Math.random() * STEP_N), { vol: 0.6 }); SND.play('splash', { vol: 0.25, rate: 1.2 }); SND.play('car_start', { vol: 0.55, rate: after.model === 'motorboat' ? 1.1 : 0.72, delay: 0.45 }); SND.boatKick = 1.0; } else SND.play('splash', { vol: 0.3 }); }
   else if (before && !after) { if (before.kind === 'truck') SND.play('car_door', { vol: 0.8 }); else SND.var('step_water', STEP_N, { vol: 0.5 }); } return r; }; }
 const sndWrap = (obj, fn, pre, post) => { const f = obj[fn]; if (typeof f !== 'function') return; obj[fn] = function () { if (pre) pre.apply(this, arguments); const r = f.apply(this, arguments); if (post) post.apply(this, [r, ...arguments]); return r; }; };
 sndWrap(GAME, 'update', null, function (r, dt) { if (!SND._ui) { SND._ui = 1; try { SND.ui(); SND.watchModal(); } catch (e) { } } try { SND.update(dt || 0.016); } catch (e) { if (!SND._err) { SND._err = 1; console.warn('snd', e); } } });

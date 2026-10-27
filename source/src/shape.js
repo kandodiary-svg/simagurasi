@@ -91,15 +91,20 @@ function carveRiver(G) {
   for (let i = 0; i < pts.length; i++) {
     let g = Infinity; for (const [ox, oz] of [[0, 0], [1.5, 0], [-1.5, 0], [0, 1.5], [0, -1.5]]) g = Math.min(g, hAt(G, pts[i][0] + ox, pts[i][1] + oz));
     const L = Math.min(prev, g - 0.9); gs.push(g);
-    if (L < 0.25) { end = i + 1; lv.push(0); break; }
+    if (L < 0.25) { end = i; gs.pop(); break; }
     lv.push(L); prev = L;
   }
+  // the mouth (ver.46): the river used to stop in a pool ~20 m short of the sea, behind a strip of beach. Now it carries on
+  // across the beach until it reaches open water; its surface sinks to sea level and the channel is cut below the sea,
+  // so the sea flows in and the two waters meet without a step (the river surface fades out there, see river.js)
+  let mouth = end, shore = end; { const L0 = lv.length ? lv[lv.length - 1] : 0.3, M = []; for (let i = end; i < pts.length && M.length < 34; i++) { const g = hAt(G, pts[i][0], pts[i][1]); M.push(i); if (g < 0.05 && shore === end) shore = i; if (g < -2.4 && M.length > 3) break; }
+    M.forEach((i, k) => { const t = (k + 1) / M.length; lv.push(Math.max(0.0, L0 * (1 - t * t * (3 - 2 * t)))); gs.push(hAt(G, pts[i][0], pts[i][1])); }); end = end + M.length; if (shore === mouth) shore = end - 1; }
   pts = pts.slice(0, end);
-  const N = pts.length, hw = pts.map((_, i) => lerp(3.0, 6.5, i / N));
+  const N = pts.length, hw = pts.map((_, i) => lerp(3.0, 6.5, Math.min(i, mouth) / Math.max(1, mouth)) * (i > mouth ? 1 + 0.6 * Math.min(1, (i - mouth) / 10) : 1));
   // plunge pool below the biggest drop
   let fi = 1, fd = 0; for (let i = 1; i < N; i++) if (lv[i - 1] - lv[i] > fd) { fd = lv[i - 1] - lv[i]; fi = i; }
-  { const sm = lv.slice(); for (let i = 0; i < N; i++) { if (Math.abs(i - fi) <= 1) continue; let a = 0, c = 0; for (let k = -6; k <= 6; k++) { const q = i + k; if (q < 0 || q >= N || (q < fi) !== (i < fi)) continue; a += lv[q]; c++; } sm[i] = a / c; }
-    for (let i = 0; i < N; i++) { sm[i] = Math.min(sm[i], gs[i] - 0.4); if (i > 0) sm[i] = Math.min(sm[i], sm[i - 1]); } for (let i = 0; i < N; i++) lv[i] = sm[i]; }
+  { const sm = lv.slice(); for (let i = 0; i < N; i++) { if (Math.abs(i - fi) <= 1 || i >= mouth) continue; let a = 0, c = 0; for (let k = -6; k <= 6; k++) { const q = i + k; if (q < 0 || q >= N || (q < fi) !== (i < fi)) continue; a += lv[q]; c++; } sm[i] = c ? a / c : lv[i]; }   // the window runs into the mouth, so the surface eases down onto the beach instead of dropping off a step
+    for (let i = 0; i < N; i++) { if (i < mouth) sm[i] = Math.min(sm[i], gs[i] - 0.4); if (i > 0) sm[i] = Math.min(sm[i], sm[i - 1]); } for (let i = 0; i < N; i++) lv[i] = sm[i]; }
   for (let i = fi; i < Math.min(N, fi + 6); i++) hw[i] += 3.5 * (1 - (i - fi) / 6);
   const best = new Float32Array(n * n).fill(1e9), bi = new Int32Array(n * n).fill(-1);
   for (let s = 1; s < N; s++) {
@@ -115,9 +120,10 @@ function carveRiver(G) {
     if (bi[k] < 0) continue; const s = bi[k], d = best[k], w = hw[s], L = lv[s];
     if (d < w + 7) G.H[k] = Math.min(G.H[k], lerp(L + 0.35, G.H[k], sstep(w, w + 7, d)));
     if (d < w) { const deep = (s >= fi && s < fi + 5) ? 2.8 : 1.8; G.H[k] = Math.min(G.H[k], L - deep * (1 - Math.pow(d / w, 2) * 0.65)); }
-    if (d < w + 2.5 && L > 0.2) G.Wl[k] = L;
+    if (s >= mouth && d < w + 1.5) G.H[k] = Math.min(G.H[k], lerp(-2.4, -0.7, sstep(0, w + 1.5, d)));   // the mouth: cut below the sea so the sea comes in (only where the river is already down at sea level, so its banks still hold it upstream)
+    if (d < w + 2.5 && s <= shore + 1) { if (s >= mouth) G.Wl[k] = Math.max(L, 0.16); else if (L > 0.06) G.Wl[k] = L; }   // the river's own surface runs to the shoreline; river.js lays it onto the sea (tide) there, and past it the cut channel is the sea's
   }
-  G.river = { pts, lv, hw, falls: { x: pts[fi][0], z: pts[fi][1], top: lv[fi - 1], bottom: lv[fi] } };
+  G.river = { pts, lv, hw, mouth, shore, falls: { x: pts[fi][0], z: pts[fi][1], top: lv[fi - 1], bottom: lv[fi] } };
 }
 function waterLevelAt(G, x, z) { // level of the inland water cell under (x,z), NaN if none
   const { n, size } = WORLD, cell = size / (n - 1); const i = clamp(Math.floor((x + size / 2) / cell), 0, n - 2), j = clamp(Math.floor((z + size / 2) / cell), 0, n - 2), W = G.Wl;

@@ -59,6 +59,7 @@ function terrainMaterial() {
         { float sl = dot(sand, vec3(0.3, 0.59, 0.11)); sand = mix(sand, mix(sand, vec3(sl * 1.03, sl * 1.01, sl * 0.95), 0.32), uResort * smoothstep(-0.6, 0.2, vWPos.y)); }
         vec4 w = max(vSplat + (nz - 0.5) * vec4(0.45, 0.45, 0.2, 0.3), 0.0); w = w * w * w; w /= (w.x + w.y + w.z + w.w + 1e-5);
         diffuseColor.rgb *= grass * w.x + dirt * w.y + rock * w.z + sand * w.w;
+        diffuseColor.rgb *= mix(vec3(1.0), vec3(0.45, 0.74, 0.76), (1.0 - smoothstep(-3.2, -0.4, vWPos.y)) * 0.8);   // ground under a metre or more of water picks up the water's blue-green, so channels and drop-offs read as water, not wet sand
         float snowAmt = uSnow * smoothstep(0.55, 0.85, normalize(vWNor).y) * smoothstep(0.2, 1.2, vWPos.y) * (0.75 + 0.25 * nz);
         diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.84, 0.87, 0.93), clamp(snowAmt * 1.15, 0.0, 0.88));
       `);
@@ -77,7 +78,7 @@ function computeAttrs(i0, j0, i1, j1) {
     const md = Math.hypot(x - MIKAN.x, z - MIKAN.z); if (md < MIKAN.r * 0.8 && h > 5) dirt += 0.45;
     if (Math.hypot(x - VILLAGE.x, z - VILLAGE.z) < VILLAGE.r * 0.6) dirt += 0.15;
     const L = W[k];
-    if (!isNaN(L)) { if (h < L - 0.05) { sand = 0.35; dirt = 0.3; rock = 0.6; } else if (h < L + 1.2) dirt += 0.6; }
+    if (!isNaN(L)) { const f = sstep(0.3, 1.5, L); if (h < L - 0.05) { sand = lerp(1, 0.35, f); dirt = 0.3 * f; rock = 0.6 * f; } else if (h < L + 1.2) dirt += 0.6 * f; }   // f: a stony bed upstream, plain sand where the river comes down to the sea
     const edited = Math.abs(h - G.H0[k]) > 0.6; if (edited && h > 2.5 && isNaN(L)) dirt += 0.25 * sstep(0.6, 2.5, Math.abs(h - G.H0[k]));
     let grass = Math.max(0, 1 - sand - rock - dirt * 0.6);
     const s = grass + dirt + rock + sand + 1e-5; spl[k * 4] = grass / s; spl[k * 4 + 1] = dirt / s; spl[k * 4 + 2] = Math.min(1, rock) / s; spl[k * 4 + 3] = sand / s;
