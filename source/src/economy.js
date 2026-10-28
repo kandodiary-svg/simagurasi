@@ -88,17 +88,17 @@ Object.assign(GAME, {
   // =============== 出荷 ===============
   openShip() {
     const p = this.p, b = this.bag(), hot = FISH.find(f => f.id === this.hotFish()); this.modal = 'ship';
-    const rows = b.fish.map((f, i) => { const F = FISH.find(q => q.id === f.id); return `<li><label><input type="checkbox" data-i="${i}" checked><span class="nm">${esc(F.name)} <small>${f.size}cm ${'★'.repeat(F.st)}</small>${f.id === hot.id ? '<span class="hot">高値</span>' : ''}</span><span class="pr">${yen(this.fishPrice(f.id, f.size))}</span></label></li>`; }).join('');
+    const sm = typeof SHOP !== 'undefined' && SHOP.sellMikan ? SHOP.sellMikan() : b.mikan; const rows = b.fish.map((f, i) => { const F = FISH.find(q => q.id === f.id); if (f.shop) return `<li class="lock"><label><span class="nm">${esc(F.name)} <small>${f.size}cm・お店で買った魚は出荷できません（料理に使えます）</small></span></label></li>`; return `<li><label><input type="checkbox" data-i="${i}" checked><span class="nm">${esc(F.name)} <small>${f.size}cm ${'★'.repeat(F.st)}</small>${f.id === hot.id ? '<span class="hot">高値</span>' : ''}</span><span class="pr">${yen(this.fishPrice(f.id, f.size))}</span></label></li>`; }).join('');
     this.el.modal.innerHTML = `<div class="mbox shopbox"><div class="mh"><h2>漁協 出荷所</h2><span class="isl">今日の高値：${esc(hot.name)}（いつもの2倍）</span><button class="x" data-x="close" aria-label="とじる">×</button></div><div class="mb">
-      ${b.fish.length || b.mikan ? `<ul class="slist">${rows}${b.mikan ? `<li><label><input type="checkbox" data-m="1" checked><span class="nm">みかん <small>×${b.mikan}</small></span><span class="pr">${yen(b.mikan * this.mikanPrice())}</span></label></li>` : ''}</ul>` : '<p class="empty">出荷できるものがありません。魚を釣ったり、みかんをとったりしてから来てね。</p>'}
+      ${b.fish.length || sm ? `<ul class="slist">${rows}${sm ? `<li><label><input type="checkbox" data-m="1" checked><span class="nm">みかん <small>×${sm}${sm < b.mikan ? `（お店で買った${b.mikan - sm}こはのぞく）` : ''}</small></span><span class="pr">${yen(sm * this.mikanPrice())}</span></label></li>` : ''}</ul>` : '<p class="empty">出荷できるものがありません。魚を釣ったり、みかんをとったりしてから来てね。</p>'}
       </div><div class="mf"><span class="tot" id="shipTot"></span><span class="sp"></span><button class="ghost" data-x="none">ぜんぶ外す</button><button class="primary" data-x="ship">選んだものを出荷</button></div></div>`;
     this.el.modal.hidden = false; const box2 = this.el.modal.querySelector('.shopbox');
-    const total = () => { let t = 0; box2.querySelectorAll('input[data-i]:checked').forEach(c => { const f = b.fish[+c.dataset.i]; t += this.fishPrice(f.id, f.size); }); if (box2.querySelector('input[data-m]:checked')) t += b.mikan * this.mikanPrice(); box2.querySelector('#shipTot').textContent = `合計 ${yen(t)}`; return t; };
+    const total = () => { let t = 0; box2.querySelectorAll('input[data-i]:checked').forEach(c => { const f = b.fish[+c.dataset.i]; t += this.fishPrice(f.id, f.size); }); if (box2.querySelector('input[data-m]:checked')) t += sm * this.mikanPrice(); box2.querySelector('#shipTot').textContent = `合計 ${yen(t)}`; return t; };
     total(); box2.onchange = total;
     box2.onclick = e => { const x = e.target.closest('[data-x]'); if (!x) return; const k = x.dataset.x; if (k === 'close') return this.closeModal();
       if (k === 'none') { const cs = box2.querySelectorAll('input[type=checkbox]'), any = [...cs].some(c => c.checked); cs.forEach(c => c.checked = !any); x.textContent = any ? 'ぜんぶ選ぶ' : 'ぜんぶ外す'; total(); }
       if (k === 'ship') { const t = total(); if (!t) { UI.toast('出荷するものを選んでね'); return; } const idx = [...box2.querySelectorAll('input[data-i]:checked')].map(c => +c.dataset.i); const nf = idx.length;
-        b.fish = b.fish.filter((_, i) => !idx.includes(i)); const mk = box2.querySelector('input[data-m]:checked'); if (mk) b.mikan = 0;
+        b.fish = b.fish.filter((_, i) => !idx.includes(i)); const mk = box2.querySelector('input[data-m]:checked'); if (mk) b.mikan -= sm;
         p.stats.shipped += t; p.stats.shipFish += nf; this.addMoney(t); this.closeModal(); UI.toast(`📦 出荷しました！ ${yen(t)} もらった（所持金 ${yen(p.money)}）`); this.check(); this.save(); } };
   },
   // =============== 商店 ===============

@@ -138,10 +138,13 @@ GAME.openCook = function (tab, where) {
     const c = e.target.closest('[data-cook]'); if (c && !c.disabled) { const R = RECIPES.find(q => q.id === c.dataset.cook); if (COOK.make(R)) this.openCook('make'); } };
 };
 // at home: next to the kitchen, the low table, the kotatsu or the dining set
-COOK.FURN = ['kitchen', 'table_low', 'kotatsu', 'dining'];
-COOK.near = function () { if (!GAME.inside || GAME.place || GAME.roomEdit || !GAME.p) return null; let best = null, bd = 1.5; for (const it of GAME.home().items) { if (!COOK.FURN.includes(it.id)) continue; const F = FURN.find(f => f.id === it.id); if (!F) continue; const d = Math.hypot(PL.x - it.x, PL.z - it.z) - Math.max(F.w, F.d) / 2; if (d < bd) { bd = d; best = it; } } return best; };
-{ const _rp = GAME.roomPrompt; GAME.roomPrompt = function () { const r = _rp.apply(this, arguments); if (r) return r; return COOK.near() ? 'Space：料理する' : ''; }; }
-{ const _ra = GAME.roomAct; GAME.roomAct = function () { const S = ROOM.size; if (!(PL.z > S.d / 2 - 1.0 && Math.abs(PL.x) < 1)) { const n = this.roomNear(); if (!n) { const c = COOK.near(); if (c) return this.openCook('make', c.id === 'kitchen' ? 'kitchen' : 'table'); } } return _ra.apply(this, arguments); }; }
+COOK.FURN = ['kitchen', 'table_low', 'kotatsu', 'dining', 'cafetable'];
+COOK.near = function () { if (!GAME.inside || GAME.place || GAME.roomEdit || !GAME.p) return null; let best = null, bd = 1.5; for (const it of GAME.home().items) { if (!COOK.FURN.includes(String(it.id).split('__')[0])) continue; const F = FURN.find(f => f.id === it.id); if (!F) continue; const d = Math.hypot(PL.x - it.x, PL.z - it.z) - Math.max(F.w, F.d) / 2; if (d < bd) { bd = d; best = it; } } return best; };
+// the nearer one wins: a table next to a TV still lets you cook when you stand at the table
+COOK.dist = it => { const F = FURN.find(f => f.id === it.id) || { w: 1, d: 1 }; return Math.hypot(PL.x - it.x, PL.z - it.z) - Math.max(F.w, F.d) / 2; };
+COOK.wins = function (g) { const c = COOK.near(); if (!c) return null; const n = g.roomNear(); return !n || COOK.dist(c) < COOK.dist(n.it) ? c : null; };
+{ const _rp = GAME.roomPrompt; GAME.roomPrompt = function () { const S = ROOM.size; if (!this.roomEdit && !this.place && !(PL.z > S.d / 2 - 1.0 && Math.abs(PL.x) < 1) && COOK.wins(this)) return 'Space：料理する'; const r = _rp.apply(this, arguments); if (r) return r; return COOK.near() ? 'Space：料理する' : ''; }; }
+{ const _ra = GAME.roomAct; GAME.roomAct = function () { const S = ROOM.size; if (!(PL.z > S.d / 2 - 1.0 && Math.abs(PL.x) < 1)) { const c = COOK.wins(this); if (c) return this.openCook('make', String(c.id).split('__')[0] === 'kitchen' ? 'kitchen' : 'table'); } return _ra.apply(this, arguments); }; }
 // ---------- F key / prompt / update ----------
 { const _fk = GAME.fishKey; GAME.fishKey = function () { if (!LIFE.fish && !PL.veh && !EDIT.on && !GAME.inside && GAME.p) { const it = FORAGE.target(); if (it) return FORAGE.pick(it); } return _fk.apply(this, arguments); }; }
 { const _pr = GAME.prompt; GAME.prompt = function () { if (!LIFE.fish && !PL.veh && !EDIT.on && !GAME.inside && GAME.p) { const it = FORAGE.target(); if (it) return `F：${FORAGE.def(it.id).name}をひろう`; } return _pr.apply(this, arguments); }; }
