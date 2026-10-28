@@ -6,7 +6,10 @@ import base64
 if (pathlib.Path('assets')/'models.js').exists(): assets = (pathlib.Path('assets')/'models.js').read_text()
 else:  # GitHub copy: rebuild the embedded models from ../models/*.glb
     md = pathlib.Path('..')/'models'; assets = 'const MODEL_DATA = {' + ','.join(f'{f.stem}:"{base64.b64encode(f.read_bytes()).decode()}"' for f in sorted(md.glob('*.glb'))) + '};' if md.exists() else ''
-html = (src/'head.html').read_text() + '''
+# Trystero (MIT, vendor/trystero-LICENSE.txt): serverless WebRTC for the online visits (net.js), bundled to one file as window.Trystero
+vend = pathlib.Path('vendor')/'trystero-0.26.0.iife.js'
+tr = ('<script>/* trystero 0.26.0 (MIT) */\n' + vend.read_text() + '\n</script>\n') if vend.exists() else ''
+html = (src/'head.html').read_text() + tr + '''
 <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}</script>
 <script type="module">
 import * as THREE from 'three';

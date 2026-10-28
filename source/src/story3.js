@@ -26,6 +26,7 @@ MILESTONE.v_minato = { decor: 'lamp', n: 1, t: 'ぼくのおこづかいで…�
 STORY3.makeModel = function () {
   if (MODELS.v_minato || !MODELS.v_kota) return; const m = MODELS.v_kota.clone(true), COL = { top: '#5aa8e0', bottom: '#e6d8b8', acc: '#f2b632', hair: '#1c2028', shoe: '#2f4f7a', sole: '#e8e4dc' };
   m.traverse(o => { if (!o.isMesh) return; const one = mt => { const c = mt && COL[mt.name]; if (!c) return mt; const q = mt.clone(); q.color.set(c); return q; }; o.material = Array.isArray(o.material) ? o.material.map(one) : one(o.material); });
+  m.userData = Object.assign({}, m.userData, { chr: null }); try { CHR.rig(m); } catch (e) { }   // its own face (blinks), not the copied one's
   m.name = 'v_minato'; MODELS.v_minato = m; };
 { const _sv = spawnVillagers; spawnVillagers = function () { try { STORY3.makeModel(); } catch (e) { console.warn('minato model', e); } return _sv.apply(this, arguments); }; }
 // he comes to look round only in 第13章 (never through the usual Lv order)
