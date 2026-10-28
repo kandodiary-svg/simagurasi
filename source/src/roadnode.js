@@ -175,6 +175,7 @@ JN.meshOne = function (j, g) {
   for (let i = 0; i < n; i++) { const a = 1 + i, b = 1 + (i + 1) % n; if (area > 0) idx.push(0, b, a); else idx.push(0, a, b); }
   const pm = JN.tri({ p: pos, i: info, up: true }, idx, roadMat2(type, { fill: true, prio }), g), nm = pm.geometry.attributes.normal; for (let i = 0; i < nm.count; i++) nm.setXYZ(i, 0, 1, 0); // even shading across the long fan triangles
   const T = []; for (let i = 0; i < idx.length; i += 3) T.push([idx[i], idx[i + 1], idx[i + 2]].map(v => [pos[v * 3], pos[v * 3 + 1], pos[v * 3 + 2]])); JN.addWalk(T);
+  j.plate = JN.walk[JN.walk.length - 1];   // the plate alone (cars drive on it; the corner sidewalks are separate)
   j.tris = T.map(t => ({ t, dy: 0.12 })); for (const c of j.corners) JN.kerb(j, c, g, yl, prio);
 };
 // a sidewalk band (or the small kerb) along a corner's kerb path, widths blending from one arm to the next
@@ -218,6 +219,13 @@ JN.walkY = function (x, z) {
     for (const [A, B, C] of W.T) { const d = (B[2] - C[2]) * (A[0] - C[0]) + (C[0] - B[0]) * (A[2] - C[2]); if (Math.abs(d) < 1e-9) continue; const l1 = ((B[2] - C[2]) * (x - C[0]) + (C[0] - B[0]) * (z - C[2])) / d, l2 = ((C[2] - A[2]) * (x - C[0]) + (A[0] - C[0]) * (z - C[2])) / d, l3 = 1 - l1 - l2;
       if (l1 < -1e-4 || l2 < -1e-4 || l3 < -1e-4) continue; const y = l1 * A[1] + l2 * B[1] + l3 * C[1]; if (out === null || y > out) out = y; } }
   return out;
+};
+// the junction plate's surface only (not the corner sidewalks) — where cars drive
+JN.plateY = function (x, z) {
+  for (const j of JN.list) { const W = j.plate; if (!W || x < W.bb[0] || x > W.bb[2] || z < W.bb[1] || z > W.bb[3]) continue;
+    for (const [A, B, C] of W.T) { const d = (B[2] - C[2]) * (A[0] - C[0]) + (C[0] - B[0]) * (A[2] - C[2]); if (Math.abs(d) < 1e-9) continue; const l1 = ((B[2] - C[2]) * (x - C[0]) + (C[0] - B[0]) * (z - C[2])) / d, l2 = ((C[2] - A[2]) * (x - C[0]) + (A[0] - C[0]) * (z - C[2])) / d, l3 = 1 - l1 - l2;
+      if (l1 < -1e-4 || l2 < -1e-4 || l3 < -1e-4) continue; return l1 * A[1] + l2 * B[1] + l3 * C[1]; } }
+  return null;
 };
 // is (x,z) on any paved road surface (strips or junction plates)? — for placing signs, poles, trees
 JN.onRoad = function (x, z, m = 0.3) {

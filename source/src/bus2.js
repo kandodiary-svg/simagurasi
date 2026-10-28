@@ -92,10 +92,13 @@ BUS2.doors = function (B, dt) { const D = B.mesh && B.mesh.userData.doors; if (!
 // ---------- the bus's own frame (x: curb side, z: forward) to the world ----------
 BUS2.W = function (B, lx, lz) { const c = Math.cos(B.rot), s = Math.sin(B.rot); return [B.x + c * lx + s * lz, B.z - s * lx + c * lz]; };
 BUS2.L = function (B, x, z) { const c = Math.cos(B.rot), s = Math.sin(B.rot), dx = x - B.x, dz = z - B.z; return [c * dx - s * dz, s * dx + c * dz]; };
+BUS2.P = function (B, lx, ly, lz) { return B.mesh.localToWorld(new THREE.Vector3(lx, ly, lz)); };   // a point of the bus (the body tilts on slopes)
+BUS2.yaw = B => B.shown ? B.shown.yaw : B.rot;
+BUS2.floorAt = function (B, x, z, up) { const [lx, lz] = BUS2.L(B, x, z); return BUS2.P(B, lx, up, lz).y; };
 BUS2.FLOOR = 0.65; BUS2.SITK = 0.62; BUS2.dy = 0.28;   // the hero is small: sitting on the cushion (0.47 m above the floor) the feet dangle a little
 // ---------- you, sitting by the window while riding ----------
 BUS2.sit = function (B) {
-  const [x, z] = BUS2.W(B, BUS2.SEAT[0], BUS2.SEAT[1]); PL.mesh.position.set(x, B.mesh.position.y + BUS2.FLOOR + (BUS2.dy || 0), z); PL.mesh.rotation.y = B.rot;
+  const q = BUS2.P(B, BUS2.SEAT[0], BUS2.FLOOR + (BUS2.dy || 0), BUS2.SEAT[1]); PL.mesh.position.copy(q); PL.mesh.rotation.y = BUS2.yaw(B);
   const P = PL.parts, R0 = PL.rest; if (!P || !P.thighL) return;
   P.thighL.rotation.set(-1.45, 0, 0.04); P.thighR.rotation.set(-1.45, 0, -0.04); P.shinL.rotation.set(1.45, 0, 0); P.shinR.rotation.set(1.45, 0, 0);
   P.upperArmL.rotation.set(-0.42, 0, -0.12); P.upperArmR.rotation.set(-0.42, 0, 0.12); P.foreArmL.rotation.set(-0.75, 0, 0); P.foreArmR.rotation.set(-0.75, 0, 0); P.spine.rotation.set(0, 0, 0);
@@ -103,8 +106,8 @@ BUS2.sit = function (B) {
 };
 // ---------- the view from inside: 運転席 / 座席 ----------
 BUS2.fp = function (B) {
-  const c = Math.cos(B.rot), s = Math.sin(B.rot); let x, y, z, yaw = B.rot + (CAM.fpLook || 0), pitch = CAM.fpPitch || 0;
-  const e = BUS2.eye(); x = B.x + c * e[0] + s * e[2]; y = B.mesh.position.y + e[1]; z = B.z - s * e[0] + c * e[2];
+  let x, y, z, yaw = BUS2.yaw(B) + (CAM.fpLook || 0), pitch = (CAM.fpPitch || 0) + (B.shown ? B.shown.pitch : 0);
+  const e = BUS2.eye(), q = BUS2.P(B, e[0], e[1], e[2]); x = q.x; y = q.y; z = q.z;
   if (BUS2.view === 'driver') pitch -= 0.17;   // the top of the wheel and the dashboard show at the bottom
   else { yaw += 0.32; pitch -= 0.06; }          // a passenger's eye height, turned a little to the window
   camera.position.set(x, y, z); const cp = Math.cos(pitch); camera.lookAt(x + Math.sin(yaw) * cp, y + Math.sin(pitch), z + Math.cos(yaw) * cp);
@@ -129,7 +132,7 @@ BUS2.start = function (type, B) {
   }
   B.wait = Math.max(B.wait, 3.4); BUS2.anim = { type, B, pts, i: 1, t: 0 };
   PL.veh = null; PL.mesh.visible = true; if (CAM.mode === 'first') setViewMode('third'); CAM.distT = 5.2; PL.speed = 0;
-  if (type === 'off') { PL.x = pts[0].x; PL.z = pts[0].z; PL.y = B.mesh.position.y + F; PL.rot = B.rot; }
+  if (type === 'off') { PL.x = pts[0].x; PL.z = pts[0].z; PL.y = BUS2.floorAt(B, PL.x, PL.z, F); PL.rot = B.rot; }
   UI.toast(type === 'board' ? '🎫 整理券をとって、バスに乗った' : '💴 運賃をはらって「ありがとうございました」');
 };
 BUS2.step = function (dt) {
@@ -137,7 +140,7 @@ BUS2.step = function (dt) {
   const dx = p.x - PL.x, dz = p.z - PL.z, d = Math.hypot(dx, dz), sp = (p.up > 0 || A.pts[A.i - 1].up > 0 ? 1.5 : 2.2) * dt;
   if (d <= sp) { PL.x = p.x; PL.z = p.z; A.i++; } else { PL.x += dx / d * sp; PL.z += dz / d * sp; }
   if (d > 0.05) PL.rot = angLerp(PL.rot, Math.atan2(dx, dz), Math.min(1, dt * 10));
-  const floorY = B.mesh.position.y + (p.up || 0); PL.y = p.up ? lerp(PL.y, floorY, Math.min(1, dt * 9)) : lerp(PL.y, standY(PL.x, PL.z), Math.min(1, dt * 9));
+  const floorY = BUS2.floorAt(B, PL.x, PL.z, p.up || 0); PL.y = p.up ? lerp(PL.y, floorY, Math.min(1, dt * 9)) : lerp(PL.y, standY(PL.x, PL.z), Math.min(1, dt * 9));
   PL.mesh.position.set(PL.x, PL.y, PL.z); PL.mesh.rotation.y = PL.rot; PL.speed = 1.8; animateHero(dt, 1.8, 0);
   // the camera watches from the curb side, a little ahead of the doors
   CAM.lastDrag = performance.now() / 1000 - 0.6; CAM.yaw = angLerp(CAM.yaw, B.rot + Math.PI / 2 - 0.45, Math.min(1, dt * 2.5)); CAM.pitch = lerp(CAM.pitch, 0.3, Math.min(1, dt * 2));

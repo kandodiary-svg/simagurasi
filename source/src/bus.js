@@ -45,7 +45,7 @@ BUSX.setSign = function (text) { if (!BUSX.mesh || BUSX._sign === text) return; 
 // ---------- road graph for routing ----------
 BUSX.graph = function () {
   const RS = ROADS.filter(r => !isFoot(r) && r.w >= 3.4 && r.pts.length > 1), N = [], cell = 6, hash = new Map(), key = (x, z) => Math.floor(x / cell) + ',' + Math.floor(z / cell);
-  for (const r of RS) { const L = rLen(r), n = Math.max(1, Math.ceil(L / 4)); let prev = -1; for (let k = 0; k <= n; k++) { const p = rAt(r, L * k / n), i = N.length; N.push({ x: p.x, y: p.y, z: p.z, w: r.w, r, e: [] }); if (prev >= 0) { const d = Math.hypot(N[prev].x - p.x, N[prev].z - p.z); N[prev].e.push([i, d]); N[i].e.push([prev, d]); } prev = i; const kk = key(p.x, p.z); if (!hash.has(kk)) hash.set(kk, []); hash.get(kk).push(i); } }
+  for (const r of RS) { const L = rLen(r), n = Math.max(1, Math.ceil(L / 4)); let prev = -1; for (let k = 0; k <= n; k++) { const p = rAt(r, L * k / n), i = N.length; N.push({ x: p.x, y: TRF.surf(r, L * k / n, p.x, p.z) - 0.04, z: p.z, w: r.w, r, e: [] }); if (prev >= 0) { const d = Math.hypot(N[prev].x - p.x, N[prev].z - p.z); N[prev].e.push([i, d]); N[i].e.push([prev, d]); } prev = i; const kk = key(p.x, p.z); if (!hash.has(kk)) hash.set(kk, []); hash.get(kk).push(i); } }
   // junctions: join nodes of different roads that touch
   for (let i = 0; i < N.length; i++) { const a = N[i], cx = Math.floor(a.x / cell), cz = Math.floor(a.z / cell); for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) for (const j of hash.get((cx + dx) + ',' + (cz + dz)) || []) { if (j <= i) continue; const b = N[j]; if (b.r === a.r) continue; const d = Math.hypot(a.x - b.x, a.z - b.z); if (d < Math.min(a.w, b.w) / 2 + 2.6) { a.e.push([j, d]); b.e.push([i, d]); } } }
   BUSX.G = { N, hash, cell }; return BUSX.G;
@@ -114,8 +114,10 @@ GAME.placeBus = function (dt) {
   // heading from a point a little ahead (smooth turns at junctions)
   const ah = (s) => { let k = 1; while (k < cum.length - 1 && cum[k] < s) k++; const tt = clamp((s - cum[k - 1]) / Math.max(1e-3, cum[k] - cum[k - 1]), 0, 1); return [pts[k - 1][0] + (pts[k][0] - pts[k - 1][0]) * tt, pts[k - 1][2] + (pts[k][2] - pts[k - 1][2]) * tt]; };
   const fa = ah(clamp(B.s + 3 * B.dir, 0, Lt)), ba = ah(clamp(B.s - 2 * B.dir, 0, Lt)); const tr = Math.atan2(fa[0] - ba[0], fa[1] - ba[1]); B.rot = dt ? angLerp(B.rot, tr, Math.min(1, dt * 5)) : tr;
-  const lane = Math.min(w / 4, 1.6); B.x = cx + Math.cos(B.rot) * lane; B.z = cz - Math.sin(B.rot) * lane; const gy = standY(B.x, B.z); B.y = Math.max(gy, p0[1] + (p1[1] - p0[1]) * t) + 0.02;
-  B.mesh.position.set(B.x, B.y, B.z); B.mesh.rotation.set(0, B.rot, 0);
+  const lane = Math.min(w / 4, 1.6); B.x = cx + Math.cos(B.rot) * lane; B.z = cz - Math.sin(B.rot) * lane;
+  // ver.49: every wheel (axles 2.95 m ahead / 2.0 m behind, ±1.04 m) on the road you see; the body tilts and leans (was: flat, at the higher of the walk height and the route)
+  const P = RIDE.pose(B.ride || (B.ride = { y: p0[1] + (p1[1] - p0[1]) * t }), B.x, B.z, B.rot, 2.95, -2.0, 1.04, null, 0, 1, dt, B.v); B.y = P.y;
+  B.mesh.position.set(P.x, P.y, P.z); B.mesh.rotation.set(0, 0, 0); B.mesh.rotateY(P.yaw); B.mesh.rotateX(-P.pitch); B.mesh.rotateZ(P.roll); B.mesh.updateMatrixWorld(true); B.shown = P;
 };
 GAME.updateBus = function (dt) {
   const B = DV.bus; if (!B) return; const Lt = B.cum[B.cum.length - 1];

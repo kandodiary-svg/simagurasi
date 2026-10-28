@@ -2137,7 +2137,11 @@ function placeVehicle(v, dt) {
     // the 4 wheels follow this car's real size (bigger cars used to sink at the ends)
     const sp = VSPEC.truck, fl = Math.max(1.1, (sp.len || 1.6) * 0.72), wl = Math.max(0.6, (sp.wid || 0.8) * 0.85), s = Math.sin(v.rot), c = Math.cos(v.rot);
     const W = (a, b) => standY(v.x + s * a + c * b, v.z + c * a - s * b), fL = W(fl, wl), fR = W(fl, -wl), bL = W(-fl, wl), bR = W(-fl, -wl), hf = (fL + fR) / 2, hb = (bL + bR) / 2, hl = (fL + bL) / 2, hr = (fR + bR) / 2;
-    const ty = Math.max((hf + hb + hl + hr) / 4, Math.max(fL, fR, bL, bR) - 0.12); v.y = !dt || ty > v.y ? ty : lerp(v.y, ty, Math.min(1, dt * 12)); v.pitch = lerp(v.pitch, Math.atan2(hb - hf, fl * 2), dt ? Math.min(1, dt * 14) : 1); v.roll = lerp(v.roll, Math.atan2(hr - hl, wl * 2), dt ? Math.min(1, dt * 14) : 1);
+    const ty = Math.max((hf + hb + hl + hr) / 4, Math.max(fL, fR, bL, bR) - 0.12), tp = Math.atan2(hb - hf, fl * 2), tr = Math.atan2(hr - hl, wl * 2);
+    // follow the ground exactly; only a sudden step (a curb, the edge of a plate) is eased over ~0.1 s like a suspension
+    if (!dt || v._ry === undefined || Math.abs(ty - v._ry) > 2) { v._oy = 0; v._op = 0; v._or = 0; }
+    else { const ly = Math.abs(v.v || 0) * dt * 0.45 + 0.02, jy = ty - v._ry, jp = tp - v._rp, jr = tr - v._rr; if (Math.abs(jy) > ly) v._oy -= jy - Math.sign(jy) * ly; if (Math.abs(jp) > 0.03) v._op -= jp - Math.sign(jp) * 0.03; if (Math.abs(jr) > 0.03) v._or -= jr - Math.sign(jr) * 0.03; const k = Math.exp(-dt * 10); v._oy *= k; v._op *= k; v._or *= k; }
+    v._ry = ty; v._rp = tp; v._rr = tr; v.y = ty + v._oy; v.pitch = tp + v._op; v.roll = tr + v._or;
     v.mesh.position.set(v.x, v.y, v.z); v.mesh.rotation.set(0, 0, 0); v.mesh.rotateY(v.rot); v.mesh.rotateX(v.pitch); v.mesh.rotateZ(v.roll);
   } else {
     v.bob += dt; const t = performance.now() / 1000;
@@ -3268,6 +3272,7 @@ JN.meshOne = function (j, g) {
   for (let i = 0; i < n; i++) { const a = 1 + i, b = 1 + (i + 1) % n; if (area > 0) idx.push(0, b, a); else idx.push(0, a, b); }
   const pm = JN.tri({ p: pos, i: info, up: true }, idx, roadMat2(type, { fill: true, prio }), g), nm = pm.geometry.attributes.normal; for (let i = 0; i < nm.count; i++) nm.setXYZ(i, 0, 1, 0); // even shading across the long fan triangles
   const T = []; for (let i = 0; i < idx.length; i += 3) T.push([idx[i], idx[i + 1], idx[i + 2]].map(v => [pos[v * 3], pos[v * 3 + 1], pos[v * 3 + 2]])); JN.addWalk(T);
+  j.plate = JN.walk[JN.walk.length - 1];   // the plate alone (cars drive on it; the corner sidewalks are separate)
   j.tris = T.map(t => ({ t, dy: 0.12 })); for (const c of j.corners) JN.kerb(j, c, g, yl, prio);
 };
 // a sidewalk band (or the small kerb) along a corner's kerb path, widths blending from one arm to the next
@@ -3311,6 +3316,13 @@ JN.walkY = function (x, z) {
     for (const [A, B, C] of W.T) { const d = (B[2] - C[2]) * (A[0] - C[0]) + (C[0] - B[0]) * (A[2] - C[2]); if (Math.abs(d) < 1e-9) continue; const l1 = ((B[2] - C[2]) * (x - C[0]) + (C[0] - B[0]) * (z - C[2])) / d, l2 = ((C[2] - A[2]) * (x - C[0]) + (A[0] - C[0]) * (z - C[2])) / d, l3 = 1 - l1 - l2;
       if (l1 < -1e-4 || l2 < -1e-4 || l3 < -1e-4) continue; const y = l1 * A[1] + l2 * B[1] + l3 * C[1]; if (out === null || y > out) out = y; } }
   return out;
+};
+// the junction plate's surface only (not the corner sidewalks) — where cars drive
+JN.plateY = function (x, z) {
+  for (const j of JN.list) { const W = j.plate; if (!W || x < W.bb[0] || x > W.bb[2] || z < W.bb[1] || z > W.bb[3]) continue;
+    for (const [A, B, C] of W.T) { const d = (B[2] - C[2]) * (A[0] - C[0]) + (C[0] - B[0]) * (A[2] - C[2]); if (Math.abs(d) < 1e-9) continue; const l1 = ((B[2] - C[2]) * (x - C[0]) + (C[0] - B[0]) * (z - C[2])) / d, l2 = ((C[2] - A[2]) * (x - C[0]) + (A[0] - C[0]) * (z - C[2])) / d, l3 = 1 - l1 - l2;
+      if (l1 < -1e-4 || l2 < -1e-4 || l3 < -1e-4) continue; return l1 * A[1] + l2 * B[1] + l3 * C[1]; } }
+  return null;
 };
 // is (x,z) on any paved road surface (strips or junction plates)? — for placing signs, poles, trees
 JN.onRoad = function (x, z, m = 0.3) {
@@ -9450,7 +9462,7 @@ FSH.updatePanel = function () {
 { const _ok2 = GAME.onKey; GAME.onKey = function (e) { if (!e.repeat && e.code === 'KeyT' && this.p && !this.modal && !EDIT.on && !PL.veh && !LIFE.fish && FSH.holdKg() > 0.05) { const S = DECO.ship, H = this.LM.harbor; if ((S && Math.hypot(PL.x - S.x, PL.z - S.z) < 12) || (H && Math.hypot(PL.x - H.x, PL.z - H.z) < 60)) { FSH.openLanding(true); return true; } } return _ok2.apply(this, arguments); }; }
 { const _p2 = GAME.prompt; GAME.prompt = function () { if (this.p && !PL.veh && !this.modal && this.nearShip && this.nearShip() && FSH.holdKg() > 0.05) return `Space：出荷所　T：網の魚を水揚げ（魚倉 ${FSH.holdKg().toFixed(0)}kg）`; return _p2.apply(this, arguments); }; }
 // version label so you can tell whether the page has updated
-const GAME_VER = '48（10/28）';
+const GAME_VER = '49（10/28）';
 { const v = document.createElement('div'); v.id = 'verTag'; v.textContent = 'ver.' + GAME_VER; v.style.cssText = 'position:fixed;left:6px;bottom:4px;z-index:5;font-size:10px;color:rgba(255,255,255,.75);text-shadow:0 1px 2px rgba(0,0,0,.6);pointer-events:none;font-family:sans-serif'; document.body.appendChild(v); }
 
 // ===================== 島の収益: 建物ごとに1時間あたりの売上が入りつづける（留守のあいだも最大24時間分） =====================
@@ -9529,12 +9541,13 @@ function sidewalkY(x, z) {
     for (let i = 0; i < F.length; i++) { const f = F[i], d = (x - f.x) * (x - f.x) + (z - f.z) * (z - f.z); if (d < bd) { bd = d; best = i; } }
     const rr = half + (r.side ? SIDEW : 0) + 1; if (best < 0 || bd > rr * rr + 4) continue;
     const f = F[best], lat = (x - f.x) * f.nx + (z - f.z) * f.nz, al = Math.abs(lat);
+    const alg = (x - f.x) * f.tx + (z - f.z) * f.tz, g2 = alg >= 0 ? F[best + 1] : F[best - 1]; let fy = f.y; if (g2) { const seg = Math.hypot(g2.x - f.x, g2.z - f.z) || 1; fy = f.y + (g2.y - f.y) * Math.min(1, Math.abs(alg) / seg); }   // between frames: a smooth slope, not 1 m stairs
     if ((r.cuts || []).some(([a, b]) => f.dist > a - 0.3 && f.dist < b + 0.3)) continue; // a junction plate (JN.walkY)
     if (best === 0 || best === F.length - 1) { const tx = -f.nz, tz = f.nx, along = (x - f.x) * tx + (z - f.z) * tz; if (Math.abs(along) > 0.9) continue; }
-    if (al <= half) { const ty = rType(r), yl = ty === 'dirt' || ty === 'trail' || ty === 'gravel' ? 0.03 : 0.04; top(f.y + yl); continue; }
+    if (al <= half) { const ty = rType(r), yl = ty === 'dirt' || ty === 'trail' || ty === 'gravel' ? 0.03 : 0.04; top(fy + yl); continue; }
     if (!r.side || al > half + SIDEW + 0.02) continue;
     const sd = lat < 0 ? -1 : 1; if ((r.gaps || []).some(g => !g.foot && g.side === sd && f.dist > g.s0 - 0.6 && f.dist < g.s1 + 0.6)) continue;
-    top(f.y + SIDEWALK_H);
+    top(fy + SIDEWALK_H);
   }
   return out;
 }
@@ -9937,6 +9950,55 @@ TRF.plan = function () {
   for (const c of TRF.cars) c.L = rLen(c.r);
 };
 TRF.pose = function (c) { const a = rAt(c.r, c.s), t = rTan(c.r, c.s), fx = t[0] * c.dir, fz = t[1] * c.dir, off = Math.min(c.r.w * 0.26, 1.7); c.x = a.x + fz * off; c.z = a.z - fx * off; c.y = a.y; c.fx = fx; c.fz = fz; c.rot = Math.atan2(fx, fz); };
+// ---- how a car sits on the road (ver.49): every wheel on the road you see; the body tilts and leans with it ----
+// (before: one height at the car's centre, never tilted → on slopes one end floated and the other sank; the height
+//  came from the walk height, which went up and down in 1 m stairs → shaking; and inside junctions the road's own
+//  heights were used, which can be ~1 m off the junction plate you see)
+TRF.yl = r => { const ty = rType(r); return ty === 'dirt' || ty === 'trail' || ty === 'gravel' ? 0.03 : 0.04; };
+TRF.onStrip = (r, s) => { const L = rLen(r), s0 = r.trim ? r.trim[0] : 0, s1 = L - (r.trim ? r.trim[1] : 0); return s >= s0 && s <= s1 && !(r.cuts || []).some(([a, b]) => s > a && s < b); };
+TRF.projNear = function (r, s, x, z) { // rProject, but only on the few segments around arc s (fast)
+  const c = rCum(r), n = r.pts.length, i0 = rAt(r, s).i; let best = null;
+  for (let i = Math.max(1, i0 - 3); i <= Math.min(n - 1, i0 + 4); i++) { const a = r.pts[i - 1], b = r.pts[i], vx = b[0] - a[0], vz = b[1] - a[1], ll = vx * vx + vz * vz || 1, t = clamp(((x - a[0]) * vx + (z - a[1]) * vz) / ll, 0, 1), px = a[0] + vx * t, pz = a[1] + vz * t, d = Math.hypot(x - px, z - pz); if (!best || d < best.d) best = { d, s: c[i - 1] + (c[i] - c[i - 1]) * t, y: r.h[i - 1] + (r.h[i] - r.h[i - 1]) * t }; }
+  return best;
+};
+// the drivable surface at (x,z): a road strip or a junction plate (never the sidewalks); r/s = the road the car is on (fast path); yRef picks between stacked surfaces
+TRF.ground = function (x, z, r, s, yRef) {
+  const C = [];
+  if (r) { const q = TRF.projNear(r, s, x, z); if (q && q.d <= r.w / 2 + 0.05 && TRF.onStrip(r, q.s)) C.push(q.y + TRF.yl(r)); }
+  const j = typeof JN !== 'undefined' && JN.plateY ? JN.plateY(x, z) : null; if (j !== null) C.push(j);
+  if (!C.length) for (const q of ROADS) { if (q === r || isFoot(q)) continue; const b = rBox(q), R = q.w / 2 + 0.1; if (x < b[0] - R || x > b[2] + R || z < b[1] - R || z > b[3] + R) continue; const pr = rProject(q, x, z); if (pr && pr.d <= q.w / 2 + 0.05 && TRF.onStrip(q, pr.s)) C.push(pr.y + TRF.yl(q)); }
+  if (!C.length) { const e = r ? rAt(r, clamp(s, r.trim ? r.trim[0] : 0, rLen(r) - (r.trim ? r.trim[1] : 0))).y + TRF.yl(r) : (yRef !== undefined ? yRef : standY(x, z)); const g = standY(x, z); return Math.abs(g - e) < 0.3 ? g : e; }   // a gap between strip and plate: the ground there
+  let best = C[0]; if (yRef !== undefined) for (const y of C) if (Math.abs(y - yRef) < Math.abs(best - yRef)) best = y; return best;
+};
+TRF.surf = (r, s, x, z) => TRF.ground(x, z, r, s);
+// sudden changes (a new road at a junction, the other lane after turning round) glide instead of popping
+const RIDE = {};
+RIDE.easeXZ = function (o, x, z, yaw, dt, v) {
+  if (!o.p || !dt || Math.hypot(x - o.p.x, z - o.p.z) > 8) { o.p = { x, z, yaw }; o.o = { x: 0, z: 0, yaw: 0 }; o.jumped = true; return { x, z, yaw }; }
+  const st = Math.abs(v || 0) * dt, P = o.p, O = o.o; if (Math.hypot(x - P.x, z - P.z) > st * 1.6 + 0.2) { O.x += P.x - x; O.z += P.z - z; }
+  let jw = yaw - P.yaw; jw = Math.atan2(Math.sin(jw), Math.cos(jw)); if (Math.abs(jw) > 0.07) O.yaw -= jw;
+  // glide back: quick for small steps, never faster than a car really moves / turns
+  const k = 1 - Math.exp(-dt * 8), m = Math.hypot(O.x, O.z); if (m > 1e-4) { const f = Math.max(0, m - Math.min(m * k, 5 * dt)) / m; O.x *= f; O.z *= f; } else O.x = O.z = 0;
+  { const a = Math.abs(O.yaw); O.yaw = a < 1e-4 ? 0 : Math.sign(O.yaw) * (a - Math.min(a * k, 2.5 * dt)); }
+  o.p = { x, z, yaw }; return { x: x + O.x, z: z + O.z, yaw: yaw + O.yaw };
+};
+RIDE.easeH = function (o, y, pitch, roll, dt, v) { // only steps in the surface are eased (like a suspension); slopes are followed exactly
+  if (!o.h || !dt || Math.abs(y - o.h.y) > 2) { o.h = { y, pitch, roll }; o.oh = { y: 0, pitch: 0, roll: 0 }; return { y, pitch, roll }; }
+  const st = Math.abs(v || 0) * dt, P = o.h, O = o.oh, ly = st * 0.45 + 0.025, jy = y - P.y, jp = pitch - P.pitch, jr = roll - P.roll;
+  if (Math.abs(jy) > ly) O.y -= jy - Math.sign(jy) * ly; if (Math.abs(jp) > 0.035) O.pitch -= jp - Math.sign(jp) * 0.035; if (Math.abs(jr) > 0.035) O.roll -= jr - Math.sign(jr) * 0.035;
+  const k = 1 - Math.exp(-dt * 10); for (const [key, rate] of [['y', 1.2], ['pitch', 0.8], ['roll', 0.8]]) { const a = Math.abs(O[key]); O[key] = a < 1e-4 ? 0 : Math.sign(O[key]) * (a - Math.min(a * k, rate * dt)); }
+  o.h = { y, pitch, roll }; return { y: y + O.y, pitch: pitch + O.pitch, roll: roll + O.roll };
+};
+// pose of a car body with axles at wf (front, +) / wr (rear, −) and wheels at ±wx, standing on TRF.ground
+RIDE.pose = function (o, x, z, yaw, wf, wr, wx, r, s, dir, dt, v) {
+  const P = RIDE.easeXZ(o, x, z, yaw, dt, v), fx = Math.sin(P.yaw), fz = Math.cos(P.yaw), yRef = o.y;
+  const H = (a, b) => TRF.ground(P.x + fx * a + fz * b, P.z + fz * a - fx * b, r, r ? s + a * dir : 0, yRef);   // a: along, b: to the +x side
+  const fP = H(wf, wx), fN = H(wf, -wx), rP = H(wr, wx), rN = H(wr, -wx), hF = (fP + fN) / 2, hR = (rP + rN) / 2;
+  const y = hR + (hF - hR) * (-wr) / (wf - wr), pitch = clamp(Math.atan2(hF - hR, wf - wr), -0.5, 0.5), roll = clamp(Math.atan2((fP + rP) / 2 - (fN + rN) / 2, wx * 2), -0.35, 0.35);
+  // after a jump to a new place altogether (a respawn) nothing glides
+  const E = RIDE.easeH(o, y, pitch, roll, o.jumped ? 0 : dt, v); o.jumped = false; o.y = E.y; return { x: P.x, z: P.z, yaw: P.yaw, y: E.y, pitch: E.pitch, roll: E.roll };
+};
+TRF.vis = function (c, dt) { const T = CAR_TYPES[c.type] || CAR_TYPES.kei; return RIDE.pose(c.ride || (c.ride = { y: c.y }), c.x, c.z, c.rot, T.wb[0], T.wb[1], T.wx, c.r, c.s, c.dir, dt, c.v); };
 TRF.obstacles = function () {
   const O = []; for (const c of TRF.cars) if (c.x !== undefined) O.push({ x: c.x, z: c.z, car: c });
   if (!PL.veh && !GAME.inside) O.push({ x: PL.x, z: PL.z, pl: 1 }); for (const v of VEH) if (v.kind === 'truck') O.push({ x: v.x, z: v.z, veh: v });
@@ -9963,9 +10025,9 @@ TRF.update = function (dt) {
     if (c.v < 0.3 && gap < 6) { c.block += dt; if (c.block > 7) { c.block = 0; if (Math.hypot(c.x - PL.x, c.z - PL.z) > 70) TRF.spawn(c, true); else c.dir = -c.dir; } } else c.block = 0;
   }
   // draw
-  const show = !GAME.inside, cnt = {}, m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), v = new THREE.Vector3(), sc = new THREE.Vector3(1, 1, 1), Y = new THREE.Vector3(0, 1, 0);
+  const show = !GAME.inside, cnt = {}, m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), v = new THREE.Vector3(), sc = new THREE.Vector3(1, 1, 1), Y = new THREE.Vector3(0, 1, 0), X = new THREE.Vector3(1, 0, 0), Z = new THREE.Vector3(0, 0, 1), qp = new THREE.Quaternion();
   for (const k of Object.keys(CARX.types)) cnt[k] = 0;
-  if (show) for (const c of TRF.cars.concat(TRF.parked || [])) { if (c.x === undefined) continue; const M = CARX.types[c.type], i = cnt[c.type]++; const ty = c.r ? standY(c.x, c.z) : c.y; q.setFromAxisAngle(Y, c.rot); m4.compose(v.set(c.x, Math.max(ty, c.y) + 0.02, c.z), q, sc); M.body.setMatrixAt(i, m4); M.dark.setMatrixAt(i, m4); M.light.setMatrixAt(i, m4); M.body.setColorAt(i, c.col); }
+  if (show) for (const c of TRF.cars.concat(TRF.parked || [])) { if (c.x === undefined) continue; const M = CARX.types[c.type], i = cnt[c.type]++; if (c.r) { const P = TRF.vis(c, dt); q.setFromAxisAngle(Y, P.yaw).multiply(qp.setFromAxisAngle(X, -P.pitch)).multiply(qp.setFromAxisAngle(Z, P.roll)); m4.compose(v.set(P.x, P.y + 0.005, P.z), q, sc); } else { q.setFromAxisAngle(Y, c.rot); m4.compose(v.set(c.x, c.y + 0.02, c.z), q, sc); } M.body.setMatrixAt(i, m4); M.dark.setMatrixAt(i, m4); M.light.setMatrixAt(i, m4); M.body.setColorAt(i, c.col); }
   for (const [k, M] of Object.entries(CARX.types)) { for (const m of [M.body, M.dark, M.light]) { m.count = cnt[k]; m.instanceMatrix.needsUpdate = true; } if (M.body.instanceColor) M.body.instanceColor.needsUpdate = true; }
 };
 // replace the old box-car traffic
@@ -10022,7 +10084,7 @@ BUSX.setSign = function (text) { if (!BUSX.mesh || BUSX._sign === text) return; 
 // ---------- road graph for routing ----------
 BUSX.graph = function () {
   const RS = ROADS.filter(r => !isFoot(r) && r.w >= 3.4 && r.pts.length > 1), N = [], cell = 6, hash = new Map(), key = (x, z) => Math.floor(x / cell) + ',' + Math.floor(z / cell);
-  for (const r of RS) { const L = rLen(r), n = Math.max(1, Math.ceil(L / 4)); let prev = -1; for (let k = 0; k <= n; k++) { const p = rAt(r, L * k / n), i = N.length; N.push({ x: p.x, y: p.y, z: p.z, w: r.w, r, e: [] }); if (prev >= 0) { const d = Math.hypot(N[prev].x - p.x, N[prev].z - p.z); N[prev].e.push([i, d]); N[i].e.push([prev, d]); } prev = i; const kk = key(p.x, p.z); if (!hash.has(kk)) hash.set(kk, []); hash.get(kk).push(i); } }
+  for (const r of RS) { const L = rLen(r), n = Math.max(1, Math.ceil(L / 4)); let prev = -1; for (let k = 0; k <= n; k++) { const p = rAt(r, L * k / n), i = N.length; N.push({ x: p.x, y: TRF.surf(r, L * k / n, p.x, p.z) - 0.04, z: p.z, w: r.w, r, e: [] }); if (prev >= 0) { const d = Math.hypot(N[prev].x - p.x, N[prev].z - p.z); N[prev].e.push([i, d]); N[i].e.push([prev, d]); } prev = i; const kk = key(p.x, p.z); if (!hash.has(kk)) hash.set(kk, []); hash.get(kk).push(i); } }
   // junctions: join nodes of different roads that touch
   for (let i = 0; i < N.length; i++) { const a = N[i], cx = Math.floor(a.x / cell), cz = Math.floor(a.z / cell); for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) for (const j of hash.get((cx + dx) + ',' + (cz + dz)) || []) { if (j <= i) continue; const b = N[j]; if (b.r === a.r) continue; const d = Math.hypot(a.x - b.x, a.z - b.z); if (d < Math.min(a.w, b.w) / 2 + 2.6) { a.e.push([j, d]); b.e.push([i, d]); } } }
   BUSX.G = { N, hash, cell }; return BUSX.G;
@@ -10091,8 +10153,10 @@ GAME.placeBus = function (dt) {
   // heading from a point a little ahead (smooth turns at junctions)
   const ah = (s) => { let k = 1; while (k < cum.length - 1 && cum[k] < s) k++; const tt = clamp((s - cum[k - 1]) / Math.max(1e-3, cum[k] - cum[k - 1]), 0, 1); return [pts[k - 1][0] + (pts[k][0] - pts[k - 1][0]) * tt, pts[k - 1][2] + (pts[k][2] - pts[k - 1][2]) * tt]; };
   const fa = ah(clamp(B.s + 3 * B.dir, 0, Lt)), ba = ah(clamp(B.s - 2 * B.dir, 0, Lt)); const tr = Math.atan2(fa[0] - ba[0], fa[1] - ba[1]); B.rot = dt ? angLerp(B.rot, tr, Math.min(1, dt * 5)) : tr;
-  const lane = Math.min(w / 4, 1.6); B.x = cx + Math.cos(B.rot) * lane; B.z = cz - Math.sin(B.rot) * lane; const gy = standY(B.x, B.z); B.y = Math.max(gy, p0[1] + (p1[1] - p0[1]) * t) + 0.02;
-  B.mesh.position.set(B.x, B.y, B.z); B.mesh.rotation.set(0, B.rot, 0);
+  const lane = Math.min(w / 4, 1.6); B.x = cx + Math.cos(B.rot) * lane; B.z = cz - Math.sin(B.rot) * lane;
+  // ver.49: every wheel (axles 2.95 m ahead / 2.0 m behind, ±1.04 m) on the road you see; the body tilts and leans (was: flat, at the higher of the walk height and the route)
+  const P = RIDE.pose(B.ride || (B.ride = { y: p0[1] + (p1[1] - p0[1]) * t }), B.x, B.z, B.rot, 2.95, -2.0, 1.04, null, 0, 1, dt, B.v); B.y = P.y;
+  B.mesh.position.set(P.x, P.y, P.z); B.mesh.rotation.set(0, 0, 0); B.mesh.rotateY(P.yaw); B.mesh.rotateX(-P.pitch); B.mesh.rotateZ(P.roll); B.mesh.updateMatrixWorld(true); B.shown = P;
 };
 GAME.updateBus = function (dt) {
   const B = DV.bus; if (!B) return; const Lt = B.cum[B.cum.length - 1];
@@ -13143,10 +13207,13 @@ BUS2.doors = function (B, dt) { const D = B.mesh && B.mesh.userData.doors; if (!
 // ---------- the bus's own frame (x: curb side, z: forward) to the world ----------
 BUS2.W = function (B, lx, lz) { const c = Math.cos(B.rot), s = Math.sin(B.rot); return [B.x + c * lx + s * lz, B.z - s * lx + c * lz]; };
 BUS2.L = function (B, x, z) { const c = Math.cos(B.rot), s = Math.sin(B.rot), dx = x - B.x, dz = z - B.z; return [c * dx - s * dz, s * dx + c * dz]; };
+BUS2.P = function (B, lx, ly, lz) { return B.mesh.localToWorld(new THREE.Vector3(lx, ly, lz)); };   // a point of the bus (the body tilts on slopes)
+BUS2.yaw = B => B.shown ? B.shown.yaw : B.rot;
+BUS2.floorAt = function (B, x, z, up) { const [lx, lz] = BUS2.L(B, x, z); return BUS2.P(B, lx, up, lz).y; };
 BUS2.FLOOR = 0.65; BUS2.SITK = 0.62; BUS2.dy = 0.28;   // the hero is small: sitting on the cushion (0.47 m above the floor) the feet dangle a little
 // ---------- you, sitting by the window while riding ----------
 BUS2.sit = function (B) {
-  const [x, z] = BUS2.W(B, BUS2.SEAT[0], BUS2.SEAT[1]); PL.mesh.position.set(x, B.mesh.position.y + BUS2.FLOOR + (BUS2.dy || 0), z); PL.mesh.rotation.y = B.rot;
+  const q = BUS2.P(B, BUS2.SEAT[0], BUS2.FLOOR + (BUS2.dy || 0), BUS2.SEAT[1]); PL.mesh.position.copy(q); PL.mesh.rotation.y = BUS2.yaw(B);
   const P = PL.parts, R0 = PL.rest; if (!P || !P.thighL) return;
   P.thighL.rotation.set(-1.45, 0, 0.04); P.thighR.rotation.set(-1.45, 0, -0.04); P.shinL.rotation.set(1.45, 0, 0); P.shinR.rotation.set(1.45, 0, 0);
   P.upperArmL.rotation.set(-0.42, 0, -0.12); P.upperArmR.rotation.set(-0.42, 0, 0.12); P.foreArmL.rotation.set(-0.75, 0, 0); P.foreArmR.rotation.set(-0.75, 0, 0); P.spine.rotation.set(0, 0, 0);
@@ -13154,8 +13221,8 @@ BUS2.sit = function (B) {
 };
 // ---------- the view from inside: 運転席 / 座席 ----------
 BUS2.fp = function (B) {
-  const c = Math.cos(B.rot), s = Math.sin(B.rot); let x, y, z, yaw = B.rot + (CAM.fpLook || 0), pitch = CAM.fpPitch || 0;
-  const e = BUS2.eye(); x = B.x + c * e[0] + s * e[2]; y = B.mesh.position.y + e[1]; z = B.z - s * e[0] + c * e[2];
+  let x, y, z, yaw = BUS2.yaw(B) + (CAM.fpLook || 0), pitch = (CAM.fpPitch || 0) + (B.shown ? B.shown.pitch : 0);
+  const e = BUS2.eye(), q = BUS2.P(B, e[0], e[1], e[2]); x = q.x; y = q.y; z = q.z;
   if (BUS2.view === 'driver') pitch -= 0.17;   // the top of the wheel and the dashboard show at the bottom
   else { yaw += 0.32; pitch -= 0.06; }          // a passenger's eye height, turned a little to the window
   camera.position.set(x, y, z); const cp = Math.cos(pitch); camera.lookAt(x + Math.sin(yaw) * cp, y + Math.sin(pitch), z + Math.cos(yaw) * cp);
@@ -13180,7 +13247,7 @@ BUS2.start = function (type, B) {
   }
   B.wait = Math.max(B.wait, 3.4); BUS2.anim = { type, B, pts, i: 1, t: 0 };
   PL.veh = null; PL.mesh.visible = true; if (CAM.mode === 'first') setViewMode('third'); CAM.distT = 5.2; PL.speed = 0;
-  if (type === 'off') { PL.x = pts[0].x; PL.z = pts[0].z; PL.y = B.mesh.position.y + F; PL.rot = B.rot; }
+  if (type === 'off') { PL.x = pts[0].x; PL.z = pts[0].z; PL.y = BUS2.floorAt(B, PL.x, PL.z, F); PL.rot = B.rot; }
   UI.toast(type === 'board' ? '🎫 整理券をとって、バスに乗った' : '💴 運賃をはらって「ありがとうございました」');
 };
 BUS2.step = function (dt) {
@@ -13188,7 +13255,7 @@ BUS2.step = function (dt) {
   const dx = p.x - PL.x, dz = p.z - PL.z, d = Math.hypot(dx, dz), sp = (p.up > 0 || A.pts[A.i - 1].up > 0 ? 1.5 : 2.2) * dt;
   if (d <= sp) { PL.x = p.x; PL.z = p.z; A.i++; } else { PL.x += dx / d * sp; PL.z += dz / d * sp; }
   if (d > 0.05) PL.rot = angLerp(PL.rot, Math.atan2(dx, dz), Math.min(1, dt * 10));
-  const floorY = B.mesh.position.y + (p.up || 0); PL.y = p.up ? lerp(PL.y, floorY, Math.min(1, dt * 9)) : lerp(PL.y, standY(PL.x, PL.z), Math.min(1, dt * 9));
+  const floorY = BUS2.floorAt(B, PL.x, PL.z, p.up || 0); PL.y = p.up ? lerp(PL.y, floorY, Math.min(1, dt * 9)) : lerp(PL.y, standY(PL.x, PL.z), Math.min(1, dt * 9));
   PL.mesh.position.set(PL.x, PL.y, PL.z); PL.mesh.rotation.y = PL.rot; PL.speed = 1.8; animateHero(dt, 1.8, 0);
   // the camera watches from the curb side, a little ahead of the doors
   CAM.lastDrag = performance.now() / 1000 - 0.6; CAM.yaw = angLerp(CAM.yaw, B.rot + Math.PI / 2 - 0.45, Math.min(1, dt * 2.5)); CAM.pitch = lerp(CAM.pitch, 0.3, Math.min(1, dt * 2));
@@ -13977,9 +14044,9 @@ NET.onCtl = function (id, d) { if (!d || id !== NET.hostId) return; if (d.t === 
 NET.env = () => ({ m: TIME.mode, hf: +currentHour().toFixed(3), w: TIME.weather, so: (typeof SEASON !== 'undefined' && SEASON.override) || null });
 NET.sendEnv = id => { if (NET.A && NET.role === 'host') NET.A.env.send(NET.env(), id ? { target: id } : undefined); };
 NET.applyEnv = function (e) { if (!e) return; if (e.m === 'real') TIME.mode = 'real'; else if (isFinite(e.hf)) { TIME.mode = 'fixed'; TIME.hf = +e.hf; } if (['clear', 'cloudy', 'rain', 'storm', 'snow'].includes(e.w)) { TIME.wmode = 'manual'; TIME.weather = e.w; } if (typeof SEASON !== 'undefined' && (e.so === null || typeof e.so === 'string')) { SEASON.override = e.so; try { SEASON.apply && SEASON.apply(); } catch (er) { } } };
-NET.myState = function () { const v = PL.veh, x = v ? v.x : PL.x, y = v ? (v.y || PL.y) : PL.y, z = v ? v.z : PL.z; return [+x.toFixed(2), +y.toFixed(2), +z.toFixed(2), +PL.rot.toFixed(3), +Math.min(9, PL.speed || (v ? Math.abs(v.v || 0) : 0)).toFixed(2), v ? (v.model || v.kind) : '', GAME.inside ? 1 : 0, v ? +v.rot.toFixed(3) : 0]; };
+NET.myState = function () { const v = PL.veh, x = v ? v.x : PL.x, y = v ? (v.y || PL.y) : PL.y, z = v ? v.z : PL.z; return [+x.toFixed(2), +y.toFixed(2), +z.toFixed(2), +PL.rot.toFixed(3), +Math.min(9, PL.speed || (v ? Math.abs(v.v || 0) : 0)).toFixed(2), v ? (v.model || v.kind) : '', GAME.inside ? 1 : 0, v ? +v.rot.toFixed(3) : 0, v ? +(v.pitch || 0).toFixed(3) : 0, v ? +(v.roll || 0).toFixed(3) : 0]; };   // ver.49: + the car's tilt
 NET.onState = function (id, d) { if (!Array.isArray(d) || d.length < 7) return; const p = NET.peers[id]; if (!p || !p.ok) return; const a = NET.av[id] || NET.avatar(id); if (!a) return;
-  const n = i => (typeof d[i] === 'number' && isFinite(d[i]) ? d[i] : 0); a.tx = clamp(n(0), -400, 400); a.ty = clamp(n(1), -20, 120); a.tz = clamp(n(2), -400, 400); a.trot = n(3); a.spd = clamp(n(4), 0, 30); a.veh = typeof d[5] === 'string' ? d[5].slice(0, 12) : ''; a.inside = !!d[6]; a.vrot = n(7); a.seen = performance.now(); if (!a.placed) { a.x = a.tx; a.y = a.ty; a.z = a.tz; a.rot = a.trot; a.placed = true; } };
+  const n = i => (typeof d[i] === 'number' && isFinite(d[i]) ? d[i] : 0); a.tx = clamp(n(0), -400, 400); a.ty = clamp(n(1), -20, 120); a.tz = clamp(n(2), -400, 400); a.trot = n(3); a.spd = clamp(n(4), 0, 30); a.veh = typeof d[5] === 'string' ? d[5].slice(0, 12) : ''; a.inside = !!d[6]; a.vrot = n(7); a.vp = clamp(n(8), -0.6, 0.6); a.vr = clamp(n(9), -0.6, 0.6); a.seen = performance.now(); if (!a.placed) { a.x = a.tx; a.y = a.ty; a.z = a.tz; a.rot = a.trot; a.placed = true; } };
 NET.onSay = function (id, d) { const p = NET.peers[id], a = NET.av[id]; if (!p || !p.ok || !a || !d) return;
   if (d.t === 'stamp' && NET.STAMP[d.k]) { if (['heart', 'note', 'bang', 'q', 'zzz'].includes(d.k)) LIVE.emote(a, d.k, 2.6); else LIVE.say(a, NET.STAMP[d.k], 2.6); }
   if (d.t === 'ph' && NET.PHRASE[d.i | 0] && (d.i | 0) >= 0) { LIVE.say(a, NET.PHRASE[d.i | 0], 3.6); NET.log(`${p.name}：${NET.PHRASE[d.i | 0]}`); } };
@@ -14002,7 +14069,7 @@ NET.update = function (dt) {
   for (const a of Object.values(NET.av)) {
     const k = Math.min(1, dt * 9); a.x += (a.tx - a.x) * k; a.y += (a.ty - a.y) * k; a.z += (a.tz - a.z) * k; a.rot = angLerp(a.rot, a.trot, k);
     const stale = now - (a.seen || 0) > 6000, inBig = a.veh === 'bus' || a.veh === 'ferry', g = NET.ghostFor(a), show = a.placed && !a.inside && !stale && !GAME.inside;
-    if (g) { g.visible = show; g.position.set(a.x, a.y, a.z); g.rotation.y = a.vrot; }
+    if (g) { g.visible = show; g.position.set(a.x, a.y, a.z); a.gp = (a.gp || 0) + ((a.vp || 0) - (a.gp || 0)) * k; a.gr = (a.gr || 0) + ((a.vr || 0) - (a.gr || 0)) * k; g.rotation.set(0, 0, 0); g.rotateY(a.vrot); g.rotateX(a.gp); g.rotateZ(a.gr); }
     // riding: the vehicle shows (or, in the bus or the ferry, only the name), the body does not
     const body = !(inBig || g); a.mesh.visible = show; a.tag.visible = show && Math.hypot(PL.x - a.x, PL.z - a.z) < 60; if (a.bodyOn !== body) { a.bodyOn = body; for (const o of a.mesh.children) if (o !== a.tag && o !== a.emo && o !== a.sayS) o.visible = body; }
     a.mesh.position.set(a.x, g ? a.y + 1.2 : inBig ? a.y + 1.6 : a.y, a.z); a.mesh.rotation.y = a.rot; a.ph += dt * (a.spd > 0.15 && !g ? 2.4 + a.spd * 1.6 : 1.8);

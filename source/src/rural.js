@@ -110,6 +110,55 @@ TRF.plan = function () {
   for (const c of TRF.cars) c.L = rLen(c.r);
 };
 TRF.pose = function (c) { const a = rAt(c.r, c.s), t = rTan(c.r, c.s), fx = t[0] * c.dir, fz = t[1] * c.dir, off = Math.min(c.r.w * 0.26, 1.7); c.x = a.x + fz * off; c.z = a.z - fx * off; c.y = a.y; c.fx = fx; c.fz = fz; c.rot = Math.atan2(fx, fz); };
+// ---- how a car sits on the road (ver.49): every wheel on the road you see; the body tilts and leans with it ----
+// (before: one height at the car's centre, never tilted → on slopes one end floated and the other sank; the height
+//  came from the walk height, which went up and down in 1 m stairs → shaking; and inside junctions the road's own
+//  heights were used, which can be ~1 m off the junction plate you see)
+TRF.yl = r => { const ty = rType(r); return ty === 'dirt' || ty === 'trail' || ty === 'gravel' ? 0.03 : 0.04; };
+TRF.onStrip = (r, s) => { const L = rLen(r), s0 = r.trim ? r.trim[0] : 0, s1 = L - (r.trim ? r.trim[1] : 0); return s >= s0 && s <= s1 && !(r.cuts || []).some(([a, b]) => s > a && s < b); };
+TRF.projNear = function (r, s, x, z) { // rProject, but only on the few segments around arc s (fast)
+  const c = rCum(r), n = r.pts.length, i0 = rAt(r, s).i; let best = null;
+  for (let i = Math.max(1, i0 - 3); i <= Math.min(n - 1, i0 + 4); i++) { const a = r.pts[i - 1], b = r.pts[i], vx = b[0] - a[0], vz = b[1] - a[1], ll = vx * vx + vz * vz || 1, t = clamp(((x - a[0]) * vx + (z - a[1]) * vz) / ll, 0, 1), px = a[0] + vx * t, pz = a[1] + vz * t, d = Math.hypot(x - px, z - pz); if (!best || d < best.d) best = { d, s: c[i - 1] + (c[i] - c[i - 1]) * t, y: r.h[i - 1] + (r.h[i] - r.h[i - 1]) * t }; }
+  return best;
+};
+// the drivable surface at (x,z): a road strip or a junction plate (never the sidewalks); r/s = the road the car is on (fast path); yRef picks between stacked surfaces
+TRF.ground = function (x, z, r, s, yRef) {
+  const C = [];
+  if (r) { const q = TRF.projNear(r, s, x, z); if (q && q.d <= r.w / 2 + 0.05 && TRF.onStrip(r, q.s)) C.push(q.y + TRF.yl(r)); }
+  const j = typeof JN !== 'undefined' && JN.plateY ? JN.plateY(x, z) : null; if (j !== null) C.push(j);
+  if (!C.length) for (const q of ROADS) { if (q === r || isFoot(q)) continue; const b = rBox(q), R = q.w / 2 + 0.1; if (x < b[0] - R || x > b[2] + R || z < b[1] - R || z > b[3] + R) continue; const pr = rProject(q, x, z); if (pr && pr.d <= q.w / 2 + 0.05 && TRF.onStrip(q, pr.s)) C.push(pr.y + TRF.yl(q)); }
+  if (!C.length) { const e = r ? rAt(r, clamp(s, r.trim ? r.trim[0] : 0, rLen(r) - (r.trim ? r.trim[1] : 0))).y + TRF.yl(r) : (yRef !== undefined ? yRef : standY(x, z)); const g = standY(x, z); return Math.abs(g - e) < 0.3 ? g : e; }   // a gap between strip and plate: the ground there
+  let best = C[0]; if (yRef !== undefined) for (const y of C) if (Math.abs(y - yRef) < Math.abs(best - yRef)) best = y; return best;
+};
+TRF.surf = (r, s, x, z) => TRF.ground(x, z, r, s);
+// sudden changes (a new road at a junction, the other lane after turning round) glide instead of popping
+const RIDE = {};
+RIDE.easeXZ = function (o, x, z, yaw, dt, v) {
+  if (!o.p || !dt || Math.hypot(x - o.p.x, z - o.p.z) > 8) { o.p = { x, z, yaw }; o.o = { x: 0, z: 0, yaw: 0 }; o.jumped = true; return { x, z, yaw }; }
+  const st = Math.abs(v || 0) * dt, P = o.p, O = o.o; if (Math.hypot(x - P.x, z - P.z) > st * 1.6 + 0.2) { O.x += P.x - x; O.z += P.z - z; }
+  let jw = yaw - P.yaw; jw = Math.atan2(Math.sin(jw), Math.cos(jw)); if (Math.abs(jw) > 0.07) O.yaw -= jw;
+  // glide back: quick for small steps, never faster than a car really moves / turns
+  const k = 1 - Math.exp(-dt * 8), m = Math.hypot(O.x, O.z); if (m > 1e-4) { const f = Math.max(0, m - Math.min(m * k, 5 * dt)) / m; O.x *= f; O.z *= f; } else O.x = O.z = 0;
+  { const a = Math.abs(O.yaw); O.yaw = a < 1e-4 ? 0 : Math.sign(O.yaw) * (a - Math.min(a * k, 2.5 * dt)); }
+  o.p = { x, z, yaw }; return { x: x + O.x, z: z + O.z, yaw: yaw + O.yaw };
+};
+RIDE.easeH = function (o, y, pitch, roll, dt, v) { // only steps in the surface are eased (like a suspension); slopes are followed exactly
+  if (!o.h || !dt || Math.abs(y - o.h.y) > 2) { o.h = { y, pitch, roll }; o.oh = { y: 0, pitch: 0, roll: 0 }; return { y, pitch, roll }; }
+  const st = Math.abs(v || 0) * dt, P = o.h, O = o.oh, ly = st * 0.45 + 0.025, jy = y - P.y, jp = pitch - P.pitch, jr = roll - P.roll;
+  if (Math.abs(jy) > ly) O.y -= jy - Math.sign(jy) * ly; if (Math.abs(jp) > 0.035) O.pitch -= jp - Math.sign(jp) * 0.035; if (Math.abs(jr) > 0.035) O.roll -= jr - Math.sign(jr) * 0.035;
+  const k = 1 - Math.exp(-dt * 10); for (const [key, rate] of [['y', 1.2], ['pitch', 0.8], ['roll', 0.8]]) { const a = Math.abs(O[key]); O[key] = a < 1e-4 ? 0 : Math.sign(O[key]) * (a - Math.min(a * k, rate * dt)); }
+  o.h = { y, pitch, roll }; return { y: y + O.y, pitch: pitch + O.pitch, roll: roll + O.roll };
+};
+// pose of a car body with axles at wf (front, +) / wr (rear, −) and wheels at ±wx, standing on TRF.ground
+RIDE.pose = function (o, x, z, yaw, wf, wr, wx, r, s, dir, dt, v) {
+  const P = RIDE.easeXZ(o, x, z, yaw, dt, v), fx = Math.sin(P.yaw), fz = Math.cos(P.yaw), yRef = o.y;
+  const H = (a, b) => TRF.ground(P.x + fx * a + fz * b, P.z + fz * a - fx * b, r, r ? s + a * dir : 0, yRef);   // a: along, b: to the +x side
+  const fP = H(wf, wx), fN = H(wf, -wx), rP = H(wr, wx), rN = H(wr, -wx), hF = (fP + fN) / 2, hR = (rP + rN) / 2;
+  const y = hR + (hF - hR) * (-wr) / (wf - wr), pitch = clamp(Math.atan2(hF - hR, wf - wr), -0.5, 0.5), roll = clamp(Math.atan2((fP + rP) / 2 - (fN + rN) / 2, wx * 2), -0.35, 0.35);
+  // after a jump to a new place altogether (a respawn) nothing glides
+  const E = RIDE.easeH(o, y, pitch, roll, o.jumped ? 0 : dt, v); o.jumped = false; o.y = E.y; return { x: P.x, z: P.z, yaw: P.yaw, y: E.y, pitch: E.pitch, roll: E.roll };
+};
+TRF.vis = function (c, dt) { const T = CAR_TYPES[c.type] || CAR_TYPES.kei; return RIDE.pose(c.ride || (c.ride = { y: c.y }), c.x, c.z, c.rot, T.wb[0], T.wb[1], T.wx, c.r, c.s, c.dir, dt, c.v); };
 TRF.obstacles = function () {
   const O = []; for (const c of TRF.cars) if (c.x !== undefined) O.push({ x: c.x, z: c.z, car: c });
   if (!PL.veh && !GAME.inside) O.push({ x: PL.x, z: PL.z, pl: 1 }); for (const v of VEH) if (v.kind === 'truck') O.push({ x: v.x, z: v.z, veh: v });
@@ -136,9 +185,9 @@ TRF.update = function (dt) {
     if (c.v < 0.3 && gap < 6) { c.block += dt; if (c.block > 7) { c.block = 0; if (Math.hypot(c.x - PL.x, c.z - PL.z) > 70) TRF.spawn(c, true); else c.dir = -c.dir; } } else c.block = 0;
   }
   // draw
-  const show = !GAME.inside, cnt = {}, m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), v = new THREE.Vector3(), sc = new THREE.Vector3(1, 1, 1), Y = new THREE.Vector3(0, 1, 0);
+  const show = !GAME.inside, cnt = {}, m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), v = new THREE.Vector3(), sc = new THREE.Vector3(1, 1, 1), Y = new THREE.Vector3(0, 1, 0), X = new THREE.Vector3(1, 0, 0), Z = new THREE.Vector3(0, 0, 1), qp = new THREE.Quaternion();
   for (const k of Object.keys(CARX.types)) cnt[k] = 0;
-  if (show) for (const c of TRF.cars.concat(TRF.parked || [])) { if (c.x === undefined) continue; const M = CARX.types[c.type], i = cnt[c.type]++; const ty = c.r ? standY(c.x, c.z) : c.y; q.setFromAxisAngle(Y, c.rot); m4.compose(v.set(c.x, Math.max(ty, c.y) + 0.02, c.z), q, sc); M.body.setMatrixAt(i, m4); M.dark.setMatrixAt(i, m4); M.light.setMatrixAt(i, m4); M.body.setColorAt(i, c.col); }
+  if (show) for (const c of TRF.cars.concat(TRF.parked || [])) { if (c.x === undefined) continue; const M = CARX.types[c.type], i = cnt[c.type]++; if (c.r) { const P = TRF.vis(c, dt); q.setFromAxisAngle(Y, P.yaw).multiply(qp.setFromAxisAngle(X, -P.pitch)).multiply(qp.setFromAxisAngle(Z, P.roll)); m4.compose(v.set(P.x, P.y + 0.005, P.z), q, sc); } else { q.setFromAxisAngle(Y, c.rot); m4.compose(v.set(c.x, c.y + 0.02, c.z), q, sc); } M.body.setMatrixAt(i, m4); M.dark.setMatrixAt(i, m4); M.light.setMatrixAt(i, m4); M.body.setColorAt(i, c.col); }
   for (const [k, M] of Object.entries(CARX.types)) { for (const m of [M.body, M.dark, M.light]) { m.count = cnt[k]; m.instanceMatrix.needsUpdate = true; } if (M.body.instanceColor) M.body.instanceColor.needsUpdate = true; }
 };
 // replace the old box-car traffic

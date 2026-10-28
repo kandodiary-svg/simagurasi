@@ -135,7 +135,11 @@ function placeVehicle(v, dt) {
     // the 4 wheels follow this car's real size (bigger cars used to sink at the ends)
     const sp = VSPEC.truck, fl = Math.max(1.1, (sp.len || 1.6) * 0.72), wl = Math.max(0.6, (sp.wid || 0.8) * 0.85), s = Math.sin(v.rot), c = Math.cos(v.rot);
     const W = (a, b) => standY(v.x + s * a + c * b, v.z + c * a - s * b), fL = W(fl, wl), fR = W(fl, -wl), bL = W(-fl, wl), bR = W(-fl, -wl), hf = (fL + fR) / 2, hb = (bL + bR) / 2, hl = (fL + bL) / 2, hr = (fR + bR) / 2;
-    const ty = Math.max((hf + hb + hl + hr) / 4, Math.max(fL, fR, bL, bR) - 0.12); v.y = !dt || ty > v.y ? ty : lerp(v.y, ty, Math.min(1, dt * 12)); v.pitch = lerp(v.pitch, Math.atan2(hb - hf, fl * 2), dt ? Math.min(1, dt * 14) : 1); v.roll = lerp(v.roll, Math.atan2(hr - hl, wl * 2), dt ? Math.min(1, dt * 14) : 1);
+    const ty = Math.max((hf + hb + hl + hr) / 4, Math.max(fL, fR, bL, bR) - 0.12), tp = Math.atan2(hb - hf, fl * 2), tr = Math.atan2(hr - hl, wl * 2);
+    // follow the ground exactly; only a sudden step (a curb, the edge of a plate) is eased over ~0.1 s like a suspension
+    if (!dt || v._ry === undefined || Math.abs(ty - v._ry) > 2) { v._oy = 0; v._op = 0; v._or = 0; }
+    else { const ly = Math.abs(v.v || 0) * dt * 0.45 + 0.02, jy = ty - v._ry, jp = tp - v._rp, jr = tr - v._rr; if (Math.abs(jy) > ly) v._oy -= jy - Math.sign(jy) * ly; if (Math.abs(jp) > 0.03) v._op -= jp - Math.sign(jp) * 0.03; if (Math.abs(jr) > 0.03) v._or -= jr - Math.sign(jr) * 0.03; const k = Math.exp(-dt * 10); v._oy *= k; v._op *= k; v._or *= k; }
+    v._ry = ty; v._rp = tp; v._rr = tr; v.y = ty + v._oy; v.pitch = tp + v._op; v.roll = tr + v._or;
     v.mesh.position.set(v.x, v.y, v.z); v.mesh.rotation.set(0, 0, 0); v.mesh.rotateY(v.rot); v.mesh.rotateX(v.pitch); v.mesh.rotateZ(v.roll);
   } else {
     v.bob += dt; const t = performance.now() / 1000;
