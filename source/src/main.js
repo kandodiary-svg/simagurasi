@@ -4,13 +4,13 @@ const TIME = { mode: 'real', hf: 12, weather: 'clear' };
 let RAIN = null, composer = null, gradePass = null, GAME_RP = null;
 async function init() {
   const ld = document.getElementById('loading'); const step = t => new Promise(r => { ld.textContent = t; setTimeout(r, 16); });
-  renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('c'), antialias: true, powerPreference: 'high-performance' });
+  renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('c'), antialias: !window.__mob, powerPreference: 'high-performance' });
   renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5)); renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.0;
   renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   scene = new THREE.Scene(); camera = new THREE.PerspectiveCamera(55, 1, 0.1, 9000);
-  const rt = new THREE.WebGLRenderTarget(innerWidth, innerHeight, { type: THREE.HalfFloatType, samples: 4 });
+  const rt = new THREE.WebGLRenderTarget(innerWidth, innerHeight, { type: THREE.HalfFloatType, samples: window.__mob ? 0 : 4 }); // phones: no multisampling (lighter)
   composer = new EffectComposer(renderer, rt); GAME_RP = new RenderPass(scene, camera); composer.addPass(GAME_RP);
-  const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth / 2, innerHeight / 2), 0.32, 0.6, 0.86); composer.addPass(bloom);
+  const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth / 2, innerHeight / 2), 0.32, 0.6, 0.86); composer.addPass(bloom); if (window.__mob) bloom.enabled = false; // phones: no glow pass (it renders the screen several more times)
   composer.addPass(new OutputPass());
   // display grade (after tone mapping, sRGB): near-neutral saturation with the lime greens tamed, gentle filmic contrast,
   // warm highlights / cool shadows, soft vignette

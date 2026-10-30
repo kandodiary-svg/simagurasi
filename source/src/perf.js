@@ -28,7 +28,7 @@ PERF.tick = function () {
   if (now > PERF.cullT) { PERF.cullT = now + 250; PERF.cull(now); }
   if (!PERF.auto || document.hidden || dtm > 250 || dtm <= 0 || GAME.modal === 'title' || window.__manual) return;
   PERF.ema += (dtm - PERF.ema) * 0.05; const s = dtm / 1000;
-  if (PERF.ema > 22.5) { PERF.badT += s; PERF.goodT = 0; } else if (PERF.ema < 18.2) { PERF.goodT += s; PERF.badT = Math.max(0, PERF.badT - s); } else { PERF.badT = Math.max(0, PERF.badT - s * 0.5); PERF.goodT = 0; }
+  const TH = PERF.TH || { bad: 22.5, good: 18.2 }; if (PERF.ema > TH.bad) { PERF.badT += s; PERF.goodT = 0; } else if (PERF.ema < TH.good) { PERF.goodT += s; PERF.badT = Math.max(0, PERF.badT - s); } else { PERF.badT = Math.max(0, PERF.badT - s * 0.5); PERF.goodT = 0; }
   if (PERF.badT > 3 && PERF.level < 3) { if (now - PERF.lastUp < 12000) PERF.lockUntil = now + 90000; PERF.setLevel(PERF.level + 1); }
   else if (PERF.goodT > 12 && PERF.level > 0 && now > PERF.lockUntil) { PERF.lastUp = now; PERF.setLevel(PERF.level - 1); }
 };

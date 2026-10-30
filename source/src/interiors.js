@@ -55,8 +55,8 @@ INT.toggle = () => INT.setMode(INT.mode === 'room' ? 'near' : INT.mode === 'near
 // movement relative to the camera (ちかく) / your own eyes (目線)
 { const _mi = moveInput; moveInput = function () { const r = _mi.apply(this, arguments); if (!GAME.inside || GAME.roomEdit || INT.mode === 'room') return r; if (INT.mode === 'eye') return [0, 0, 0]; const [ix, iz, l] = r; if (l < 0.01) return r; const a = Math.atan2(ix, -iz) + INT.yaw; return [Math.sin(a), -Math.cos(a), l]; }; }
 // drag with the mouse to look around
-{ let drag = null; addEventListener('pointerdown', e => { if (!GAME.inside || GAME.roomEdit || GAME.modal || INT.mode === 'room' || e.target.id !== 'c') return; drag = { x: e.clientX, y: e.clientY }; });
-  addEventListener('pointermove', e => { if (!drag) return; const dx = e.clientX - drag.x, dy = e.clientY - drag.y; drag = { x: e.clientX, y: e.clientY }; if (INT.mode === 'near') { INT.yaw -= dx * 0.006; INT.pitch = clamp(INT.pitch + dy * 0.004, 0.25, 1.2); } else if (INT.mode === 'eye') { PL.rot -= dx * 0.005; INT.lookP = clamp(INT.lookP - dy * 0.004, -0.9, 0.8); } });
+{ let drag = null; addEventListener('pointerdown', e => { if (!GAME.inside || GAME.roomEdit || GAME.modal || INT.mode === 'room' || e.target.id !== 'c') return; drag = { x: e.clientX, y: e.clientY, k: typeof MOB !== 'undefined' ? MOB.k : 0 }; });
+  addEventListener('pointermove', e => { if (!drag) return; if (typeof MOB !== 'undefined' && drag.k !== MOB.k) { drag = { x: e.clientX, y: e.clientY, k: MOB.k }; return; } const dx = e.clientX - drag.x, dy = e.clientY - drag.y; drag = { x: e.clientX, y: e.clientY, k: drag.k }; if (INT.mode === 'near') { INT.yaw -= dx * 0.006; INT.pitch = clamp(INT.pitch + dy * 0.004, 0.25, 1.2); } else if (INT.mode === 'eye') { PL.rot -= dx * 0.005; INT.lookP = clamp(INT.lookP - dy * 0.004, -0.9, 0.8); } });
   addEventListener('pointerup', () => { drag = null; }); }
 { const _ur = GAME.updateRoom; GAME.updateRoom = function (dt) {
   if (SHOP.updateEat(dt)) { INT.cam(dt); return; }
@@ -79,7 +79,7 @@ INT.cam = function (dt) { const S = ROOM.size, H = GAME.home(), WH = (H && H.wh)
     for (const [dist, up] of [[3.4, 0], [3.4, 0.18], [3.4, 0.36], [3.4, 0.52], [2.5, 0.52], [1.8, 0.52], [1.3, 0.6]]) { const p = Math.min(1.25, INT.pitch + up), cp2 = Math.cos(p), to = new THREE.Vector3(tx + Math.sin(INT.yaw) * dist * cp2, Math.min(1.0 + Math.sin(p) * dist, dist < 3.3 ? WH - 0.15 : WH + 1.2), tz + Math.cos(INT.yaw) * dist * cp2), dir = to.clone().sub(from), L = dir.length(); rc.set(from, dir.normalize()); rc.far = L - 0.1; rc.near = 0.35;
       const hit = rc.intersectObjects(objs, false).find(h => !(h.object.material && h.object.material.transparent)); INT._pUp = up; INT._dW = dist; if (!hit) break; } } }
   INT._pNow = (INT._pNow === undefined ? INT.pitch : INT._pNow) + (Math.min(1.25, INT.pitch + (INT._pUp || 0)) - (INT._pNow === undefined ? INT.pitch : INT._pNow)) * Math.min(1, dt * 4);
-  INT._dNow = (INT._dNow || 3.4) + ((INT._dW || 3.4) - (INT._dNow || 3.4)) * Math.min(1, dt * 4); const dist = INT._dNow;
+  INT._dNow = (INT._dNow || 3.4) + ((INT._dW || 3.4) - (INT._dNow || 3.4)) * Math.min(1, dt * 4); const dist = INT._dNow * (INT.zk || 1);
   const cp = Math.cos(INT._pNow); let cx = tx + Math.sin(INT.yaw) * dist * cp, cz = tz + Math.cos(INT.yaw) * dist * cp, cy = 1.0 + Math.sin(INT._pNow) * dist;
   cx = clamp(cx, -S.w / 2 + 0.3, S.w / 2 - 0.3); cz = clamp(cz, -S.d / 2 + 0.3, S.d / 2 + 2.5); cy = Math.min(cy, dist < 3.3 ? WH - 0.15 : WH + 1.2); const want = new THREE.Vector3(cx, cy, cz);
   if (INT._snap || camera.position.distanceTo(want) > 8) { camera.position.copy(want); INT._snap = false; INT._dNow = INT._dW || 3.4; } else camera.position.lerp(want, Math.min(1, dt * 6)); camera.lookAt(tx, 0.95, tz); };

@@ -124,7 +124,10 @@ Object.assign(GAME, {
     if (!ROOM._ct || t - ROOM._ct > 20) { ROOM._ct = t; ROOM.clocks.forEach(c => c()); }
     // camera
     const back = S.d / 2 + 3.6 + S.w * 0.18, hgt = 4.4 + S.w * 0.22; const tx = this.roomEdit ? 0 : PL.x * 0.35, tz = this.roomEdit ? 0 : PL.z * 0.25;
-    camera.position.lerp(new THREE.Vector3(tx, hgt + (this.roomEdit ? 3.2 : 0), back + tz * 0.5 + (this.roomEdit ? 1.2 : 0)), Math.min(1, dt * 4)); camera.lookAt(tx, this.roomEdit ? -1.2 : 0.4, tz - 0.6 + (this.roomEdit ? 1.6 : 0));
+    const cpos = new THREE.Vector3(tx, hgt + (this.roomEdit ? 3.2 : 0), back + tz * 0.5 + (this.roomEdit ? 1.2 : 0)), clk = new THREE.Vector3(tx, this.roomEdit ? -1.2 : 0.4, tz - 0.6 + (this.roomEdit ? 1.6 : 0));
+    // 模様がえ on a phone: two fingers bring the camera closer (ROOM.zk) and slide it over the room (ROOM.pan); a mouse never sets them
+    if (this.roomEdit && ROOM.zk && ROOM.zk < 1) { const pn = ROOM.pan || { x: 0, z: 0 }; cpos.lerp(clk, 1 - ROOM.zk); cpos.x += pn.x; cpos.z += pn.z; clk.x += pn.x; clk.z += pn.z; } else if (!this.roomEdit && ROOM.zk) { ROOM.zk = 1; ROOM.pan = null; }
+    camera.position.lerp(cpos, Math.min(1, dt * 4)); camera.lookAt(clk);
     if (this.roomEdit) this.roomEditUpdate();
   },
   roomBlocked(x, z) { for (const it of this.home().items) { const F = FURN.find(f => f.id === it.id); if (F.wall || F.flat || F.low) continue; const c = Math.cos(it.rot || 0), s = Math.sin(it.rot || 0), dx = x - it.x, dz = z - it.z, lx = dx * c - dz * s, lz = dx * s + dz * c; if (Math.abs(lx) < F.w / 2 + 0.22 && Math.abs(lz) < F.d / 2 + 0.22) return true; } return false; },
