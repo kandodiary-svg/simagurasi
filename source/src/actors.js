@@ -216,20 +216,20 @@ function updateCamera(dt) {
   }
   const focus = PL.veh ? new THREE.Vector3(PL.veh.x, PL.veh.mesh.position.y + (PL.veh.kind === 'boat' ? 2.4 : 1.6), PL.veh.z) : new THREE.Vector3(PL.x, PL.y + 1.05, PL.z);
   const free = now - CAM.lastDrag > 1.5 && !CAM.drag && !(typeof EDIT !== 'undefined' && EDIT.on);
-  // ---- which way the camera looks (ver.45) ----
-  // vehicles: stay behind them. On foot: when the way you walk differs clearly from where the camera looks (more than ~20°),
-  // the camera turns round behind you at an even, limited speed until it is straight behind, then stops. Small zig-zags don't
-  // sway it, walking toward the camera never flips it, and your own pitch and zoom are left alone.
+  // ---- which way the camera looks (ver.52) ----
+  // vehicles: stay behind them. On foot: when you turn (the way you walk differs from where the camera looks by more than ~12°),
+  // the camera swings round behind you — quickly for a big turn, gently for a small one — until it is straight behind, then stops.
+  // Walking straight toward the camera (more than ~150°) never flips it; your own pitch and zoom are left alone.
   if (PL.veh && free) { CAM.yaw = angLerp(CAM.yaw, PL.veh.rot + Math.PI, Math.min(1, dt * 2.2)); CAM.yawV = 0; }
   else {
     let want = 0;
     if (!PL.veh && free && PL.speed > 0.6 && CAM.follow !== false && CAM.style !== 'top') {
       const d = angDiff(PL.rot + Math.PI, CAM.yaw), ad = Math.abs(d);
-      if (!CAM.turning && ad > 0.36 && ad < 2.0) CAM.turning = true; if (CAM.turning && (ad < 0.04 || ad > 2.3)) CAM.turning = false;
-      CAM.followT = Math.min(1, (CAM.followT || 0) + dt / 0.5);
-      if (CAM.turning) want = Math.sign(d) * Math.min(0.85, ad * 1.2) * CAM.followT * Math.min(1, PL.speed / 2.2);
+      if (!CAM.turning && ad > 0.21 && ad < 2.6) CAM.turning = true; if (CAM.turning && (ad < 0.03 || ad > 2.75)) CAM.turning = false;
+      CAM.followT = Math.min(1, (CAM.followT || 0) + dt / 0.3);
+      if (CAM.turning) want = Math.sign(d) * Math.min(2.4, ad * 2.4) * CAM.followT * Math.min(1, PL.speed / 1.8);
     } else { CAM.followT = Math.max(0, (CAM.followT || 0) - dt * 2); CAM.turning = false; }
-    CAM.yawV = lerp(CAM.yawV || 0, want, Math.min(1, dt * 4)); CAM.yaw += CAM.yawV * dt;
+    CAM.yawV = lerp(CAM.yawV || 0, want, Math.min(1, dt * 6)); CAM.yaw += CAM.yawV * dt;
   }
   if (KEYS.KeyQ) { CAM.yaw += dt * 1.8; CAM.lastDrag = now; } if (KEYS.KeyE && !PL.veh) { CAM.yaw -= dt * 1.8; CAM.lastDrag = now; }
   CAM.dist = lerp(CAM.dist, CAM.distT, Math.min(1, dt * 4));
@@ -248,11 +248,27 @@ function updateCamera(dt) {
   let base = probe(ray(CAM.pitch)), pbT = 0;
   CAM.pb = CAM.pb || 0; CAM.pbHold = Math.max(0, (CAM.pbHold || 0) - dt);
   if (base.L < 2.2 && full > 2.5) { // backed right up against a wall: rise over your shoulder rather than sit in the wall
-    let best = base.L; for (const b of [0.3, 0.6, 0.9, 1.1]) { if (CAM.pitch + b > 1.45) break; const L2 = probe(ray(CAM.pitch + b)).L; if (L2 > best + 0.5) { best = L2; pbT = b; } if (L2 >= full * 0.9) break; } if (pbT) CAM.pbHold = 0.6; }
+    let best = base.L; for (const b of [0.3, 0.6, 0.9, 1.1]) { if (CAM.pitch + b > 1.2) break; const L2 = probe(ray(CAM.pitch + b)).L; if (L2 > best + 0.5) { best = L2; pbT = b; } if (L2 >= full * 0.9) break; } if (pbT) CAM.pbHold = 0.6; }
   else if (CAM.pbHold > 0) pbT = CAM.pb;
   CAM.pb = lerp(CAM.pb, pbT, Math.min(1, dt * (pbT > CAM.pb ? 4 : 1.5)));
-  const pitch = CAM.pitch + CAM.pb, dir = ray(pitch);
-  let L = probe(dir).L;
+  // ---- nothing may hide you (ver.52: no see-through window any more) ----
+  // when the line from the camera to you is blocked (a wall, a car, a tree, a post), the camera rises over it or comes closer —
+  // the smallest change that shows you — and goes back out gently once you have been in the open for a moment
+  { try { if (typeof SEE !== 'undefined' && SEE.crownUpdate) SEE.crownUpdate(); } catch (e) { }
+    CAM.occP = CAM.occP || 0; CAM.occF = CAM.occF || 1; CAM.occY = CAM.occY || 0; CAM.occN = (CAM.occN || 0) - 1;
+    if (!CAM.occW || CAM.occN <= 0) { const p0 = CAM.pitch + CAM.pb, lenB = CAM.len || full;
+      const at = (y, pb, f) => { const pt = Math.min(1.45, p0 + pb), cp = Math.cos(pt), yw = CAM.yaw + y; return T.clone().addScaledVector(new THREE.Vector3(Math.sin(yw) * cp, Math.sin(pt), Math.cos(yw) * cp), Math.max(CAMX.MIN, lenB * f)); };
+      let w = [0, 0, 1];
+      if (!CAMX.sees(at(CAM.occY, CAM.occP, CAM.occF), T) || !CAMX.sees(at(0, 0, 1), T)) { w = null; const sg = CAM.occY < 0 ? -1 : 1;
+        for (const c of CAMX.OCC) { if (c[1] > 0 && p0 + c[1] > 1.15) continue; for (const k of c[0] ? [sg, -sg] : [1]) { const y = c[0] * k; if (CAMX.sees(at(y, c[1], c[2]), T)) { w = [y, c[1], c[2]]; break; } } if (w) break; }
+        if (!w) w = [0, 0.5, 0.3]; }
+      CAM.occW = w; CAM.occN = w[0] || w[1] || w[2] < 1 ? 4 : 2; }
+    const W = CAM.occW, outward = Math.abs(W[0]) < Math.abs(CAM.occY) - 0.01 || W[1] < CAM.occP - 0.01 || W[2] > CAM.occF + 0.01;
+    CAM.occHold = outward ? (CAM.occHold || 0) + dt : 0;
+    if (!outward || CAM.occHold > 0.5) { const kin = Math.min(1, dt * 4), kout = Math.min(1, dt * 1.2);
+      CAM.occY = lerp(CAM.occY, W[0], Math.abs(W[0]) > Math.abs(CAM.occY) ? kin : kout); CAM.occP = lerp(CAM.occP, W[1], W[1] > CAM.occP ? kin : kout); CAM.occF = lerp(CAM.occF, W[2], W[2] < CAM.occF ? kin : kout); } }
+  const pitch = Math.min(1.45, CAM.pitch + CAM.pb + CAM.occP), dir = (() => { const cp = Math.cos(pitch), yw = CAM.yaw + CAM.occY; return new THREE.Vector3(Math.sin(yw) * cp, Math.sin(pitch), Math.cos(yw) * cp); })();
+  let L = probe(dir).L * CAM.occF;
   // come back out only once it has stayed clear for a moment (walking past posts and doorways made the distance breathe)
   if (CAM.len && L > CAM.len + 0.3) { CAM.outT = (CAM.outT || 0) + dt; if (CAM.outT < 0.6) L = CAM.len; } else CAM.outT = 0;
   CAM.len = !CAM.len ? L : L < CAM.len ? Math.max(L, lerp(CAM.len, L, Math.min(1, dt * 9))) : lerp(CAM.len, L, Math.min(1, dt * 1.6));   // in quickly, out gently
@@ -299,6 +315,20 @@ CAMX.free = function (T, dir, full, trees) {
     if (s) return { L: Math.max(CAMX.MIN, t - 0.45), low: false };
     if (trees && t > 2.2 && SEE.crownsAt(T.x + dir.x * t, y, T.z + dir.z * t, 0.95).length) return { L: Math.max(2.2, t - 0.4), low: false }; }
   return { L: full, low: false };
+};
+// can the camera at p see you (T)? You are hidden only when both your body and your head are behind something
+// (buildings with their height, walls, fences, cars, tree crowns and trunks; a thin post only when the camera is close to it —
+//  farther away it covers just a slice of you)
+// (yaw swing, pitch up, distance factor) — tried in this order, least change first; a swing is tried to both sides
+CAMX.OCC = [[0, 0.2, 1], [0, 0, 0.72], [0.35, 0, 1], [0, 0.2, 0.72], [0.35, 0.2, 0.85], [0, 0.4, 1], [0, 0, 0.5], [0.7, 0, 1], [0, 0.25, 0.5], [0.7, 0.2, 0.8], [0, 0.4, 0.72], [0, 0, 0.32], [1.05, 0.15, 0.9], [0, 0.6, 1], [0, 0.45, 0.5]];
+CAMX.sees = function (c, T) {
+  const foot = !PL.veh, pts = [T, new THREE.Vector3(T.x, T.y + 0.55, T.z)];
+  for (const P of pts) { const L = c.distanceTo(P), n = Math.ceil(L / 0.3); let blocked = false;
+    for (let i = 1; i < n; i++) { const t = i / n; if (L * (1 - t) < (foot ? 0.5 : 2.6)) break; const x = c.x + (P.x - c.x) * t, y = c.y + (P.y - c.y) * t, z = c.z + (P.z - c.z) * t;
+      if (CAMX.solid(x, y, z, true) || (typeof SEE !== 'undefined' && SEE.grid && SEE.crownsAt(x, y, z, 0.85).length)) { blocked = true; break; }
+      if (collidersNear(x, z).some(q => (t < q.r / 0.28) && !q.off && q.r !== undefined && (q.kind === 'tree' || q.kind === 'pole') && Math.hypot(x - q.x, z - q.z) < q.r + 0.08 && y < groundH(q.x, q.z) + (q.kind === 'pole' ? 3.4 : 3))) { blocked = true; break; } }
+    if (!blocked) return true; }
+  return false;
 };
 // ---------- effects ----------
 const FX = {

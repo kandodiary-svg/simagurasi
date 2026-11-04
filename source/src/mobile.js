@@ -25,7 +25,7 @@ MOB.fovFix = function () { if (!MOB.on) { const u = camera.userData; if (u.adjFo
 { const _uc = updateCamera; updateCamera = function () { const r = _uc.apply(this, arguments); try { MOB.fovFix(); } catch (e) { } return r; }; }
 { const _ur = GAME.updateRoom; GAME.updateRoom = function () { const r = _ur.apply(this, arguments); try { MOB.fovFix(); MOB.viewShift(); } catch (e) { } return r; }; }
 // a tall screen inside a building: the near camera shows the room a little higher (less of the dark outside below the floor, the player sits lower, under the cards)
-MOB.viewShift = function () { if (MOB._meetVO) { if (MOB.on && GAME.modal === 'meeting' && innerWidth < innerHeight) return; MOB._meetVO = false; MOB._vs = null; camera.aspect = innerWidth / innerHeight; camera.clearViewOffset(); camera.updateProjectionMatrix(); }
+MOB.viewShift = function () { if (MOB._meetVO) { if (MOB.on && GAME.modal === 'meeting') return; MOB._meetVO = false; MOB._vs = null; camera.aspect = innerWidth / innerHeight; camera.clearViewOffset(); camera.updateProjectionMatrix(); }
   if (!MOB.on && !MOB._vs) return; let k = 0, kx = 0; try { if (MOB.on && ((GAME.inside && GAME.roomEdit) || (EDIT.on && !GAME.inside)) && camera.aspect > 1) kx = MOB.roomKx || 0; } catch (e) { } try { k = MOB.on && GAME.inside && !GAME.roomEdit && typeof INT !== 'undefined' && INT.mode === 'near' && camera.aspect < 0.85 && !(typeof PHOTO !== 'undefined' && PHOTO.on) ? 0.14 : 0; } catch (e) { }
   const W = innerWidth, H = innerHeight, sig = k || kx ? [W, H, k, kx].join() : ''; if (sig === MOB._vs) return; MOB._vs = sig; if (k || kx) camera.setViewOffset(W, H, -kx, -Math.round(H * k), W, H); else camera.clearViewOffset(); };
 // ---------- words: key names in messages become the buttons you have on a phone ----------
@@ -213,7 +213,7 @@ html.mob #game .gmeet button{min-height:40px}
   html.mob #fishHud{bottom:calc(env(safe-area-inset-bottom,0px) + 8px)}
   #mJoyZone{width:40vw;height:auto;top:calc(env(safe-area-inset-top,0px) + 176px)}
   #mCtl.fixedjoy #mJoyZone{top:auto}
-  html.mob #game .gmeet{max-height:calc(100vh - 16px);max-height:calc(100dvh - 16px - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px))}
+  html.mob #game .gmeet{left:auto;right:calc(env(safe-area-inset-right,0px) + 8px);transform:none;top:calc(env(safe-area-inset-top,0px) + 8px);bottom:calc(env(safe-area-inset-bottom,0px) + 8px);width:min(420px,48vw);max-height:none}
   html.mob #hud.editing .editp{left:calc(env(safe-area-inset-left,0px) + 8px)!important;top:calc(env(safe-area-inset-top,0px) + 8px);bottom:auto;width:min(320px,44vw)!important;max-height:calc(100vh - 16px);max-height:calc(100dvh - 16px - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px));transform:none;overflow:auto}
   html.mob.medit #hud .gside,html.mob.medit #hud .clock,html.mob.medit #buffHud{display:none!important}
   html.mob.mredit #hud .clock,html.mob.mredit #hud .gside,html.mob.mredit #shopHud,html.mob.mredit #hud .minimap{display:none!important}
@@ -498,9 +498,12 @@ addEventListener('pointerdown', e => { if (!MOB.on || e.target.id !== 'c') retur
 setTimeout(() => { const _om = SHOP.openMenu; if (_om) SHOP.openMenu = function (title) { const g = GAME, same = MOB.on && g.modal === 'menu' && SHOP._mTitle === title, mb = same && g.el.modal.querySelector('.mb'), st = mb ? mb.scrollTop : 0; SHOP._mTitle = title; const r = _om.apply(this, arguments); if (same) { try { const m2 = g.el.modal.querySelector('.mb'); if (m2) m2.scrollTop = st; } catch (e) { } } return r; }; }, 0); // (SHOP.openMenu is made after this file)
 // scenes with their own camera (the island meeting, story scenes) on a tall screen: a wider view so the people around are in the picture
 { const _co = GAME.camOverride; GAME.camOverride = function () { const r = _co.apply(this, arguments); if (r && MOB.on) { try { const W = innerWidth, H = innerHeight, a = W / H;
-    // the island meeting on a tall screen: the picture a wide screen shows (everyone at the table) is put across the part above the panel
-    const mp = this.modal === 'meeting' && a < 1 && this.el.meet && !this.el.meet.hidden ? this.el.meet.getBoundingClientRect() : null;
-    if (mp && mp.height) { const Hv = Math.round(Math.max(H * 0.28, Math.min(H * 0.9, mp.top - 4))), fh = Math.round(W / 1.6), oy = -Math.max(0, Math.round(Hv * 0.42 - fh * 0.28)), sig = 'meet' + [W, H, fh, oy].join(); if (MOB._vs !== sig) { MOB._vs = sig; camera.setViewOffset(W, fh, 0, oy, W, H); } camera.aspect = 1.6; camera.updateProjectionMatrix(); MOB._meetVO = true; return r; }
+    // the island meeting: the picture a wide screen shows (everyone at the table) is put in the part the panel leaves free —
+    // above it on a tall screen, to its left on a wide one (the panel then stands at the right)
+    const mp = this.modal === 'meeting' && this.el.meet && !this.el.meet.hidden ? this.el.meet.getBoundingClientRect() : null;
+    if (mp && mp.height) { let fw, fh, ox, oy; if (a < 1) { const Hv = Math.round(Math.max(H * 0.28, Math.min(H * 0.9, mp.top - 4))); fw = Math.round(W * 1.12); fh = Math.round(fw / 1.6); ox = Math.round((fw - W) / 2); oy = -Math.max(0, Math.round(Hv * 0.5 - fh * 0.36)); }
+      else { const Wf = Math.max(220, Math.round(mp.left) - 8); fw = Math.round(Wf * 1.06); fh = Math.round(fw / 1.6); if (fh > H - 16) { fh = H - 16; fw = Math.round(fh * 1.6); } ox = Math.round((fw - Wf) / 2); oy = -Math.round((H - fh) / 2); }
+      const sig = 'meet' + [W, H, fw, fh, ox, oy].join(); if (MOB._vs !== sig) { MOB._vs = sig; camera.setViewOffset(fw, fh, ox, oy, W, H); } camera.aspect = 1.6; camera.updateProjectionMatrix(); MOB._meetVO = true; return r; }
     if (a < 1) { const u = camera.userData, f = Math.min(92, Math.max(camera.fov, 2 * Math.atan(Math.tan(25 * Math.PI / 180) / a) * 180 / Math.PI)); if (Math.abs(camera.fov - f) > 0.01) { camera.fov = f; camera.updateProjectionMatrix(); } u.adjFov = f; } } catch (e) { } } return r; }; }
 // ⚙ 「⚡ 自動」 is the picture quality (its meaning is only in a mouse-over note on a PC)
 { const _pb = PERF.btn; PERF.btn = function () { const r = _pb.apply(this, arguments); if (MOB.on) { const b = document.getElementById('autoBtn'); if (b && !/画質/.test(b.textContent)) b.textContent = b.textContent.replace('⚡ 自動', '⚡ 画質：自動'); } return r; }; }

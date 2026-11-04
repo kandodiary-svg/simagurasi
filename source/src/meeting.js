@@ -77,7 +77,7 @@ Object.assign(GAME, {
     const H = PLACED.hall;
     this.fade(() => {
       NPCS.filter(n => n.seat).forEach(n => { n.seat = null; n.x = n.hx; n.z = n.hz; n.y = groundH(n.x, n.z); if (n.vote) n.vote.visible = false; });
-      PL.x = H.entry.x; PL.z = H.entry.z; PL.y = groundH(PL.x, PL.z); PL.rot = H.rot; CAM.yaw = PL.rot + Math.PI; CAM.snap = true;
+      PL.x = H.entry.x; PL.z = H.entry.z; PL.y = groundH(PL.x, PL.z); PL.rot = H.rot; CAM.yaw = PL.rot; CAM.snap = true;   // the camera outside, in front of you (not in the hall behind the posts)
       H.board.userData.set('島の会議'); this.el.hud.hidden = false; this.mt = null; this.modal = null; this.el.meet.hidden = true; this.renderTracker(); document.getElementById('c').focus();
     });
   },
@@ -113,7 +113,9 @@ Object.assign(GAME, {
   },
   camOverride() {
     if (this.modal !== 'meeting' || !PLACED.hall) return false; const H = PLACED.hall;
-    const [cx, cz] = toWorld(H, 0.7, 3.9), [tx, tz] = toWorld(H, -0.7, 0.4); camera.position.set(cx, H.y + 2.9, cz); camera.lookAt(tx, H.y - 0.25, tz); return true;
+    // ver.52: from the open front, a little above head height, looking slightly down — everyone at the table (you at its left end),
+    // their name tags and the whiteboard behind them sit in the upper part of the picture, above the meeting panel
+    const [cx, cz] = toWorld(H, -0.6, 4.0), [tx, tz] = toWorld(H, -0.6, -3.0); camera.position.set(cx, H.y + 2.3, cz); camera.lookAt(tx, H.y + 0.16, tz); return true;
   },
 });
 // seated pose for meeting attendees (called from updateVillagers)

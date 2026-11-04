@@ -135,3 +135,6 @@ SEE.patchWorld = function () {
     for (const m of ms) { if (!m.isMeshStandardMaterial || SEE.mats.has(m) || skip.has(m) || SEE.skip.has(m)) continue; if (isUnder(o)) { SEE.skip.add(m); continue; } SEE.patch(m, 1.0); n++; } });
   SEE.worldN = (SEE.worldN || 0) + n; return n;
 };
+// ver.52: no see-through any more (no round window around you, no fading leaves) — the camera itself keeps you in view instead
+// (it rises over or comes in front of whatever would hide you: CAMX.sees in actors.js). The crown grid stays for that.
+SEE.disabled = true; SEE.patch = function () { }; SEE.patchWorld = function () { return 0; };

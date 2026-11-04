@@ -252,6 +252,7 @@ function makeHall(Hh) {
   for (let k = 0; k <= 4; k++) g.add(box(0.24, WH, 0.24, MAT.darkwood, -W / 2 + k * W / 4, WH / 2, D / 2));
   g.add(box(W + 0.3, 0.35, 0.3, MAT.darkwood, 0, WH - 0.17, D / 2));
   const A = archMats();
+  g.add(box(W, 0.05, D, A.soffitWood || MAT.wood, 0, WH - 0.045, 0));   // a ceiling (from inside you saw the trees through the roof)
   for (const s of [-1, 1]) { B(g, 1.5, 2.3, 0.06, A.koshi, s * (W / 2 - 1.0), 1.2, D / 2 - 0.15); B(g, 1.62, 0.1, 0.12, MAT.darkwood, s * (W / 2 - 1.0), 2.38, D / 2 - 0.15); }
   for (const s of [-1, 1]) for (const z of [-1.6, 1.6]) winPart(g, s * (W / 2 + 0.13), 1.85, z, s * Math.PI / 2, 1.5, 1.0, { style: 'slide', trim: MAT.darkwood, sash: A.sashBr, cur: z > 0 ? 4 : 2, hisashi: MAT.kawara });
   // lattice transom (欄間) across the open front
@@ -270,7 +271,7 @@ function makeHall(Hh) {
   g.add(box(9.4, 0.07, 1.1, tableM, 0, 0.6, -1.0)); for (const sx of [-4.4, 4.4]) for (const sz of [-1.4, -0.6]) g.add(box(0.08, 0.56, 0.08, MAT.darkframe, sx, 0.31, sz));
   Hh.seats = [];
   for (let i = 0; i < 6; i++) { const x = -3.75 + i * 1.5, z = -2.1; g.add(box(0.5, 0.06, 0.48, tableM, x, 0.34, z)); g.add(box(0.5, 0.5, 0.06, tableM, x, 0.6, z - 0.24)); for (const a of [-0.21, 0.21]) for (const b of [-0.2, 0.2]) g.add(box(0.04, 0.32, 0.04, MAT.darkframe, x + a, 0.16, z + b)); Hh.seats.push([x, z + 0.05]); }
-  const wb = dynSign(3.2, 1.3, '島の会議', '#f8f8f4', '#2f5a3f'); wb.position.set(0, 2.05, -D / 2 + 0.14); g.add(wb); Hh.board = wb; g.add(box(3.4, 1.5, 0.05, MAT.darkframe, 0, 2.05, -D / 2 + 0.12));
+  const wb = dynSign(3.2, 1.3, '島の会議', '#f8f8f4', '#2f5a3f'); wb.position.set(0, 2.05, -D / 2 + 0.17); g.add(wb); Hh.board = wb; g.add(box(3.4, 1.5, 0.05, MAT.darkframe, 0, 2.05, -D / 2 + 0.12));
   for (const x of [-3, 0, 3]) { const l = cylM(0.35, 0.45, 0.25, MAT.lamp, x, WH - 0.35, 0, 16); HOUSE_LIGHTS.push(l); g.add(l); }
   // sign above the entrance + notice board
   const sign = dynSign(3.6, 0.7, '集会所', '#3a2a1e', '#f6efe0'); sign.position.set(0, WH + 0.25, D / 2 + 0.17); g.add(sign); Hh.sign = sign;
