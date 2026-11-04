@@ -225,9 +225,9 @@ function updateCamera(dt) {
     let want = 0;
     if (!PL.veh && free && PL.speed > 0.6 && CAM.follow !== false && CAM.style !== 'top') {
       const d = angDiff(PL.rot + Math.PI, CAM.yaw), ad = Math.abs(d);
-      if (!CAM.turning && ad > 0.21 && ad < 2.6) CAM.turning = true; if (CAM.turning && (ad < 0.03 || ad > 2.75)) CAM.turning = false;
+      if (!CAM.turning && ad > 0.26 && ad < 2.6) CAM.turning = true; if (CAM.turning && (ad < 0.03 || ad > 2.75)) CAM.turning = false;
       CAM.followT = Math.min(1, (CAM.followT || 0) + dt / 0.3);
-      if (CAM.turning) want = Math.sign(d) * Math.min(2.4, ad * 2.4) * CAM.followT * Math.min(1, PL.speed / 1.8);
+      if (CAM.turning) want = Math.sign(d) * Math.min(2.2, Math.max(0.25, ad - 0.15) * 2.0) * CAM.followT * Math.min(1, PL.speed / 1.8);   // (ver.53) gentle for a small drift, quick for a real turn
     } else { CAM.followT = Math.max(0, (CAM.followT || 0) - dt * 2); CAM.turning = false; }
     CAM.yawV = lerp(CAM.yawV || 0, want, Math.min(1, dt * 6)); CAM.yaw += CAM.yawV * dt;
   }
@@ -288,10 +288,10 @@ const CAMX = { MIN: 1.0 };
 // top of a collider: city buildings and developments know their height; thin walls and fences are low; anything else ~8.5 m
 CAMX.top = function (c) { if (c.base === undefined) c.base = groundH(c.x, c.z); const thin = Math.min(c.hw || 0, c.hd || 0) < 0.25; if (thin) return c.base + Math.min(1.6, c.top !== undefined ? c.top - c.base : 1.6); return c.top !== undefined ? c.top : c.base + 8.5; };
 // is the point (x,y,z) inside something solid? → { top } or null
-CAMX.solid = function (x, y, z, cars = true) {
+CAMX.solid = function (x, y, z, cars = true, lowThin = false) {
   for (const c of collidersNear(x, z)) { if (c.off || c.r !== undefined || c.kind === 'tree' || c.kind === 'rock') continue;
     const cs = Math.cos(c.rot || 0), sn = Math.sin(c.rot || 0), lx = (x - c.x) * cs - (z - c.z) * sn, lz = (x - c.x) * sn + (z - c.z) * cs;
-    if (Math.abs(lx) < (c.hw || 0) + 0.06 && Math.abs(lz) < (c.hd || 0) + 0.06) { const top = CAMX.top(c); if (y < top + 0.25) return { top }; } }
+    if (Math.abs(lx) < (c.hw || 0) + 0.06 && Math.abs(lz) < (c.hd || 0) + 0.06) { let top = CAMX.top(c); if (lowThin && c.top === undefined && Math.min(c.hw || 0, c.hd || 0) < 0.25) top = c.base + 1.0; if (y < top + (lowThin ? 0.05 : 0.25)) return { top }; } }
   if (cars && typeof CARHIT !== 'undefined') for (const q of CARHIT.others(PL.veh || null, x, z)) { const h = q.o && (q.o === DV.bus || (typeof BUSX !== 'undefined' && BUSX.extra && BUSX.extra.includes(q.o))) ? 3.4 : 1.8, top = (isFinite(q.y) ? q.y : groundH(x, z)) + h;
     if (y < top && CARHIT.circ(q.b, x, z, 0.15)) return { top }; }
   return null;
@@ -325,7 +325,7 @@ CAMX.sees = function (c, T) {
   const foot = !PL.veh, pts = [T, new THREE.Vector3(T.x, T.y + 0.55, T.z)];
   for (const P of pts) { const L = c.distanceTo(P), n = Math.ceil(L / 0.3); let blocked = false;
     for (let i = 1; i < n; i++) { const t = i / n; if (L * (1 - t) < (foot ? 0.5 : 2.6)) break; const x = c.x + (P.x - c.x) * t, y = c.y + (P.y - c.y) * t, z = c.z + (P.z - c.z) * t;
-      if (CAMX.solid(x, y, z, true) || (typeof SEE !== 'undefined' && SEE.grid && SEE.crownsAt(x, y, z, 0.85).length)) { blocked = true; break; }
+      if (CAMX.solid(x, y, z, true, true) || (typeof SEE !== 'undefined' && SEE.grid && SEE.crownsAt(x, y, z, 0.85).length)) { blocked = true; break; }
       if (collidersNear(x, z).some(q => (t < q.r / 0.28) && !q.off && q.r !== undefined && (q.kind === 'tree' || q.kind === 'pole') && Math.hypot(x - q.x, z - q.z) < q.r + 0.08 && y < groundH(q.x, q.z) + (q.kind === 'pole' ? 3.4 : 3))) { blocked = true; break; } }
     if (!blocked) return true; }
   return false;
